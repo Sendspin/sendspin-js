@@ -200,6 +200,13 @@ export interface ResonatePlayerConfig {
    */
   bufferCapacity?: number;
 
+  /**
+   * Static sync delay in milliseconds.
+   * Positive values delay playback, negative values advance it.
+   * Use this to compensate for device-specific audio latency.
+   */
+  syncDelay?: number;
+
   /** Callback when player state changes */
   onStateChange?: (state: {
     isPlaying: boolean;

@@ -35,6 +35,7 @@ export class ResonatePlayer {
       config.audioElement,
       config.isAndroid ?? false,
       config.silentAudioSrc,
+      config.syncDelay ?? 0,
     );
 
     // Initialize WebSocket manager

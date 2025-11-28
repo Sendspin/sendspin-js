@@ -10,6 +10,10 @@ export class AudioProcessor {
   private scheduledSources: AudioBufferSourceNode[] = [];
   private queueProcessTimeout: number | null = null;
 
+  // Seamless playback tracking
+  private nextPlaybackTime: number = 0;  // AudioContext time when next chunk should start
+  private lastScheduledServerTime: number = 0;  // Server timestamp of last scheduled chunk end
+
   constructor(
     private stateManager: StateManager,
     private timeFilter: ResonateTimeFilter,
@@ -17,6 +21,7 @@ export class AudioProcessor {
     private audioElement?: HTMLAudioElement,
     private isAndroid: boolean = false,
     private silentAudioSrc?: string,
+    private syncDelayMs: number = 0,
   ) {}
 
   // Initialize AudioContext with platform-specific setup
@@ -268,32 +273,59 @@ export class AudioProcessor {
       return;
     }
 
-    // Capture times ONCE at the start of scheduling
     const audioContextTime = this.audioContext.currentTime;
     const nowUs = performance.now() * 1000;
 
     // Buffer to add for scheduling headroom (200ms)
     const bufferSec = 0.2;
 
+    // Convert sync delay from ms to seconds (positive = delay, negative = advance)
+    const syncDelaySec = this.syncDelayMs / 1000;
+
     // Schedule all chunks in the queue
     while (this.audioBufferQueue.length > 0) {
       const chunk = this.audioBufferQueue.shift()!;
+      const chunkDuration = chunk.buffer.duration;
 
-      // Convert server timestamp to client time using synchronized clock
-      const chunkClientTimeUs = this.timeFilter.computeClientTime(
-        chunk.serverTime,
-      );
+      let playbackTime: number;
 
-      // Calculate how far in the future this chunk should play
-      const deltaUs = chunkClientTimeUs - nowUs;
-      const deltaSec = deltaUs / 1_000_000;
+      // First chunk or after a gap: calculate from server timestamp
+      if (this.nextPlaybackTime === 0 || this.lastScheduledServerTime === 0) {
+        // Convert server timestamp to client time using synchronized clock
+        const chunkClientTimeUs = this.timeFilter.computeClientTime(
+          chunk.serverTime,
+        );
+        const deltaUs = chunkClientTimeUs - nowUs;
+        const deltaSec = deltaUs / 1_000_000;
+        playbackTime = audioContextTime + deltaSec + bufferSec + syncDelaySec;
+      } else {
+        // Subsequent chunks: schedule back-to-back for seamless playback
+        // Check if this chunk is contiguous with the last one
+        const expectedServerTime = this.lastScheduledServerTime;
+        const serverGapUs = chunk.serverTime - expectedServerTime;
+        const serverGapSec = serverGapUs / 1_000_000;
 
-      // Schedule relative to current AudioContext time
-      const playbackTime = audioContextTime + deltaSec + bufferSec;
+        if (Math.abs(serverGapSec) < 0.1) {
+          // Chunk is contiguous (within 100ms) - schedule seamlessly
+          playbackTime = this.nextPlaybackTime;
+        } else {
+          // Gap detected in server timestamps - resync from timestamp
+          console.log(`Resonate: Gap detected (${serverGapSec.toFixed(3)}s), resyncing`);
+          const chunkClientTimeUs = this.timeFilter.computeClientTime(
+            chunk.serverTime,
+          );
+          const deltaUs = chunkClientTimeUs - nowUs;
+          const deltaSec = deltaUs / 1_000_000;
+          playbackTime = audioContextTime + deltaSec + bufferSec + syncDelaySec;
+        }
+      }
 
       // Drop chunks that arrived too late
       if (playbackTime < audioContextTime) {
         console.log("Resonate: Dropping late audio chunk");
+        // Reset seamless tracking since we dropped a chunk
+        this.nextPlaybackTime = 0;
+        this.lastScheduledServerTime = 0;
         continue;
       }
 
@@ -301,6 +333,10 @@ export class AudioProcessor {
       source.buffer = chunk.buffer;
       source.connect(this.gainNode);
       source.start(playbackTime);
+
+      // Track for seamless scheduling of next chunk
+      this.nextPlaybackTime = playbackTime + chunkDuration;
+      this.lastScheduledServerTime = chunk.serverTime + chunkDuration * 1_000_000;
 
       this.scheduledSources.push(source);
       source.onended = () => {
@@ -355,6 +391,10 @@ export class AudioProcessor {
 
     // Reset stream anchors
     this.stateManager.resetStreamAnchors();
+
+    // Reset seamless playback tracking
+    this.nextPlaybackTime = 0;
+    this.lastScheduledServerTime = 0;
   }
 
   // Cleanup and close AudioContext
