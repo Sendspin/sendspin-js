@@ -123,6 +123,11 @@ export class ResonatePlayer {
     this.protocolHandler.sendStateUpdate();
   }
 
+  // Set sync delay (in milliseconds)
+  setSyncDelay(delayMs: number): void {
+    this.audioProcessor.setSyncDelay(delayMs);
+  }
+
   // Getters for reactive state
   get isPlaying(): boolean {
     return this.stateManager.isPlaying;

@@ -24,6 +24,14 @@ export class AudioProcessor {
     private syncDelayMs: number = 0,
   ) {}
 
+  // Update sync delay at runtime
+  setSyncDelay(delayMs: number): void {
+    this.syncDelayMs = delayMs;
+    // Reset seamless playback tracking to force resync with new delay
+    this.nextPlaybackTime = 0;
+    this.lastScheduledServerTime = 0;
+  }
+
   // Initialize AudioContext with platform-specific setup
   initAudioContext(): void {
     if (this.audioContext) {
