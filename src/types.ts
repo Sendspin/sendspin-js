@@ -9,7 +9,7 @@ export enum MessageType {
   SERVER_STATE = "server/state",
   SERVER_COMMAND = "server/command",
   STREAM_START = "stream/start",
-  STREAM_UPDATE = "stream/update",
+  STREAM_CLEAR = "stream/clear",
   STREAM_REQUEST_FORMAT = "stream/request-format",
   STREAM_END = "stream/end",
   GROUP_UPDATE = "group/update",
@@ -90,22 +90,18 @@ export interface StreamStart {
   };
 }
 
-export interface StreamUpdate {
-  type: MessageType.STREAM_UPDATE;
+export interface StreamClear {
+  type: MessageType.STREAM_CLEAR;
   payload: {
-    player?: {
-      codec?: string;
-      sample_rate?: number;
-      channels?: number;
-      bit_depth?: number;
-      codec_header?: string;
-    };
+    roles?: string[];
   };
 }
 
 export interface StreamEnd {
   type: MessageType.STREAM_END;
-  payload: Record<string, unknown>;
+  payload: {
+    roles?: string[];
+  };
 }
 
 export interface ServerCommand {
@@ -129,7 +125,7 @@ export type ServerMessage =
   | ServerTime
   | ServerState
   | StreamStart
-  | StreamUpdate
+  | StreamClear
   | StreamEnd
   | ServerCommand
   | GroupUpdate;

@@ -6,8 +6,9 @@ import type {
   MessageType,
   ServerCommand,
   ServerMessage,
+  StreamClear,
+  StreamEnd,
   StreamStart,
-  StreamUpdate,
   SupportedFormat,
 } from "./types";
 import type { AudioProcessor } from "./audio-processor";
@@ -83,12 +84,12 @@ export class ProtocolHandler {
         this.handleStreamStart(message as StreamStart);
         break;
 
-      case "stream/update":
-        this.handleStreamUpdate(message as StreamUpdate);
+      case "stream/clear":
+        this.handleStreamClear(message as StreamClear);
         break;
 
       case "stream/end":
-        this.handleStreamEnd();
+        this.handleStreamEnd(message as StreamEnd);
         break;
 
       case "server/command":
@@ -151,11 +152,13 @@ export class ProtocolHandler {
     );
   }
 
-  // Handle stream start
+  // Handle stream start (also used for format updates per new spec)
   private handleStreamStart(message: StreamStart): void {
+    const isFormatUpdate = this.stateManager.currentStreamFormat !== null;
+
     this.stateManager.currentStreamFormat = message.payload.player;
     console.log(
-      "Resonate: Stream started",
+      isFormatUpdate ? "Resonate: Stream format updated" : "Resonate: Stream started",
       this.stateManager.currentStreamFormat,
     );
 
@@ -163,9 +166,13 @@ export class ProtocolHandler {
     // Resume AudioContext if suspended (required for browser autoplay policies)
     this.audioProcessor.resumeAudioContext();
 
-    // Reset scheduling state for new stream
-    this.stateManager.resetStreamAnchors();
-    this.audioProcessor.clearBuffers();
+    if (!isFormatUpdate) {
+      // New stream: reset scheduling state and clear buffers
+      this.stateManager.resetStreamAnchors();
+      this.audioProcessor.clearBuffers();
+    }
+    // Format update: don't clear buffers (per new spec)
+
     this.stateManager.isPlaying = true;
 
     // Ensure audio element is playing for MediaSession
@@ -177,41 +184,43 @@ export class ProtocolHandler {
     }
   }
 
-  // Handle stream update
-  private handleStreamUpdate(message: StreamUpdate): void {
-    // Merge delta updates into existing format
-    if (message.payload.player && this.stateManager.currentStreamFormat) {
-      this.stateManager.currentStreamFormat = {
-        ...this.stateManager.currentStreamFormat,
-        ...message.payload.player,
-      };
+  // Handle stream clear (for seek operations)
+  private handleStreamClear(message: StreamClear): void {
+    const roles = message.payload.roles;
+    // If roles is undefined or includes 'player', clear player buffers
+    if (!roles || roles.includes("player")) {
+      console.log("Resonate: Stream clear (seek)");
+      this.audioProcessor.clearBuffers();
+      this.stateManager.resetStreamAnchors();
+      // Note: Don't stop playing, don't clear format - just clear buffers
     }
-    console.log(
-      "Resonate: Stream format updated",
-      this.stateManager.currentStreamFormat,
-    );
   }
 
   // Handle stream end
-  private handleStreamEnd(): void {
-    console.log("Resonate: Stream ended");
-    // Per spec: Stop playback and clear buffers
-    this.audioProcessor.clearBuffers();
+  private handleStreamEnd(message: StreamEnd): void {
+    const roles = message.payload?.roles;
 
-    // Clear format and reset state
-    this.stateManager.currentStreamFormat = null;
-    this.stateManager.isPlaying = false;
+    // If roles is undefined or includes 'player', handle player stream end
+    if (!roles || roles.includes("player")) {
+      console.log("Resonate: Stream ended");
+      // Per spec: Stop playback and clear buffers
+      this.audioProcessor.clearBuffers();
 
-    // Stop audio element (except on Android where silent loop continues)
-    this.audioProcessor.stopAudioElement();
+      // Clear format and reset state
+      this.stateManager.currentStreamFormat = null;
+      this.stateManager.isPlaying = false;
 
-    // Explicitly set playbackState (if mediaSession available)
-    if (typeof navigator !== "undefined" && navigator.mediaSession) {
-      navigator.mediaSession.playbackState = "paused";
+      // Stop audio element (except on Android where silent loop continues)
+      this.audioProcessor.stopAudioElement();
+
+      // Explicitly set playbackState (if mediaSession available)
+      if (typeof navigator !== "undefined" && navigator.mediaSession) {
+        navigator.mediaSession.playbackState = "paused";
+      }
+
+      // Send state update to server
+      this.sendStateUpdate();
     }
-
-    // Send state update to server
-    this.sendStateUpdate();
   }
 
   // Handle server commands
