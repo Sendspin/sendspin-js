@@ -1,0 +1,75 @@
+name: Publish release to npm
+
+on:
+  release:
+    types: [published]
+env:
+  NODE_VERSION: "20"
+
+jobs:
+  build:
+    name: Build and publish to npm
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.vars.outputs.tag }}
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/checkout@v5.0.0
+      - name: Get tag
+        id: vars
+        run: echo "tag=${GITHUB_REF#refs/*/}" >> $GITHUB_OUTPUT
+      - name: Validate version number
+        run: >-
+          if [[ "${{ github.event.release.prerelease }}" == "true" ]]; then
+            if ! [[ "${{ steps.vars.outputs.tag }}" =~ "b" ]]; then
+            echo "Pre-release: Tag is missing beta suffix (${{ steps.vars.outputs.tag }})"
+              exit 1
+            fi
+          else
+            if [[ "${{ steps.vars.outputs.tag }}" =~ "b" ]]; then
+              echo "Release: Tag must not have a beta suffix (${{ steps.vars.outputs.tag }})"
+              exit 1
+            fi
+          fi
+      - name: Set up Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          registry-url: "https://registry.npmjs.org"
+      - name: Install dependencies
+        run: yarn install --frozen-lockfile
+      - name: Set package version from tag
+        run: npm version ${{ steps.vars.outputs.tag }} --no-git-tag-version
+      - name: Build package
+        run: yarn build
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: dist
+          path: ./dist
+
+  publish:
+    needs: ['build']
+    environment: 'publish'
+
+    name: Upload release to npm
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/checkout@v5.0.0
+      - name: Set up Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          registry-url: "https://registry.npmjs.org"
+      - uses: actions/download-artifact@v6
+        with:
+          name: dist
+          path: dist
+
+      - name: Publish release to npm
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

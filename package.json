@@ -1,8 +1,8 @@
 {
-  "name": "resonate-js",
+  "name": "@music-assistant/resonate-js",
   "version": "0.1.0",
   "type": "module",
-  "description": "TypeScript client library for the Resonate synchronized audio protocol",
+  "description": "TypeScript client library for the Resonate (working title) synchronized audio protocol",
   "main": "dist/index.js",
   "module": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -21,13 +21,23 @@
     "prepublishOnly": "npm run build"
   },
   "keywords": [
-    "resonate",
     "audio",
     "streaming",
-    "synchronized",
     "music-assistant"
   ],
   "license": "Apache-2.0",
+  "author": "Resonate Protocol Authors <resonate@openhomefoundation.org>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Resonate-Protocol/resonate-js.git"
+  },
+  "homepage": "https://github.com/Resonate-Protocol/resonate-js#readme",
+  "bugs": {
+    "url": "https://github.com/Resonate-Protocol/resonate-js/issues"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  },
   "devDependencies": {
     "typescript": "^5.9.3"
   }
