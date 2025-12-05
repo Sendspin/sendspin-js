@@ -231,6 +231,12 @@ export interface SendspinPlayerConfig {
    * Should return current hardware volume (0-100) and muted state.
    */
   getExternalVolume?: () => { volume: number; muted: boolean };
+
+  /**
+   * Time sync interval in milliseconds. Defaults to 5000ms.
+   * Can be set to a lower value for testing purposes.
+   */
+  timeSyncInterval?: number;
 }
 
 export interface AudioBufferQueueItem {

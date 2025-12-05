@@ -16,7 +16,7 @@ import type { StateManager } from "./state-manager";
 import type { WebSocketManager } from "./websocket-manager";
 
 // Constants
-const TIME_SYNC_INTERVAL = 5000; // 5 seconds
+const DEFAULT_TIME_SYNC_INTERVAL = 5000; // 5 seconds
 const STATE_UPDATE_INTERVAL = 5000; // 5 seconds
 
 export interface ProtocolHandlerConfig {
@@ -26,6 +26,7 @@ export interface ProtocolHandlerConfig {
   useHardwareVolume?: boolean;
   onVolumeCommand?: (volume: number, muted: boolean) => void;
   getExternalVolume?: () => { volume: number; muted: boolean };
+  timeSyncInterval?: number;
 }
 
 export class ProtocolHandler {
@@ -35,6 +36,7 @@ export class ProtocolHandler {
   private useHardwareVolume: boolean;
   private onVolumeCommand?: (volume: number, muted: boolean) => void;
   private getExternalVolume?: () => { volume: number; muted: boolean };
+  private timeSyncInterval: number;
 
   constructor(
     private playerId: string,
@@ -50,6 +52,7 @@ export class ProtocolHandler {
     this.useHardwareVolume = config.useHardwareVolume ?? false;
     this.onVolumeCommand = config.onVolumeCommand;
     this.getExternalVolume = config.getExternalVolume;
+    this.timeSyncInterval = config.timeSyncInterval ?? DEFAULT_TIME_SYNC_INTERVAL;
   }
 
   // Handle WebSocket messages
@@ -112,7 +115,7 @@ export class ProtocolHandler {
     this.sendTimeSync();
     const timeSyncInterval = window.setInterval(
       () => this.sendTimeSync(),
-      TIME_SYNC_INTERVAL,
+      this.timeSyncInterval,
     );
     this.stateManager.setTimeSyncInterval(timeSyncInterval);
 
@@ -143,7 +146,7 @@ export class ProtocolHandler {
     this.timeFilter.update(measurement, max_error, T4);
 
     console.log(
-      "Sendspin: Clock sync - offset:",
+      "Sendspin: Clock sink - offset:",
       (this.timeFilter.offset / 1000).toFixed(2),
       "ms, error:",
       (this.timeFilter.error / 1000).toFixed(2),
