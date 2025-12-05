@@ -22,6 +22,11 @@ export class AudioProcessor {
   private currentSyncErrorMs: number = 0;
   private resyncCount: number = 0;
 
+  // Opus decoder (lazy-loaded)
+  private opusDecoder: any = null;
+  private opusDecoderModule: any = null;
+  private opusDecoderReady: Promise<void> | null = null;
+
   constructor(
     private stateManager: StateManager,
     private timeFilter: SendspinTimeFilter,
@@ -151,8 +156,12 @@ export class AudioProcessor {
     if (!this.audioContext) return null;
 
     try {
-      if (format.codec === "opus" || format.codec === "flac") {
-        // Opus and FLAC can be decoded by the browser's native decoder
+      if (format.codec === "opus") {
+        // For Opus, we need to use WebCodecs API for raw packet decoding
+        // Browser's decodeAudioData expects Ogg Opus containers, not raw packets
+        return await this.decodeOpusData(audioData, format);
+      } else if (format.codec === "flac") {
+        // FLAC can be decoded by the browser's native decoder
         // If codec_header is provided, prepend it to the audio data
         let dataToEncode = audioData;
         if (format.codec_header) {
@@ -178,6 +187,112 @@ export class AudioProcessor {
     }
 
     return null;
+  }
+
+  // Initialize Opus decoder (lazy-loaded)
+  private async initOpusDecoder(format: StreamFormat): Promise<void> {
+    if (this.opusDecoderReady) {
+      await this.opusDecoderReady;
+      return;
+    }
+
+    this.opusDecoderReady = (async () => {
+      console.log("[Opus] Initializing decoder...");
+
+      // Dynamically import the pure JavaScript decoder (not WASM) to avoid bundling issues
+      const [DecoderModuleExport, DecoderWrapperExport] = await Promise.all([
+        import("opus-encdec/dist/libopus-decoder.js"),
+        import("opus-encdec/src/oggOpusDecoder.js"),
+      ]);
+
+      // The UMD module exports the Module object directly (as default in ES6 modules)
+      this.opusDecoderModule = DecoderModuleExport.default || DecoderModuleExport;
+
+      // The OggOpusDecoder is exported as default.OggOpusDecoder
+      const decoderWrapper = (DecoderWrapperExport as any).default || DecoderWrapperExport;
+      const OggOpusDecoderClass = decoderWrapper.OggOpusDecoder || decoderWrapper;
+
+      // Wait for Module to be ready (async asm.js initialization)
+      if (!this.opusDecoderModule.isReady) {
+        await new Promise<void>((resolve) => {
+          this.opusDecoderModule.onready = () => resolve();
+        });
+      }
+
+      // Create decoder instance
+      this.opusDecoder = new OggOpusDecoderClass(
+        {
+          rawOpus: true, // We're decoding raw Opus packets, not Ogg containers
+          decoderSampleRate: format.sample_rate,
+          outputBufferSampleRate: format.sample_rate,
+          numberOfChannels: format.channels,
+        },
+        this.opusDecoderModule,
+      );
+
+      // Wait for decoder to be ready if needed
+      if (!this.opusDecoder.isReady) {
+        await new Promise<void>((resolve) => {
+          this.opusDecoder.onready = () => resolve();
+        });
+      }
+
+      console.log("[Opus] Decoder ready");
+    })();
+
+    await this.opusDecoderReady;
+  }
+
+  // Decode Opus audio data using opus-encdec library
+  private async decodeOpusData(
+    audioData: ArrayBuffer,
+    format: StreamFormat,
+  ): Promise<AudioBuffer | null> {
+    if (!this.audioContext) {
+      return null;
+    }
+
+    try {
+      // Initialize decoder if needed
+      await this.initOpusDecoder(format);
+
+      // Decode the raw Opus packet
+      const uint8Array = new Uint8Array(audioData);
+      const decodedSamples: Float32Array[] = [];
+
+      this.opusDecoder.decodeRaw(uint8Array, (samples: Float32Array) => {
+        // Copy samples since they're from WASM heap
+        decodedSamples.push(new Float32Array(samples));
+      });
+
+      if (decodedSamples.length === 0) {
+        console.warn("[Opus] Decoder produced no samples");
+        return null;
+      }
+
+      // Convert interleaved samples to AudioBuffer
+      const interleavedSamples = decodedSamples[0];
+      const numFrames = interleavedSamples.length / format.channels;
+
+      const audioBuffer = this.audioContext.createBuffer(
+        format.channels,
+        numFrames,
+        format.sample_rate,
+      );
+
+      // De-interleave samples into separate channels
+      for (let ch = 0; ch < format.channels; ch++) {
+        const channelData = audioBuffer.getChannelData(ch);
+        for (let i = 0; i < numFrames; i++) {
+          channelData[i] = interleavedSamples[i * format.channels + ch];
+        }
+      }
+
+      return audioBuffer;
+    } catch (error) {
+      console.error("[Opus] Decode error:", error);
+      return null;
+    }
   }
 
   // Decode PCM audio data
@@ -295,6 +410,10 @@ export class AudioProcessor {
     }
   }
 
+  // Tracking variables for diagnostics
+  private lastChunkReceivedTime: number = 0;
+  private lastScheduledTime: number = 0;
+
   // Process the audio queue and schedule chunks in order
   processAudioQueue(): void {
     if (!this.audioContext || !this.gainNode) return;
@@ -328,6 +447,10 @@ export class AudioProcessor {
 
     // Convert sync delay from ms to seconds (positive = delay, negative = advance)
     const syncDelaySec = this.syncDelayMs / 1000;
+
+    // Track timing for diagnostics
+    const processingStartTime = performance.now();
+    let chunksScheduled = 0;
 
     // Schedule all chunks in the queue
     while (this.audioBufferQueue.length > 0) {
@@ -394,15 +517,22 @@ export class AudioProcessor {
         continue;
       }
 
+      // Calculate gap from last scheduled chunk
+      const schedulingGap = this.lastScheduledTime > 0
+        ? (playbackTime - this.lastScheduledTime) * 1000
+        : 0;
+
       const source = this.audioContext.createBufferSource();
       source.buffer = chunk.buffer;
       source.connect(this.gainNode);
       source.start(playbackTime);
 
+      chunksScheduled++;
+
       // Track for seamless scheduling of next chunk
       this.nextPlaybackTime = playbackTime + chunkDuration;
-      this.lastScheduledServerTime =
-        chunk.serverTime + chunkDuration * 1_000_000;
+      this.lastScheduledServerTime = chunk.serverTime + chunkDuration * 1_000_000;
+      this.lastScheduledTime = playbackTime + chunkDuration;
 
       this.scheduledSources.push(source);
       source.onended = () => {
@@ -478,6 +608,13 @@ export class AudioProcessor {
     if (this.audioContext) {
       this.audioContext.close();
       this.audioContext = null;
+    }
+
+    // Clean up Opus decoder
+    if (this.opusDecoder) {
+      this.opusDecoder = null;
+      this.opusDecoderModule = null;
+      this.opusDecoderReady = null;
     }
 
     this.gainNode = null;
