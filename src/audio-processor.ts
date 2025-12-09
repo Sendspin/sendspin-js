@@ -410,10 +410,6 @@ export class AudioProcessor {
     }
   }
 
-  // Tracking variables for diagnostics
-  private lastChunkReceivedTime: number = 0;
-  private lastScheduledTime: number = 0;
-
   // Process the audio queue and schedule chunks in order
   processAudioQueue(): void {
     if (!this.audioContext || !this.gainNode) return;
@@ -447,10 +443,6 @@ export class AudioProcessor {
 
     // Convert sync delay from ms to seconds (positive = delay, negative = advance)
     const syncDelaySec = this.syncDelayMs / 1000;
-
-    // Track timing for diagnostics
-    const processingStartTime = performance.now();
-    let chunksScheduled = 0;
 
     // Schedule all chunks in the queue
     while (this.audioBufferQueue.length > 0) {
@@ -517,22 +509,14 @@ export class AudioProcessor {
         continue;
       }
 
-      // Calculate gap from last scheduled chunk
-      const schedulingGap = this.lastScheduledTime > 0
-        ? (playbackTime - this.lastScheduledTime) * 1000
-        : 0;
-
       const source = this.audioContext.createBufferSource();
       source.buffer = chunk.buffer;
       source.connect(this.gainNode);
       source.start(playbackTime);
 
-      chunksScheduled++;
-
       // Track for seamless scheduling of next chunk
       this.nextPlaybackTime = playbackTime + chunkDuration;
       this.lastScheduledServerTime = chunk.serverTime + chunkDuration * 1_000_000;
-      this.lastScheduledTime = playbackTime + chunkDuration;
 
       this.scheduledSources.push(source);
       source.onended = () => {
