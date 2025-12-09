@@ -3,6 +3,7 @@ import type {
   ClientHello,
   ClientState,
   ClientTime,
+  Codec,
   MessageType,
   ServerCommand,
   ServerMessage,
@@ -21,7 +22,7 @@ const STATE_UPDATE_INTERVAL = 5000; // 5 seconds
 
 export interface ProtocolHandlerConfig {
   clientName?: string;
-  supportedFormats?: SupportedFormat[];
+  codecs?: Codec[];
   bufferCapacity?: number;
   useHardwareVolume?: boolean;
   onVolumeCommand?: (volume: number, muted: boolean) => void;
@@ -31,7 +32,7 @@ export interface ProtocolHandlerConfig {
 
 export class ProtocolHandler {
   private clientName: string;
-  private supportedFormats?: SupportedFormat[];
+  private codecs: Codec[];
   private bufferCapacity: number;
   private useHardwareVolume: boolean;
   private useOutputLatencyCompensation: boolean;
@@ -47,7 +48,7 @@ export class ProtocolHandler {
     config: ProtocolHandlerConfig = {},
   ) {
     this.clientName = config.clientName ?? "Sendspin Player";
-    this.supportedFormats = config.supportedFormats;
+    this.codecs = config.codecs ?? ["opus", "flac", "pcm"];
     this.bufferCapacity = config.bufferCapacity ?? 1024 * 1024 * 5; // 5MB default
     this.useHardwareVolume = config.useHardwareVolume ?? false;
     this.useOutputLatencyCompensation =
@@ -297,8 +298,7 @@ export class ProtocolHandler {
             "Unknown",
         },
         player_support: {
-          supported_formats:
-            this.supportedFormats ?? this.getDefaultSupportedFormats(),
+          supported_formats: this.getSupportedFormats(),
           buffer_capacity: this.bufferCapacity,
           supported_commands: ["volume", "mute"],
         },
@@ -307,39 +307,53 @@ export class ProtocolHandler {
     this.wsManager.send(hello);
   }
 
-  // Get default supported audio formats based on browser capabilities
-  private getDefaultSupportedFormats(): Array<{
-    codec: string;
-    channels: number;
-    sample_rate: number;
-    bit_depth: number;
-  }> {
+  // Get supported codecs for the current browser
+  private getBrowserSupportedCodecs(): Set<Codec> {
     const userAgent =
       typeof navigator !== "undefined" ? navigator.userAgent : "";
     const isSafari = /^((?!chrome|android).)*safari/i.test(userAgent);
     const isFirefox = /firefox/i.test(userAgent);
 
     if (isSafari) {
-      // Safari: Opus only (Safari doesn't support FLAC, 48kHz required for Opus)
-      return [
-        { codec: "opus", sample_rate: 48000, channels: 2, bit_depth: 16 },
-      ];
+      // Safari: No FLAC support
+      return new Set(["pcm", "opus"] as Codec[]);
     }
 
     if (isFirefox) {
-      // Firefox: FLAC only (libopus has audio glitches in Firefox)
-      return [
-        { codec: "flac", sample_rate: 48000, channels: 2, bit_depth: 16 },
-        { codec: "flac", sample_rate: 44100, channels: 2, bit_depth: 16 },
-      ];
+      // Firefox: No Opus support (libopus has audio glitches)
+      return new Set(["pcm", "flac"] as Codec[]);
     }
 
-    // Chromium-based browsers (Chrome, Edge, etc.): Opus preferred, FLAC fallback
-    return [
-      { codec: "opus", sample_rate: 48000, channels: 2, bit_depth: 16 },
-      { codec: "flac", sample_rate: 48000, channels: 2, bit_depth: 16 },
-      { codec: "flac", sample_rate: 44100, channels: 2, bit_depth: 16 },
-    ];
+    // Chromium-based browsers (Chrome, Edge, etc.): All codecs supported
+    return new Set(["pcm", "opus", "flac"] as Codec[]);
+  }
+
+  // Build supported formats from requested codecs, filtering out unsupported ones
+  private getSupportedFormats(): SupportedFormat[] {
+    const browserSupported = this.getBrowserSupportedCodecs();
+    const formats: SupportedFormat[] = [];
+
+    for (const codec of this.codecs) {
+      if (!browserSupported.has(codec)) {
+        continue;
+      }
+
+      if (codec === "opus") {
+        // Opus requires 48kHz
+        formats.push({
+          codec: "opus",
+          sample_rate: 48000,
+          channels: 2,
+          bit_depth: 16,
+        });
+      } else {
+        // PCM and FLAC support both sample rates
+        formats.push({ codec, sample_rate: 48000, channels: 2, bit_depth: 16 });
+        formats.push({ codec, sample_rate: 44100, channels: 2, bit_depth: 16 });
+      }
+    }
+
+    return formats;
   }
 
   // Send time synchronization message
