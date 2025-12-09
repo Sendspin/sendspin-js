@@ -314,58 +314,31 @@ export class ProtocolHandler {
     sample_rate: number;
     bit_depth: number;
   }> {
-    // Safari has limited codec support, only use PCM for Safari
-    // TODO: add flac support for Safari
     const userAgent =
       typeof navigator !== "undefined" ? navigator.userAgent : "";
     const isSafari = /^((?!chrome|android).)*safari/i.test(userAgent);
+    const isFirefox = /firefox/i.test(userAgent);
 
     if (isSafari) {
+      // Safari: Opus only (Safari doesn't support FLAC, 48kHz required for Opus)
       return [
-        {
-          codec: "pcm",
-          sample_rate: 48000,
-          channels: 2,
-          bit_depth: 16,
-        },
-        {
-          codec: "pcm",
-          sample_rate: 44100,
-          channels: 2,
-          bit_depth: 16,
-        },
+        { codec: "opus", sample_rate: 48000, channels: 2, bit_depth: 16 },
       ];
     }
 
-    // Other browsers support FLAC and PCM
-    // TODO: Opus needs special handling, at least on Safari and Firefox
+    if (isFirefox) {
+      // Firefox: FLAC only (libopus has audio glitches in Firefox)
+      return [
+        { codec: "flac", sample_rate: 48000, channels: 2, bit_depth: 16 },
+        { codec: "flac", sample_rate: 44100, channels: 2, bit_depth: 16 },
+      ];
+    }
+
+    // Chromium-based browsers (Chrome, Edge, etc.): Opus preferred, FLAC fallback
     return [
-      // FLAC preferred
-      {
-        codec: "flac",
-        sample_rate: 48000,
-        channels: 2,
-        bit_depth: 16,
-      },
-      {
-        codec: "flac",
-        sample_rate: 44100,
-        channels: 2,
-        bit_depth: 16,
-      },
-      // PCM fallback (uncompressed)
-      {
-        codec: "pcm",
-        sample_rate: 48000,
-        channels: 2,
-        bit_depth: 16,
-      },
-      {
-        codec: "pcm",
-        sample_rate: 44100,
-        channels: 2,
-        bit_depth: 16,
-      },
+      { codec: "opus", sample_rate: 48000, channels: 2, bit_depth: 16 },
+      { codec: "flac", sample_rate: 48000, channels: 2, bit_depth: 16 },
+      { codec: "flac", sample_rate: 44100, channels: 2, bit_depth: 16 },
     ];
   }
 
