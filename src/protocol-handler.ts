@@ -16,7 +16,6 @@ import type { StateManager } from "./state-manager";
 import type { WebSocketManager } from "./websocket-manager";
 
 // Constants
-const TIME_SYNC_INTERVAL = 5000; // 5 seconds
 const STATE_UPDATE_INTERVAL = 5000; // 5 seconds
 
 export interface ProtocolHandlerConfig {
@@ -112,13 +111,9 @@ export class ProtocolHandler {
     console.log("Sendspin: Connected to server");
     // Per spec: Send initial client/state immediately after server/hello
     this.sendStateUpdate();
-    // Start time synchronization
+    // Start time synchronization with adaptive intervals
     this.sendTimeSync();
-    const timeSyncInterval = window.setInterval(
-      () => this.sendTimeSync(),
-      TIME_SYNC_INTERVAL,
-    );
-    this.stateManager.setTimeSyncInterval(timeSyncInterval);
+    this.scheduleNextTimeSync();
 
     // Start periodic state updates
     const stateInterval = window.setInterval(
@@ -126,6 +121,36 @@ export class ProtocolHandler {
       STATE_UPDATE_INTERVAL,
     );
     this.stateManager.setStateUpdateInterval(stateInterval);
+  }
+
+  // Schedule next time sync with adaptive interval based on sync quality
+  private scheduleNextTimeSync(): void {
+    const interval = this.computeTimeSyncInterval();
+    const timeSyncTimeout = window.setTimeout(() => {
+      this.sendTimeSync();
+      this.scheduleNextTimeSync();
+    }, interval);
+    this.stateManager.setTimeSyncInterval(timeSyncTimeout);
+  }
+
+  // Compute adaptive time sync interval based on synchronization state
+  // Matches Python client behavior: fast sync when unsynchronized or high error,
+  // slower when well-synchronized to reduce network overhead
+  private computeTimeSyncInterval(): number {
+    if (!this.timeFilter.is_synchronized) {
+      return 200; // 200ms - fast sync when not yet synchronized
+    }
+    const error = this.timeFilter.error;
+    if (error < 1000) {
+      return 5000; // 5s - well synchronized (< 1ms error)
+    }
+    if (error < 2000) {
+      return 1000; // 1s - good sync (< 2ms error)
+    }
+    if (error < 5000) {
+      return 500; // 500ms - moderate sync (< 5ms error)
+    }
+    return 200; // 200ms - poor sync, need fast updates
   }
 
   // Handle server time synchronization

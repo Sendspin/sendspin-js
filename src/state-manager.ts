@@ -118,7 +118,7 @@ export class StateManager {
 
   clearTimeSyncInterval(): void {
     if (this.timeSyncInterval !== null) {
-      clearInterval(this.timeSyncInterval);
+      clearTimeout(this.timeSyncInterval);
       this.timeSyncInterval = null;
     }
   }
