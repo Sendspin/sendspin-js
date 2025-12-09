@@ -203,6 +203,18 @@ export interface SendspinPlayerConfig {
    */
   syncDelay?: number;
 
+  /**
+   * Use browser's output latency API for automatic latency compensation.
+   * When enabled, reads AudioContext.baseLatency and outputLatency to
+   * compensate for hardware delay (e.g., Bluetooth headphones).
+   *
+   * Note: API reliability varies by browser/platform. Works well on Android,
+   * less reliable on desktop browsers.
+   *
+   * Default: false
+   */
+  useOutputLatencyCompensation?: boolean;
+
   /** Callback when player state changes */
   onStateChange?: (state: {
     isPlaying: boolean;

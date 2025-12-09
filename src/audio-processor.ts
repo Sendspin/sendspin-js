@@ -1,4 +1,8 @@
-import type { AudioBufferQueueItem, StreamFormat, AudioOutputMode } from "./types";
+import type {
+  AudioBufferQueueItem,
+  StreamFormat,
+  AudioOutputMode,
+} from "./types";
 import type { StateManager } from "./state-manager";
 import type { SendspinTimeFilter } from "./time-filter";
 
@@ -17,6 +21,11 @@ export class AudioProcessor {
   // Sync tracking (for debugging/display)
   private currentSyncErrorMs: number = 0;
   private resyncCount: number = 0;
+
+  // Opus decoder (lazy-loaded)
+  private opusDecoder: any = null;
+  private opusDecoderModule: any = null;
+  private opusDecoderReady: Promise<void> | null = null;
 
   constructor(
     private stateManager: StateManager,
@@ -42,12 +51,22 @@ export class AudioProcessor {
     clockDriftPercent: number;
     syncErrorMs: number;
     resyncCount: number;
+    outputLatencyMs: number;
   } {
     return {
       clockDriftPercent: this.timeFilter.drift * 100,
       syncErrorMs: this.currentSyncErrorMs,
       resyncCount: this.resyncCount,
+      outputLatencyMs: this.getRawOutputLatencyUs() / 1000,
     };
+  }
+
+  // Get raw output latency in microseconds (for Kalman filter input)
+  getRawOutputLatencyUs(): number {
+    if (!this.audioContext) return 0;
+    const baseLatency = this.audioContext.baseLatency ?? 0;
+    const outputLatency = this.audioContext.outputLatency ?? 0;
+    return (baseLatency + outputLatency) * 1_000_000; // Convert seconds to microseconds
   }
 
   // Initialize AudioContext with platform-specific setup
@@ -86,7 +105,8 @@ export class AudioProcessor {
       } else {
         // iOS/Desktop: Use MediaStream approach for background playback
         // Create MediaStreamDestination to bridge Web Audio API to HTML5 audio element
-        this.streamDestination = this.audioContext.createMediaStreamDestination();
+        this.streamDestination =
+          this.audioContext.createMediaStreamDestination();
         this.gainNode.connect(this.streamDestination);
         // Do NOT connect to audioContext.destination to avoid echo
 
@@ -136,8 +156,12 @@ export class AudioProcessor {
     if (!this.audioContext) return null;
 
     try {
-      if (format.codec === "opus" || format.codec === "flac") {
-        // Opus and FLAC can be decoded by the browser's native decoder
+      if (format.codec === "opus") {
+        // For Opus, we need to use WebCodecs API for raw packet decoding
+        // Browser's decodeAudioData expects Ogg Opus containers, not raw packets
+        return await this.decodeOpusData(audioData, format);
+      } else if (format.codec === "flac") {
+        // FLAC can be decoded by the browser's native decoder
         // If codec_header is provided, prepend it to the audio data
         let dataToEncode = audioData;
         if (format.codec_header) {
@@ -163,6 +187,115 @@ export class AudioProcessor {
     }
 
     return null;
+  }
+
+  // Initialize Opus decoder (lazy-loaded)
+  private async initOpusDecoder(format: StreamFormat): Promise<void> {
+    if (this.opusDecoderReady) {
+      await this.opusDecoderReady;
+      return;
+    }
+
+    this.opusDecoderReady = (async () => {
+      console.log("[Opus] Initializing decoder...");
+
+      // Dynamically import the pure JavaScript decoder (not WASM) to avoid bundling issues
+      const [DecoderModuleExport, DecoderWrapperExport] = await Promise.all([
+        import("opus-encdec/dist/libopus-decoder.js"),
+        import("opus-encdec/src/oggOpusDecoder.js"),
+      ]);
+
+      // The UMD module exports the Module object directly (as default in ES6 modules)
+      this.opusDecoderModule =
+        DecoderModuleExport.default || DecoderModuleExport;
+
+      // The OggOpusDecoder is exported as default.OggOpusDecoder
+      const decoderWrapper =
+        (DecoderWrapperExport as any).default || DecoderWrapperExport;
+      const OggOpusDecoderClass =
+        decoderWrapper.OggOpusDecoder || decoderWrapper;
+
+      // Wait for Module to be ready (async asm.js initialization)
+      if (!this.opusDecoderModule.isReady) {
+        await new Promise<void>((resolve) => {
+          this.opusDecoderModule.onready = () => resolve();
+        });
+      }
+
+      // Create decoder instance
+      this.opusDecoder = new OggOpusDecoderClass(
+        {
+          rawOpus: true, // We're decoding raw Opus packets, not Ogg containers
+          decoderSampleRate: format.sample_rate,
+          outputBufferSampleRate: format.sample_rate,
+          numberOfChannels: format.channels,
+        },
+        this.opusDecoderModule,
+      );
+
+      // Wait for decoder to be ready if needed
+      if (!this.opusDecoder.isReady) {
+        await new Promise<void>((resolve) => {
+          this.opusDecoder.onready = () => resolve();
+        });
+      }
+
+      console.log("[Opus] Decoder ready");
+    })();
+
+    await this.opusDecoderReady;
+  }
+
+  // Decode Opus audio data using opus-encdec library
+  private async decodeOpusData(
+    audioData: ArrayBuffer,
+    format: StreamFormat,
+  ): Promise<AudioBuffer | null> {
+    if (!this.audioContext) {
+      return null;
+    }
+
+    try {
+      // Initialize decoder if needed
+      await this.initOpusDecoder(format);
+
+      // Decode the raw Opus packet
+      const uint8Array = new Uint8Array(audioData);
+      const decodedSamples: Float32Array[] = [];
+
+      this.opusDecoder.decodeRaw(uint8Array, (samples: Float32Array) => {
+        // Copy samples since they're from WASM heap
+        decodedSamples.push(new Float32Array(samples));
+      });
+
+      if (decodedSamples.length === 0) {
+        console.warn("[Opus] Decoder produced no samples");
+        return null;
+      }
+
+      // Convert interleaved samples to AudioBuffer
+      const interleavedSamples = decodedSamples[0];
+      const numFrames = interleavedSamples.length / format.channels;
+
+      const audioBuffer = this.audioContext.createBuffer(
+        format.channels,
+        numFrames,
+        format.sample_rate,
+      );
+
+      // De-interleave samples into separate channels
+      for (let ch = 0; ch < format.channels; ch++) {
+        const channelData = audioBuffer.getChannelData(ch);
+        for (let i = 0; i < numFrames; i++) {
+          channelData[i] = interleavedSamples[i * format.channels + ch];
+        }
+      }
+
+      return audioBuffer;
+    } catch (error) {
+      console.error("[Opus] Decode error:", error);
+      return null;
+    }
   }
 
   // Decode PCM audio data
@@ -352,7 +485,7 @@ export class AudioProcessor {
           // Hard resync if sync error exceeds threshold
           if (Math.abs(syncErrorMs) > 20) {
             console.log(
-              `Resonate: Sync error ${syncErrorMs.toFixed(1)}ms, resyncing`,
+              `Sendspin: Sync error ${syncErrorMs.toFixed(1)}ms, resyncing`,
             );
             this.resyncCount++;
             playbackTime = targetPlaybackTime;
@@ -363,7 +496,7 @@ export class AudioProcessor {
         } else {
           // Gap detected in server timestamps - hard resync
           console.log(
-            `Resonate: Gap detected (${serverGapSec.toFixed(3)}s), resyncing`,
+            `Sendspin: Gap detected (${serverGapSec.toFixed(3)}s), resyncing`,
           );
           this.resyncCount++;
           playbackTime = targetPlaybackTime;
@@ -386,7 +519,8 @@ export class AudioProcessor {
 
       // Track for seamless scheduling of next chunk
       this.nextPlaybackTime = playbackTime + chunkDuration;
-      this.lastScheduledServerTime = chunk.serverTime + chunkDuration * 1_000_000;
+      this.lastScheduledServerTime =
+        chunk.serverTime + chunkDuration * 1_000_000;
 
       this.scheduledSources.push(source);
       source.onended = () => {
@@ -410,7 +544,11 @@ export class AudioProcessor {
 
   // Stop audio element playback (for MediaSession)
   stopAudioElement(): void {
-    if (this.outputMode === "media-element" && this.audioElement && !this.isAndroid) {
+    if (
+      this.outputMode === "media-element" &&
+      this.audioElement &&
+      !this.isAndroid
+    ) {
       if (!this.audioElement.paused) {
         this.audioElement.pause();
       }
@@ -460,11 +598,22 @@ export class AudioProcessor {
       this.audioContext = null;
     }
 
+    // Clean up Opus decoder
+    if (this.opusDecoder) {
+      this.opusDecoder = null;
+      this.opusDecoderModule = null;
+      this.opusDecoderReady = null;
+    }
+
     this.gainNode = null;
     this.streamDestination = null;
 
     // Stop and clear the audio element (only for non-Android media-element mode)
-    if (this.outputMode === "media-element" && this.audioElement && !this.isAndroid) {
+    if (
+      this.outputMode === "media-element" &&
+      this.audioElement &&
+      !this.isAndroid
+    ) {
       this.audioElement.pause();
       this.audioElement.srcObject = null;
     }

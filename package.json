@@ -18,6 +18,8 @@
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
+    "lint": "eslint . --fix --ignore-path .gitignore",
+    "prepare": "husky",
     "prepublishOnly": "npm run build"
   },
   "keywords": [
@@ -29,16 +31,26 @@
   "author": "Sendspin Protocol Authors <sendspin@openhomefoundation.org>",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Sendspin-Protocol/sendspin-js.git"
+    "url": "git+https://github.com/Sendspin/sendspin-js.git"
   },
-  "homepage": "https://github.com/Sendspin-Protocol/sendspin-js#readme",
+  "homepage": "https://github.com/Sendspin/sendspin-js#readme",
   "bugs": {
-    "url": "https://github.com/Sendspin-Protocol/sendspin-js/issues"
+    "url": "https://github.com/Sendspin/sendspin-js/issues"
   },
   "engines": {
     "node": ">=16.0.0"
   },
   "devDependencies": {
+    "@typescript-eslint/eslint-plugin": "7.0.0",
+    "@typescript-eslint/parser": "6.21.0",
+    "eslint": "8.57.1",
+    "eslint-config-prettier": "10.1.8",
+    "eslint-plugin-prettier": "5.5.4",
+    "husky": "^9.1.7",
+    "prettier": "3.7.4",
     "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "opus-encdec": "^0.1.1"
   }
 }

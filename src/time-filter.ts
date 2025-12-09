@@ -11,7 +11,7 @@
  * matrix to track estimation uncertainty. An adaptive forgetting factor helps the
  * filter recover quickly from network disruptions or server clock adjustments.
  *
- * Direct port of the Python implementation from aioresonate.
+ * Direct port of the Python implementation from aiosendspin.
  */
 
 // Residual threshold as fraction of max_error for triggering adaptive forgetting.
