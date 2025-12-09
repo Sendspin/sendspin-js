@@ -53,7 +53,7 @@ export class SendspinPlayer {
       this.timeFilter,
       {
         clientName: config.clientName,
-        supportedFormats: config.supportedFormats,
+        codecs: config.codecs,
         bufferCapacity: config.bufferCapacity,
         useHardwareVolume: config.useHardwareVolume,
         onVolumeCommand: config.onVolumeCommand,

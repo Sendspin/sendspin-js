@@ -144,6 +144,8 @@ export type PlayerState = "synchronized" | "error";
 
 export type AudioOutputMode = "direct" | "media-element";
 
+export type Codec = "pcm" | "opus" | "flac";
+
 export interface SupportedFormat {
   codec: string;
   channels: number;
@@ -187,9 +189,15 @@ export interface SendspinPlayerConfig {
   silentAudioSrc?: string;
 
   /**
-   * Supported audio formats. If not provided, defaults based on output mode.
+   * Codecs to use for audio streaming, in priority order.
+   * Unsupported codecs for the current browser are automatically filtered out:
+   * - Safari: No FLAC support
+   * - Firefox: No Opus support (libopus has audio glitches)
+   * - Chromium: All codecs supported
+   *
+   * Default: ["opus", "flac", "pcm"]
    */
-  supportedFormats?: SupportedFormat[];
+  codecs?: Codec[];
 
   /**
    * Buffer capacity in bytes. Defaults to 5MB for media-element, 1.5MB for direct.
