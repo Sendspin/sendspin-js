@@ -337,20 +337,34 @@ export class ProtocolHandler {
     const userAgent =
       typeof navigator !== "undefined" ? navigator.userAgent : "";
     const isSafari = /^((?!chrome|android).)*safari/i.test(userAgent);
-    const isFirefox = /firefox/i.test(userAgent);
+
+    // Check if native Opus decoder is available (requires secure context)
+    const hasNativeOpus = typeof AudioDecoder !== "undefined";
+
+    if (!hasNativeOpus) {
+      if (typeof window !== "undefined" && !window.isSecureContext) {
+        console.warn(
+          "[Opus] Running in insecure context, falling back to FLAC/PCM",
+        );
+      } else {
+        console.warn(
+          "[Opus] Native decoder not available, falling back to FLAC/PCM",
+        );
+      }
+    }
 
     if (isSafari) {
       // Safari: No FLAC support
       return new Set(["pcm", "opus"] as Codec[]);
     }
 
-    if (isFirefox) {
-      // Firefox: No Opus support (libopus has audio glitches)
-      return new Set(["pcm", "flac"] as Codec[]);
+    if (hasNativeOpus) {
+      // Native Opus available (Chrome, Edge, Firefox desktop, Safari)
+      return new Set(["pcm", "opus", "flac"] as Codec[]);
     }
 
-    // Chromium-based browsers (Chrome, Edge, etc.): All codecs supported
-    return new Set(["pcm", "opus", "flac"] as Codec[]);
+    // No native Opus (Firefox Android, insecure context)
+    return new Set(["pcm", "flac"] as Codec[]);
   }
 
   // Build supported formats from requested codecs, filtering out unsupported ones

@@ -22,7 +22,13 @@ export class AudioProcessor {
   private currentSyncErrorMs: number = 0;
   private resyncCount: number = 0;
 
-  // Opus decoder (lazy-loaded)
+  // Native Opus decoder (uses WebCodecs API)
+  private webCodecsDecoder: AudioDecoder | null = null;
+  private webCodecsDecoderReady: Promise<void> | null = null;
+  private webCodecsFormat: StreamFormat | null = null;
+  private useNativeOpus: boolean = true; // false when WebCodecs unavailable
+
+  // Fallback Opus decoder (opus-encdec library)
   private opusDecoder: any = null;
   private opusDecoderModule: any = null;
   private opusDecoderReady: Promise<void> | null = null;
@@ -157,9 +163,8 @@ export class AudioProcessor {
 
     try {
       if (format.codec === "opus") {
-        // For Opus, we need to use WebCodecs API for raw packet decoding
-        // Browser's decodeAudioData expects Ogg Opus containers, not raw packets
-        return await this.decodeOpusData(audioData, format);
+        // Opus fallback path - native decoder uses async queueToNativeOpusDecoder
+        return await this.decodeOpusWithEncdec(audioData, format);
       } else if (format.codec === "flac") {
         // FLAC can be decoded by the browser's native decoder
         // If codec_header is provided, prepend it to the audio data
@@ -189,15 +194,126 @@ export class AudioProcessor {
     return null;
   }
 
-  // Initialize Opus decoder (lazy-loaded)
-  private async initOpusDecoder(format: StreamFormat): Promise<void> {
+  // Initialize native Opus decoder
+  private async initWebCodecsDecoder(format: StreamFormat): Promise<void> {
+    if (this.webCodecsDecoderReady) {
+      await this.webCodecsDecoderReady;
+      return;
+    }
+
+    this.webCodecsDecoderReady = this.createWebCodecsDecoder(format);
+    await this.webCodecsDecoderReady;
+  }
+
+  // Create and configure native Opus decoder (WebCodecs)
+  private async createWebCodecsDecoder(format: StreamFormat): Promise<void> {
+    if (typeof AudioDecoder === "undefined") {
+      this.useNativeOpus = false;
+      return;
+    }
+
+    try {
+      const support = await AudioDecoder.isConfigSupported({
+        codec: "opus",
+        sampleRate: format.sample_rate,
+        numberOfChannels: format.channels,
+      });
+
+      if (!support.supported) {
+        console.log(
+          "[NativeOpus] WebCodecs Opus not supported, will use fallback",
+        );
+        this.useNativeOpus = false;
+        return;
+      }
+
+      this.webCodecsDecoder = new AudioDecoder({
+        output: (audioData: AudioData) => this.handleAudioData(audioData),
+        error: (error: Error) => {
+          console.error("[NativeOpus] WebCodecs decoder error:", error);
+        },
+      });
+
+      this.webCodecsDecoder.configure({
+        codec: "opus",
+        sampleRate: format.sample_rate,
+        numberOfChannels: format.channels,
+      });
+
+      this.webCodecsFormat = format;
+      console.log(
+        `[NativeOpus] Using WebCodecs AudioDecoder: ${format.sample_rate}Hz, ${format.channels}ch`,
+      );
+    } catch (error) {
+      console.warn(
+        "[NativeOpus] WebCodecs init failed, will use fallback:",
+        error,
+      );
+      this.useNativeOpus = false;
+    }
+  }
+
+  // Handle decoded audio data from native Opus decoder
+  private handleAudioData(audioData: AudioData): void {
+    try {
+      const channels = audioData.numberOfChannels;
+      const frames = audioData.numberOfFrames;
+      const fmt = audioData.format;
+
+      let interleaved: Float32Array;
+
+      if (fmt === "f32-planar") {
+        interleaved = new Float32Array(frames * channels);
+        for (let ch = 0; ch < channels; ch++) {
+          const channelData = new Float32Array(frames);
+          audioData.copyTo(channelData, { planeIndex: ch });
+          for (let i = 0; i < frames; i++) {
+            interleaved[i * channels + ch] = channelData[i];
+          }
+        }
+      } else if (fmt === "f32") {
+        interleaved = new Float32Array(frames * channels);
+        audioData.copyTo(interleaved, { planeIndex: 0 });
+      } else if (fmt === "s16-planar") {
+        interleaved = new Float32Array(frames * channels);
+        for (let ch = 0; ch < channels; ch++) {
+          const channelData = new Int16Array(frames);
+          audioData.copyTo(channelData, { planeIndex: ch });
+          for (let i = 0; i < frames; i++) {
+            interleaved[i * channels + ch] = channelData[i] / 32768.0;
+          }
+        }
+      } else if (fmt === "s16") {
+        const int16Data = new Int16Array(frames * channels);
+        audioData.copyTo(int16Data, { planeIndex: 0 });
+        interleaved = new Float32Array(frames * channels);
+        for (let i = 0; i < frames * channels; i++) {
+          interleaved[i] = int16Data[i] / 32768.0;
+        }
+      } else {
+        console.warn(`[NativeOpus] Unsupported AudioData format: ${fmt}`);
+        audioData.close();
+        return;
+      }
+
+      const serverTimeUs = Number(audioData.timestamp);
+      this.handleNativeOpusOutput(interleaved, serverTimeUs, channels);
+      audioData.close();
+    } catch (e) {
+      console.error("[NativeOpus] Error in output callback:", e);
+      audioData.close();
+    }
+  }
+
+  // Initialize opus-encdec decoder (fallback when WebCodecs unavailable)
+  private async initOpusEncdecDecoder(format: StreamFormat): Promise<void> {
     if (this.opusDecoderReady) {
       await this.opusDecoderReady;
       return;
     }
 
     this.opusDecoderReady = (async () => {
-      console.log("[Opus] Initializing decoder...");
+      console.log("[Opus] Initializing decoder (opus-encdec)...");
 
       // Dynamically import the pure JavaScript decoder (not WASM) to avoid bundling issues
       const [DecoderModuleExport, DecoderWrapperExport] = await Promise.all([
@@ -246,8 +362,79 @@ export class AudioProcessor {
     await this.opusDecoderReady;
   }
 
-  // Decode Opus audio data using opus-encdec library
-  private async decodeOpusData(
+  // Handle native Opus decoder output - creates AudioBuffer and adds to queue
+  private handleNativeOpusOutput(
+    interleaved: Float32Array,
+    serverTimeUs: number,
+    channels: number,
+  ): void {
+    if (!this.audioContext || !this.webCodecsFormat) {
+      return;
+    }
+
+    const numFrames = interleaved.length / channels;
+    const audioBuffer = this.audioContext.createBuffer(
+      channels,
+      numFrames,
+      this.webCodecsFormat.sample_rate,
+    );
+
+    // De-interleave samples into separate channels
+    for (let ch = 0; ch < channels; ch++) {
+      const channelData = audioBuffer.getChannelData(ch);
+      for (let i = 0; i < numFrames; i++) {
+        channelData[i] = interleaved[i * channels + ch];
+      }
+    }
+
+    // Add to queue directly
+    this.audioBufferQueue.push({
+      buffer: audioBuffer,
+      serverTime: serverTimeUs,
+      generation: this.stateManager.streamGeneration,
+    });
+
+    // Trigger queue processing (debounced)
+    if (this.queueProcessTimeout !== null) {
+      clearTimeout(this.queueProcessTimeout);
+    }
+    this.queueProcessTimeout = window.setTimeout(() => {
+      this.processAudioQueue();
+      this.queueProcessTimeout = null;
+    }, 50);
+  }
+
+  // Queue Opus packet to native decoder for async decoding (non-blocking)
+  private queueToNativeOpusDecoder(
+    audioData: ArrayBuffer,
+    serverTimeUs: number,
+  ): boolean {
+    if (
+      !this.webCodecsDecoder ||
+      this.webCodecsDecoder.state !== "configured"
+    ) {
+      return false;
+    }
+
+    try {
+      // Create EncodedAudioChunk - use timestamp to pass server time through
+      const chunk = new EncodedAudioChunk({
+        type: "key", // Opus packets are self-contained
+        timestamp: serverTimeUs, // Pass server timestamp through to output callback
+        data: audioData,
+      });
+
+      // Queue for async decoding (non-blocking)
+      this.webCodecsDecoder.decode(chunk);
+      return true;
+    } catch (error) {
+      console.error("[NativeOpus] WebCodecs queue error:", error);
+      return false;
+    }
+  }
+
+  // Decode using opus-encdec library (fallback)
+  private async decodeOpusWithEncdec(
     audioData: ArrayBuffer,
     format: StreamFormat,
   ): Promise<AudioBuffer | null> {
@@ -256,8 +443,8 @@ export class AudioProcessor {
     }
 
     try {
-      // Initialize decoder if needed
-      await this.initOpusDecoder(format);
+      // Initialize fallback decoder if needed
+      await this.initOpusEncdecDecoder(format);
 
       // Decode the raw Opus packet
       const uint8Array = new Uint8Array(audioData);
@@ -269,7 +456,7 @@ export class AudioProcessor {
       });
 
       if (decodedSamples.length === 0) {
-        console.warn("[Opus] Decoder produced no samples");
+        console.warn("[Opus] Fallback decoder produced no samples");
         return null;
       }
 
@@ -280,7 +467,7 @@ export class AudioProcessor {
       const audioBuffer = this.audioContext.createBuffer(
         format.channels,
         numFrames,
-        format.sample_rate,
+        this.audioContext.sampleRate,
       );
 
       // De-interleave samples into separate channels
@@ -380,6 +567,20 @@ export class AudioProcessor {
 
       // Rest is audio data
       const audioData = data.slice(9);
+
+      // For Opus: use native decoder (non-blocking async path)
+      if (format.codec === "opus" && this.useNativeOpus) {
+        await this.initWebCodecsDecoder(format);
+
+        if (this.useNativeOpus && this.webCodecsDecoder) {
+          if (this.queueToNativeOpusDecoder(audioData, serverTimeUs)) {
+            return; // Async path - callback handles queue
+          }
+          // Fall through to fallback on error
+        }
+      }
+
+      // Fallback decode path (PCM, FLAC, or Opus via opus-encdec)
       const audioBuffer = await this.decodeAudioData(audioData, format);
 
       if (audioBuffer) {
@@ -598,12 +799,27 @@ export class AudioProcessor {
       this.audioContext = null;
     }
 
-    // Clean up Opus decoder
+    // Clean up native Opus decoder
+    if (this.webCodecsDecoder) {
+      try {
+        this.webCodecsDecoder.close();
+      } catch (e) {
+        // Ignore if already closed
+      }
+      this.webCodecsDecoder = null;
+      this.webCodecsDecoderReady = null;
+      this.webCodecsFormat = null;
+    }
+
+    // Clean up fallback Opus decoder
     if (this.opusDecoder) {
       this.opusDecoder = null;
       this.opusDecoderModule = null;
       this.opusDecoderReady = null;
     }
+
+    // Reset native Opus flag for next session
+    this.useNativeOpus = true;
 
     this.gainNode = null;
     this.streamDestination = null;
