@@ -70,6 +70,9 @@ jobs:
           name: dist
           path: dist
 
+      - name: Install dependencies
+        run: yarn install --frozen-lockfile
+
       - name: Update npm for OIDC support
         run: npm install -g npm@latest
 
