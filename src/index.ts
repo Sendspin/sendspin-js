@@ -175,6 +175,7 @@ export class SendspinPlayer {
     syncErrorMs: number;
     resyncCount: number;
     outputLatencyMs: number;
+    playbackRate: number;
   } {
     return this.audioProcessor.syncInfo;
   }

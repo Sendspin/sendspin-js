@@ -6,6 +6,12 @@ import type {
 import type { StateManager } from "./state-manager";
 import type { SendspinTimeFilter } from "./time-filter";
 
+// Drift correction constants
+const DRIFT_CORRECTION_FACTOR = 0.1; // Correct 10% of error per chunk
+const MIN_PLAYBACK_RATE = 0.95; // Maximum 5% slowdown
+const MAX_PLAYBACK_RATE = 1.05; // Maximum 5% speedup
+const HARD_RESYNC_THRESHOLD_MS = 200; // Hard resync only for extreme errors
+
 export class AudioProcessor {
   private audioContext: AudioContext | null = null;
   private gainNode: GainNode | null = null;
@@ -21,6 +27,7 @@ export class AudioProcessor {
   // Sync tracking (for debugging/display)
   private currentSyncErrorMs: number = 0;
   private resyncCount: number = 0;
+  private currentPlaybackRate: number = 1.0;
 
   // Native Opus decoder (uses WebCodecs API)
   private webCodecsDecoder: AudioDecoder | null = null;
@@ -58,12 +65,14 @@ export class AudioProcessor {
     syncErrorMs: number;
     resyncCount: number;
     outputLatencyMs: number;
+    playbackRate: number;
   } {
     return {
       clockDriftPercent: this.timeFilter.drift * 100,
       syncErrorMs: this.currentSyncErrorMs,
       resyncCount: this.resyncCount,
       outputLatencyMs: this.getRawOutputLatencyUs() / 1000,
+      playbackRate: this.currentPlaybackRate,
     };
   }
 
@@ -654,6 +663,7 @@ export class AudioProcessor {
       const chunkDuration = chunk.buffer.duration;
 
       let playbackTime: number;
+      let playbackRate: number;
 
       // Always compute the drift-corrected target time
       const chunkClientTimeUs = this.timeFilter.computeClientTime(
@@ -667,6 +677,7 @@ export class AudioProcessor {
       // First chunk or after a gap: calculate from server timestamp
       if (this.nextPlaybackTime === 0 || this.lastScheduledServerTime === 0) {
         playbackTime = targetPlaybackTime;
+        playbackRate = 1.0;
       } else {
         // Subsequent chunks: schedule back-to-back for seamless playback
         // Check if this chunk is contiguous with the last one
@@ -676,23 +687,34 @@ export class AudioProcessor {
 
         if (Math.abs(serverGapSec) < 0.1) {
           // Chunk is contiguous (within 100ms)
-          // Calculate sync error for monitoring (positive = ahead, negative = behind)
+          // Calculate sync error (positive = behind target, negative = ahead)
           const syncErrorSec = this.nextPlaybackTime - targetPlaybackTime;
           const syncErrorMs = syncErrorSec * 1000;
 
           // Store for display
           this.currentSyncErrorMs = syncErrorMs;
 
-          // Hard resync if sync error exceeds threshold
-          if (Math.abs(syncErrorMs) > 20) {
+          if (Math.abs(syncErrorMs) > HARD_RESYNC_THRESHOLD_MS) {
+            // Hard resync if sync error exceeds threshold
             console.log(
-              `Sendspin: Sync error ${syncErrorMs.toFixed(1)}ms, resyncing`,
+              `Sendspin: Sync error ${syncErrorMs.toFixed(1)}ms, hard resyncing`,
             );
             this.resyncCount++;
             playbackTime = targetPlaybackTime;
+            playbackRate = 1.0;
           } else {
-            // Use seamless scheduling
+            // Continuous smooth correction via playback rate
+            // Always apply proportional correction to avoid oscillation
             playbackTime = this.nextPlaybackTime;
+
+            // Rate adjustment: positive syncError = behind target, need to speed up
+            const rateAdjustment =
+              (syncErrorSec / chunkDuration) * DRIFT_CORRECTION_FACTOR;
+            playbackRate = 1.0 + rateAdjustment;
+            playbackRate = Math.max(
+              MIN_PLAYBACK_RATE,
+              Math.min(MAX_PLAYBACK_RATE, playbackRate),
+            );
           }
         } else {
           // Gap detected in server timestamps - hard resync
@@ -701,8 +723,12 @@ export class AudioProcessor {
           );
           this.resyncCount++;
           playbackTime = targetPlaybackTime;
+          playbackRate = 1.0;
         }
       }
+
+      // Track current rate for debugging
+      this.currentPlaybackRate = playbackRate;
 
       // Drop chunks that arrived too late
       if (playbackTime < audioContextTime) {
@@ -715,11 +741,14 @@ export class AudioProcessor {
 
       const source = this.audioContext.createBufferSource();
       source.buffer = chunk.buffer;
+      source.playbackRate.value = playbackRate; // Apply drift correction
       source.connect(this.gainNode);
       source.start(playbackTime);
 
       // Track for seamless scheduling of next chunk
-      this.nextPlaybackTime = playbackTime + chunkDuration;
+      // Account for actual duration with playback rate adjustment
+      const actualDuration = chunkDuration / playbackRate;
+      this.nextPlaybackTime = playbackTime + actualDuration;
       this.lastScheduledServerTime =
         chunk.serverTime + chunkDuration * 1_000_000;
 
@@ -788,6 +817,7 @@ export class AudioProcessor {
     // Reset sync stats
     this.currentSyncErrorMs = 0;
     this.resyncCount = 0;
+    this.currentPlaybackRate = 1.0;
   }
 
   // Cleanup and close AudioContext
