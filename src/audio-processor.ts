@@ -99,7 +99,7 @@ export class AudioProcessor {
   }
 
   // Get smoothed output latency in microseconds (filters Chrome jitter)
-  private getSmoothedOutputLatencyUs(): number {
+  getSmoothedOutputLatencyUs(): number {
     const rawLatencyUs = this.getRawOutputLatencyUs();
 
     if (this.smoothedOutputLatencyUs === null) {
@@ -850,6 +850,8 @@ export class AudioProcessor {
           this.resyncCount++;
           playbackTime = targetPlaybackTime;
           playbackRate = 1.0;
+          this.currentCorrectionMethod = "resync";
+          this.lastSamplesAdjusted = 0;
         }
       }
 
@@ -873,10 +875,11 @@ export class AudioProcessor {
 
       // Track for seamless scheduling of next chunk
       // Account for actual duration with playback rate adjustment
-      const actualDuration = chunkDuration / playbackRate;
+      // Use chunk.buffer.duration (not chunkDuration) since buffer may have been modified by sample adjustment
+      const actualDuration = chunk.buffer.duration / playbackRate;
       this.nextPlaybackTime = playbackTime + actualDuration;
       this.lastScheduledServerTime =
-        chunk.serverTime + chunkDuration * 1_000_000;
+        chunk.serverTime + chunk.buffer.duration * 1_000_000;
 
       this.scheduledSources.push(source);
       source.onended = () => {

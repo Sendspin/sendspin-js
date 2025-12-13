@@ -168,8 +168,9 @@ export class ProtocolHandler {
 
     // Optionally add output latency to offset measurement so Kalman filter smooths it together
     // This compensates for hardware delay (e.g., Bluetooth) by scheduling audio earlier
+    // Use EMA-smoothed latency to filter Chrome's jittery outputLatency readings
     const outputLatencyUs = this.useOutputLatencyCompensation
-      ? this.audioProcessor.getRawOutputLatencyUs()
+      ? this.audioProcessor.getSmoothedOutputLatencyUs()
       : 0;
     const measurement = clockOffset + outputLatencyUs;
 
