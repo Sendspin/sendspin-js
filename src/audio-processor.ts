@@ -784,30 +784,63 @@ export class AudioProcessor {
           this.currentSyncErrorMs = syncErrorMs;
 
           if (Math.abs(syncErrorMs) > HARD_RESYNC_THRESHOLD_MS) {
-            // Hard resync if sync error exceeds threshold
+            // Tier 4: Hard resync if sync error exceeds threshold
             console.log(
               `Sendspin: Sync error ${syncErrorMs.toFixed(1)}ms, hard resyncing`,
             );
             this.resyncCount++;
             playbackTime = targetPlaybackTime;
             playbackRate = 1.0;
-          } else {
-            // Continuous smooth correction via playback rate
+            this.currentCorrectionMethod = "resync";
+            this.lastSamplesAdjusted = 0;
+          } else if (Math.abs(syncErrorMs) < SYNC_ERROR_DEADBAND_MS) {
+            // Tier 1: Within deadband - no correction needed
             playbackTime = this.nextPlaybackTime;
+            playbackRate = 1.0;
+            this.currentCorrectionMethod = "none";
+            this.lastSamplesAdjusted = 0;
+          } else if (Math.abs(syncErrorMs) < SAMPLE_CORRECTION_THRESHOLD_MS) {
+            // Tier 2: Small error - use sample insertion/deletion
+            playbackTime = this.nextPlaybackTime;
+            playbackRate = 1.0;
 
-            // Don't correct too small errors
-            if (Math.abs(syncErrorMs) < SYNC_ERROR_DEADBAND_MS) {
-              playbackRate = 1.0;
-            } else {
-              // Rate adjustment: spread correction over target time window
-              // Positive syncError = behind target, need to speed up
-              const rateAdjustment = syncErrorSec / CORRECTION_TARGET_SECONDS;
-              playbackRate = 1.0 + rateAdjustment;
-              playbackRate = Math.max(
-                MIN_PLAYBACK_RATE,
-                Math.min(MAX_PLAYBACK_RATE, playbackRate),
+            // Calculate samples needed
+            // Positive syncError = behind target = need to speed up = delete samples
+            // Negative syncError = ahead of target = need to slow down = insert samples
+            const sampleRate = chunk.buffer.sampleRate;
+            const errorSamples = (syncErrorMs / 1000) * sampleRate;
+            // samplesToAdjust: negative = delete (speed up), positive = insert (slow down)
+            const samplesToAdjust = Math.round(
+              Math.max(
+                -MAX_SAMPLES_PER_CHUNK,
+                Math.min(MAX_SAMPLES_PER_CHUNK, -errorSamples),
+              ),
+            );
+
+            if (samplesToAdjust !== 0) {
+              chunk.buffer = this.adjustBufferSamples(
+                chunk.buffer,
+                samplesToAdjust,
               );
             }
+
+            this.currentCorrectionMethod = "samples";
+            this.lastSamplesAdjusted = samplesToAdjust;
+          } else {
+            // Tier 3: Medium error - use playback rate adjustment
+            playbackTime = this.nextPlaybackTime;
+
+            // Rate adjustment: spread correction over target time window
+            // Positive syncError = behind target, need to speed up
+            const rateAdjustment = syncErrorSec / CORRECTION_TARGET_SECONDS;
+            playbackRate = 1.0 + rateAdjustment;
+            playbackRate = Math.max(
+              MIN_PLAYBACK_RATE,
+              Math.min(MAX_PLAYBACK_RATE, playbackRate),
+            );
+
+            this.currentCorrectionMethod = "rate";
+            this.lastSamplesAdjusted = 0;
           }
         } else {
           // Gap detected in server timestamps - hard resync
