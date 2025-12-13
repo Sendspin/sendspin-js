@@ -11,7 +11,10 @@ const CORRECTION_TARGET_SECONDS = 2.0; // Target time to correct any sync error
 const MIN_PLAYBACK_RATE = 0.96; // Maximum 4% slowdown
 const MAX_PLAYBACK_RATE = 1.04; // Maximum 4% speedup
 const HARD_RESYNC_THRESHOLD_MS = 200; // Hard resync only for extreme errors
-const SYNC_ERROR_DEADBAND_MS = 2; // Don't correct if error < 2ms
+const SYNC_ERROR_DEADBAND_MS = 0.1; // Don't correct if error < 0.1ms
+const SAMPLE_CORRECTION_THRESHOLD_MS = 30; // Use sample manipulation below this
+const MAX_SAMPLES_PER_CHUNK = 5; // Max samples to insert/delete per chunk
+const OUTPUT_LATENCY_ALPHA = 0.01; // EMA smoothing factor for outputLatency
 
 export class AudioProcessor {
   private audioContext: AudioContext | null = null;
