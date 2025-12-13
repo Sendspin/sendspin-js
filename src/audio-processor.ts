@@ -944,6 +944,9 @@ export class AudioProcessor {
     this.currentSyncErrorMs = 0;
     this.resyncCount = 0;
     this.currentPlaybackRate = 1.0;
+    this.currentCorrectionMethod = "none";
+    this.lastSamplesAdjusted = 0;
+    this.resetLatencySmoother();
   }
 
   // Cleanup and close AudioContext
