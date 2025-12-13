@@ -32,6 +32,9 @@ export class AudioProcessor {
   private currentSyncErrorMs: number = 0;
   private resyncCount: number = 0;
   private currentPlaybackRate: number = 1.0;
+  private currentCorrectionMethod: "none" | "samples" | "rate" | "resync" =
+    "none";
+  private lastSamplesAdjusted: number = 0;
 
   // Output latency smoothing (EMA to filter Chrome jitter)
   private smoothedOutputLatencyUs: number | null = null;
@@ -73,6 +76,8 @@ export class AudioProcessor {
     resyncCount: number;
     outputLatencyMs: number;
     playbackRate: number;
+    correctionMethod: "none" | "samples" | "rate" | "resync";
+    samplesAdjusted: number;
   } {
     return {
       clockDriftPercent: this.timeFilter.drift * 100,
@@ -80,6 +85,8 @@ export class AudioProcessor {
       resyncCount: this.resyncCount,
       outputLatencyMs: this.getRawOutputLatencyUs() / 1000,
       playbackRate: this.currentPlaybackRate,
+      correctionMethod: this.currentCorrectionMethod,
+      samplesAdjusted: this.lastSamplesAdjusted,
     };
   }
 
