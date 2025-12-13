@@ -33,6 +33,9 @@ export class AudioProcessor {
   private resyncCount: number = 0;
   private currentPlaybackRate: number = 1.0;
 
+  // Output latency smoothing (EMA to filter Chrome jitter)
+  private smoothedOutputLatencyUs: number | null = null;
+
   // Native Opus decoder (uses WebCodecs API)
   private webCodecsDecoder: AudioDecoder | null = null;
   private webCodecsDecoderReady: Promise<void> | null = null;
@@ -86,6 +89,26 @@ export class AudioProcessor {
     const baseLatency = this.audioContext.baseLatency ?? 0;
     const outputLatency = this.audioContext.outputLatency ?? 0;
     return (baseLatency + outputLatency) * 1_000_000; // Convert seconds to microseconds
+  }
+
+  // Get smoothed output latency in microseconds (filters Chrome jitter)
+  private getSmoothedOutputLatencyUs(): number {
+    const rawLatencyUs = this.getRawOutputLatencyUs();
+
+    if (this.smoothedOutputLatencyUs === null) {
+      this.smoothedOutputLatencyUs = rawLatencyUs;
+    } else {
+      this.smoothedOutputLatencyUs =
+        OUTPUT_LATENCY_ALPHA * rawLatencyUs +
+        (1 - OUTPUT_LATENCY_ALPHA) * this.smoothedOutputLatencyUs;
+    }
+
+    return this.smoothedOutputLatencyUs;
+  }
+
+  // Reset latency smoother (call on stream change or audio context recreation)
+  private resetLatencySmoother(): void {
+    this.smoothedOutputLatencyUs = null;
   }
 
   // Initialize AudioContext with platform-specific setup
