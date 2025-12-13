@@ -111,6 +111,61 @@ export class AudioProcessor {
     this.smoothedOutputLatencyUs = null;
   }
 
+  // Adjust audio buffer by inserting or deleting samples
+  // Returns new AudioBuffer with adjusted sample count
+  private adjustBufferSamples(
+    buffer: AudioBuffer,
+    samplesToAdjust: number,
+  ): AudioBuffer {
+    if (!this.audioContext || samplesToAdjust === 0) {
+      return buffer;
+    }
+
+    const channels = buffer.numberOfChannels;
+    const originalLength = buffer.length;
+    const sampleRate = buffer.sampleRate;
+
+    // Positive = insert samples (slow down), Negative = delete samples (speed up)
+    const newLength = originalLength + samplesToAdjust;
+
+    if (newLength <= 0) {
+      // Edge case: trying to delete more samples than exist
+      // Return minimal buffer to avoid errors
+      const minBuffer = this.audioContext.createBuffer(channels, 1, sampleRate);
+      return minBuffer;
+    }
+
+    const newBuffer = this.audioContext.createBuffer(
+      channels,
+      newLength,
+      sampleRate,
+    );
+
+    for (let ch = 0; ch < channels; ch++) {
+      const oldData = buffer.getChannelData(ch);
+      const newData = newBuffer.getChannelData(ch);
+
+      if (samplesToAdjust > 0) {
+        // Insert samples at position 0 (duplicate first N samples)
+        for (let i = 0; i < samplesToAdjust; i++) {
+          newData[i] = oldData[0]; // Duplicate first sample
+        }
+        // Copy rest of original data
+        for (let i = 0; i < originalLength; i++) {
+          newData[i + samplesToAdjust] = oldData[i];
+        }
+      } else {
+        // Delete samples from position 0 (skip first N samples)
+        const samplesToSkip = -samplesToAdjust;
+        for (let i = samplesToSkip; i < originalLength; i++) {
+          newData[i - samplesToSkip] = oldData[i];
+        }
+      }
+    }
+
+    return newBuffer;
+  }
+
   // Initialize AudioContext with platform-specific setup
   initAudioContext(): void {
     if (this.audioContext) {
