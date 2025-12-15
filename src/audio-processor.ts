@@ -696,9 +696,6 @@ export class AudioProcessor {
       if (audioBuffer) {
         // Check if stream generation changed during async decode
         if (generation !== this.stateManager.streamGeneration) {
-          console.log(
-            "Sendspin: Discarding audio chunk from old stream (generation mismatch)",
-          );
           return;
         }
 
@@ -730,22 +727,15 @@ export class AudioProcessor {
 
     // Filter out any chunks from old streams (safety check)
     const currentGeneration = this.stateManager.streamGeneration;
-    this.audioBufferQueue = this.audioBufferQueue.filter((chunk) => {
-      if (chunk.generation !== currentGeneration) {
-        console.log(
-          "Sendspin: Filtering out audio chunk from old stream during queue processing",
-        );
-        return false;
-      }
-      return true;
-    });
+    this.audioBufferQueue = this.audioBufferQueue.filter(
+      (chunk) => chunk.generation === currentGeneration,
+    );
 
     // Sort queue by server timestamp to ensure proper ordering
     this.audioBufferQueue.sort((a, b) => a.serverTime - b.serverTime);
 
     // Don't schedule until time sync is ready
     if (!this.timeFilter.is_synchronized) {
-      console.log("Sendspin: Waiting for time sync before scheduling audio");
       return;
     }
 
@@ -854,7 +844,6 @@ export class AudioProcessor {
 
       // Drop chunks that arrived too late
       if (playbackTime < audioContextTime) {
-        console.log("Sendspin: Dropping late audio chunk");
         // Reset seamless tracking since we dropped a chunk
         this.nextPlaybackTime = 0;
         this.lastScheduledServerTime = 0;
