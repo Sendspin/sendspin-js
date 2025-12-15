@@ -6,15 +6,13 @@ import type {
 import type { StateManager } from "./state-manager";
 import type { SendspinTimeFilter } from "./time-filter";
 
-// Drift correction constants
-const CORRECTION_TARGET_SECONDS = 2.0; // Target time to correct any sync error
-const MIN_PLAYBACK_RATE = 0.96; // Maximum 4% slowdown
-const MAX_PLAYBACK_RATE = 1.04; // Maximum 4% speedup
-const HARD_RESYNC_THRESHOLD_MS = 200; // Hard resync only for extreme errors
-const SYNC_ERROR_DEADBAND_MS = 0.1; // Don't correct if error < 0.1ms
-const SAMPLE_CORRECTION_THRESHOLD_MS = 30; // Use sample manipulation below this
-const MAX_SAMPLES_PER_CHUNK = 5; // Max samples to insert/delete per chunk
+// Sync correction constants
+const HARD_RESYNC_THRESHOLD_MS = 200; // Hard resync for extreme errors
+const RATE_2_PERCENT_THRESHOLD_MS = 40; // Use 2% rate above this
+const SAMPLE_CORRECTION_THRESHOLD_MS = 15; // Use sample manipulation below this
+const SYNC_ERROR_DEADBAND_MS = 1; // Don't correct if error < 1ms
 const OUTPUT_LATENCY_ALPHA = 0.01; // EMA smoothing factor for outputLatency
+const SYNC_ERROR_ALPHA = 0.1; // EMA smoothing factor for sync error (filters jitter)
 
 export class AudioProcessor {
   private audioContext: AudioContext | null = null;
@@ -30,6 +28,7 @@ export class AudioProcessor {
 
   // Sync tracking (for debugging/display)
   private currentSyncErrorMs: number = 0;
+  private smoothedSyncErrorMs: number = 0; // EMA-filtered sync error for corrections
   private resyncCount: number = 0;
   private currentPlaybackRate: number = 1.0;
   private currentCorrectionMethod: "none" | "samples" | "rate" | "resync" =
@@ -118,59 +117,72 @@ export class AudioProcessor {
     this.smoothedOutputLatencyUs = null;
   }
 
-  // Adjust audio buffer by inserting or deleting samples
-  // Returns new AudioBuffer with adjusted sample count
+  // Create a fresh copy of an AudioBuffer
+  // Some decoders produce buffers with boundary artifacts - copying fixes this
+  private copyBuffer(buffer: AudioBuffer): AudioBuffer {
+    if (!this.audioContext) return buffer;
+
+    const newBuffer = this.audioContext.createBuffer(
+      buffer.numberOfChannels,
+      buffer.length,
+      buffer.sampleRate,
+    );
+
+    for (let ch = 0; ch < buffer.numberOfChannels; ch++) {
+      newBuffer.getChannelData(ch).set(buffer.getChannelData(ch));
+    }
+
+    return newBuffer;
+  }
+
+  // Adjust buffer by inserting or deleting 1 sample using interpolation
+  // Insert: [A, B, ...] → [A, (A+B)/2, B, ...] (at start)
+  // Delete: [..., Y, Z] → [..., (Y+Z)/2] (at end)
   private adjustBufferSamples(
     buffer: AudioBuffer,
     samplesToAdjust: number,
   ): AudioBuffer {
-    if (!this.audioContext || samplesToAdjust === 0) {
-      return buffer;
+    if (!this.audioContext || samplesToAdjust === 0 || buffer.length < 2) {
+      return this.copyBuffer(buffer);
     }
 
     const channels = buffer.numberOfChannels;
-    const originalLength = buffer.length;
+    const len = buffer.length;
     const sampleRate = buffer.sampleRate;
 
-    // Positive = insert samples (slow down), Negative = delete samples (speed up)
-    const newLength = originalLength + samplesToAdjust;
-
-    if (newLength <= 0) {
-      // Edge case: trying to delete more samples than exist
-      // Return minimal buffer to avoid errors
-      const minBuffer = this.audioContext.createBuffer(channels, 1, sampleRate);
-      return minBuffer;
-    }
-
-    const newBuffer = this.audioContext.createBuffer(
-      channels,
-      newLength,
-      sampleRate,
-    );
-
-    for (let ch = 0; ch < channels; ch++) {
-      const oldData = buffer.getChannelData(ch);
-      const newData = newBuffer.getChannelData(ch);
-
+    try {
       if (samplesToAdjust > 0) {
-        // Insert samples at position 0 (duplicate first N samples)
-        for (let i = 0; i < samplesToAdjust; i++) {
-          newData[i] = oldData[0]; // Duplicate first sample
-        }
-        // Copy rest of original data
-        for (let i = 0; i < originalLength; i++) {
-          newData[i + samplesToAdjust] = oldData[i];
-        }
-      } else {
-        // Delete samples from position 0 (skip first N samples)
-        const samplesToSkip = -samplesToAdjust;
-        for (let i = samplesToSkip; i < originalLength; i++) {
-          newData[i - samplesToSkip] = oldData[i];
-        }
-      }
-    }
+        // Insert 1 sample at START: [A, B, ...] → [A, (A+B)/2, B, ...]
+        const newBuffer = this.audioContext.createBuffer(channels, len + 1, sampleRate);
 
-    return newBuffer;
+        for (let ch = 0; ch < channels; ch++) {
+          const oldData = buffer.getChannelData(ch);
+          const newData = newBuffer.getChannelData(ch);
+
+          newData[0] = oldData[0];
+          newData[1] = (oldData[0] + oldData[1]) / 2;
+          newData.set(oldData.subarray(1), 2);
+        }
+
+        return newBuffer;
+      } else {
+        // Delete 1 sample at END: [..., Y, Z] → [..., (Y+Z)/2]
+        const newBuffer = this.audioContext.createBuffer(channels, len - 1, sampleRate);
+
+        for (let ch = 0; ch < channels; ch++) {
+          const oldData = buffer.getChannelData(ch);
+          const newData = newBuffer.getChannelData(ch);
+
+          newData.set(oldData.subarray(0, len - 2));
+          newData[len - 2] = (oldData[len - 2] + oldData[len - 1]) / 2;
+        }
+
+        return newBuffer;
+      }
+    } catch (e) {
+      console.error("Sendspin: adjustBufferSamples error:", e);
+      return buffer;
+    }
   }
 
   // Initialize AudioContext with platform-specific setup
@@ -767,6 +779,7 @@ export class AudioProcessor {
       if (this.nextPlaybackTime === 0 || this.lastScheduledServerTime === 0) {
         playbackTime = targetPlaybackTime;
         playbackRate = 1.0;
+        chunk.buffer = this.copyBuffer(chunk.buffer);
       } else {
         // Subsequent chunks: schedule back-to-back for seamless playback
         // Check if this chunk is contiguous with the last one
@@ -780,78 +793,59 @@ export class AudioProcessor {
           const syncErrorSec = this.nextPlaybackTime - targetPlaybackTime;
           const syncErrorMs = syncErrorSec * 1000;
 
-          // Store for display
+          // Store raw for display
           this.currentSyncErrorMs = syncErrorMs;
 
-          if (Math.abs(syncErrorMs) > HARD_RESYNC_THRESHOLD_MS) {
+          // Apply EMA smoothing to filter jitter - use smoothed value for corrections
+          this.smoothedSyncErrorMs =
+            SYNC_ERROR_ALPHA * syncErrorMs +
+            (1 - SYNC_ERROR_ALPHA) * this.smoothedSyncErrorMs;
+          const correctionErrorMs = this.smoothedSyncErrorMs;
+
+          if (Math.abs(correctionErrorMs) > HARD_RESYNC_THRESHOLD_MS) {
             // Tier 4: Hard resync if sync error exceeds threshold
-            console.log(
-              `Sendspin: Sync error ${syncErrorMs.toFixed(1)}ms, hard resyncing`,
-            );
             this.resyncCount++;
+            this.smoothedSyncErrorMs = 0;
             playbackTime = targetPlaybackTime;
             playbackRate = 1.0;
             this.currentCorrectionMethod = "resync";
             this.lastSamplesAdjusted = 0;
-          } else if (Math.abs(syncErrorMs) < SYNC_ERROR_DEADBAND_MS) {
+            chunk.buffer = this.copyBuffer(chunk.buffer);
+          } else if (Math.abs(correctionErrorMs) < SYNC_ERROR_DEADBAND_MS) {
             // Tier 1: Within deadband - no correction needed
             playbackTime = this.nextPlaybackTime;
             playbackRate = 1.0;
             this.currentCorrectionMethod = "none";
             this.lastSamplesAdjusted = 0;
-          } else if (Math.abs(syncErrorMs) < SAMPLE_CORRECTION_THRESHOLD_MS) {
-            // Tier 2: Small error - use sample insertion/deletion
+            chunk.buffer = this.copyBuffer(chunk.buffer);
+          } else if (Math.abs(correctionErrorMs) < SAMPLE_CORRECTION_THRESHOLD_MS) {
+            // Tier 2: Small error (<15ms) - use single sample insertion/deletion
             playbackTime = this.nextPlaybackTime;
             playbackRate = 1.0;
-
-            // Calculate samples needed
-            // Positive syncError = behind target = need to speed up = delete samples
-            // Negative syncError = ahead of target = need to slow down = insert samples
-            const sampleRate = chunk.buffer.sampleRate;
-            const errorSamples = (syncErrorMs / 1000) * sampleRate;
-            // samplesToAdjust: negative = delete (speed up), positive = insert (slow down)
-            const samplesToAdjust = Math.round(
-              Math.max(
-                -MAX_SAMPLES_PER_CHUNK,
-                Math.min(MAX_SAMPLES_PER_CHUNK, -errorSamples),
-              ),
-            );
-
-            if (samplesToAdjust !== 0) {
-              chunk.buffer = this.adjustBufferSamples(
-                chunk.buffer,
-                samplesToAdjust,
-              );
-            }
-
+            const samplesToAdjust = correctionErrorMs > 0 ? -1 : 1;
+            chunk.buffer = this.adjustBufferSamples(chunk.buffer, samplesToAdjust);
             this.currentCorrectionMethod = "samples";
             this.lastSamplesAdjusted = samplesToAdjust;
           } else {
-            // Tier 3: Medium error - use playback rate adjustment
+            // Tier 3: Medium error (15-200ms) - use playback rate adjustment
             playbackTime = this.nextPlaybackTime;
-
-            // Rate adjustment: spread correction over target time window
-            // Positive syncError = behind target, need to speed up
-            const rateAdjustment = syncErrorSec / CORRECTION_TARGET_SECONDS;
-            playbackRate = 1.0 + rateAdjustment;
-            playbackRate = Math.max(
-              MIN_PLAYBACK_RATE,
-              Math.min(MAX_PLAYBACK_RATE, playbackRate),
-            );
-
+            if (correctionErrorMs > 0) {
+              playbackRate = Math.abs(correctionErrorMs) >= RATE_2_PERCENT_THRESHOLD_MS ? 1.02 : 1.01;
+            } else {
+              playbackRate = Math.abs(correctionErrorMs) >= RATE_2_PERCENT_THRESHOLD_MS ? 0.98 : 0.99;
+            }
             this.currentCorrectionMethod = "rate";
             this.lastSamplesAdjusted = 0;
+            chunk.buffer = this.copyBuffer(chunk.buffer);
           }
         } else {
           // Gap detected in server timestamps - hard resync
-          console.log(
-            `Sendspin: Gap detected (${serverGapSec.toFixed(3)}s), resyncing`,
-          );
           this.resyncCount++;
           playbackTime = targetPlaybackTime;
           playbackRate = 1.0;
           this.currentCorrectionMethod = "resync";
           this.lastSamplesAdjusted = 0;
+          chunk.buffer = this.copyBuffer(chunk.buffer);
         }
       }
 
@@ -869,13 +863,12 @@ export class AudioProcessor {
 
       const source = this.audioContext.createBufferSource();
       source.buffer = chunk.buffer;
-      source.playbackRate.value = playbackRate; // Apply drift correction
+      source.playbackRate.value = playbackRate; // Apply rate correction
       source.connect(this.gainNode);
       source.start(playbackTime);
 
       // Track for seamless scheduling of next chunk
       // Account for actual duration with playback rate adjustment
-      // Use chunk.buffer.duration (not chunkDuration) since buffer may have been modified by sample adjustment
       const actualDuration = chunk.buffer.duration / playbackRate;
       this.nextPlaybackTime = playbackTime + actualDuration;
       this.lastScheduledServerTime =
@@ -945,6 +938,7 @@ export class AudioProcessor {
 
     // Reset sync stats
     this.currentSyncErrorMs = 0;
+    this.smoothedSyncErrorMs = 0;
     this.resyncCount = 0;
     this.currentPlaybackRate = 1.0;
     this.currentCorrectionMethod = "none";
