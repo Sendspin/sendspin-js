@@ -179,17 +179,6 @@ export class ProtocolHandler {
 
     // Update Kalman filter
     this.timeFilter.update(measurement, max_error, T4);
-
-    console.log(
-      "Sendspin: Clock sync - offset:",
-      (this.timeFilter.offset / 1000).toFixed(2),
-      "ms, outputLatency:",
-      (outputLatencyUs / 1000).toFixed(2),
-      "ms, error:",
-      (this.timeFilter.error / 1000).toFixed(2),
-      "ms, synced:",
-      this.timeFilter.is_synchronized,
-    );
   }
 
   // Handle stream start (also used for format updates per new spec)
