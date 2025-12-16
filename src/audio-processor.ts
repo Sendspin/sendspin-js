@@ -66,6 +66,8 @@ export class AudioProcessor {
     // Reset seamless playback tracking to force resync with new delay
     this.nextPlaybackTime = 0;
     this.lastScheduledServerTime = 0;
+    // Reset EMA to prevent stale values from causing unnecessary corrections
+    this.smoothedSyncErrorMs = 0;
   }
 
   // Get current sync info for debugging/display
