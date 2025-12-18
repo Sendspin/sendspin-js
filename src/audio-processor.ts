@@ -62,12 +62,13 @@ export class AudioProcessor {
 
   // Update sync delay at runtime
   setSyncDelay(delayMs: number): void {
+    const deltaMs = delayMs - this.syncDelayMs;
     this.syncDelayMs = delayMs;
-    // Reset seamless playback tracking to force resync with new delay
-    this.nextPlaybackTime = 0;
-    this.lastScheduledServerTime = 0;
-    // Reset EMA to prevent stale values from causing unnecessary corrections
-    this.smoothedSyncErrorMs = 0;
+
+    // Shift schedule by the delay change to maintain sync with grouped players
+    if (this.nextPlaybackTime > 0) {
+      this.nextPlaybackTime += deltaMs / 1000;
+    }
   }
 
   // Get current sync info for debugging/display
