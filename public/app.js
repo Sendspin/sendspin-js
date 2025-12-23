@@ -377,7 +377,7 @@ function disconnect() {
   }
 
   if (player) {
-    player.disconnect();
+    player.disconnect("user_request");
     player = null;
   }
 
@@ -527,7 +527,7 @@ function init() {
   // Cleanup on page unload
   window.addEventListener("beforeunload", () => {
     if (player) {
-      player.disconnect();
+      player.disconnect("shutdown");
     }
   });
 

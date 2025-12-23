@@ -1,9 +1,11 @@
 import type { SendspinTimeFilter } from "./time-filter";
 import type {
+  ClientGoodbye,
   ClientHello,
   ClientState,
   ClientTime,
   Codec,
+  GoodbyeReason,
   MessageType,
   ServerCommand,
   ServerMessage,
@@ -426,5 +428,15 @@ export class ProtocolHandler {
       },
     };
     this.wsManager.send(message);
+  }
+
+  // Send goodbye message before disconnecting
+  sendGoodbye(reason: GoodbyeReason): void {
+    this.wsManager.send({
+      type: "client/goodbye" as MessageType.CLIENT_GOODBYE,
+      payload: {
+        reason,
+      },
+    } satisfies ClientGoodbye);
   }
 }

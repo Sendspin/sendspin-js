@@ -153,8 +153,9 @@ await player.connect();
 player.setVolume(80);
 player.setMuted(false);
 
-// Disconnect when done
-player.disconnect();</code></pre>
+// Disconnect with reason (optional)
+// Reasons: 'shutdown', 'user_request', 'restart', 'another_server'
+player.disconnect('user_request');</code></pre>
         </section>
       </main>
 
