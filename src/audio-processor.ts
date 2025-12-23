@@ -156,7 +156,11 @@ export class AudioProcessor {
     try {
       if (samplesToAdjust > 0) {
         // Insert 1 sample at START: [A, B, ...] → [A, (A+B)/2, B, ...]
-        const newBuffer = this.audioContext.createBuffer(channels, len + 1, sampleRate);
+        const newBuffer = this.audioContext.createBuffer(
+          channels,
+          len + 1,
+          sampleRate,
+        );
 
         for (let ch = 0; ch < channels; ch++) {
           const oldData = buffer.getChannelData(ch);
@@ -170,7 +174,11 @@ export class AudioProcessor {
         return newBuffer;
       } else {
         // Delete 1 sample at END: [..., Y, Z] → [..., (Y+Z)/2]
-        const newBuffer = this.audioContext.createBuffer(channels, len - 1, sampleRate);
+        const newBuffer = this.audioContext.createBuffer(
+          channels,
+          len - 1,
+          sampleRate,
+        );
 
         for (let ch = 0; ch < channels; ch++) {
           const oldData = buffer.getChannelData(ch);
@@ -811,21 +819,32 @@ export class AudioProcessor {
             this.currentCorrectionMethod = "none";
             this.lastSamplesAdjusted = 0;
             chunk.buffer = this.copyBuffer(chunk.buffer);
-          } else if (Math.abs(correctionErrorMs) < SAMPLE_CORRECTION_THRESHOLD_MS) {
+          } else if (
+            Math.abs(correctionErrorMs) < SAMPLE_CORRECTION_THRESHOLD_MS
+          ) {
             // Tier 2: Small error (<15ms) - use single sample insertion/deletion
             playbackTime = this.nextPlaybackTime;
             playbackRate = 1.0;
             const samplesToAdjust = correctionErrorMs > 0 ? -1 : 1;
-            chunk.buffer = this.adjustBufferSamples(chunk.buffer, samplesToAdjust);
+            chunk.buffer = this.adjustBufferSamples(
+              chunk.buffer,
+              samplesToAdjust,
+            );
             this.currentCorrectionMethod = "samples";
             this.lastSamplesAdjusted = samplesToAdjust;
           } else {
             // Tier 3: Medium error (15-200ms) - use playback rate adjustment
             playbackTime = this.nextPlaybackTime;
             if (correctionErrorMs > 0) {
-              playbackRate = Math.abs(correctionErrorMs) >= RATE_2_PERCENT_THRESHOLD_MS ? 1.02 : 1.01;
+              playbackRate =
+                Math.abs(correctionErrorMs) >= RATE_2_PERCENT_THRESHOLD_MS
+                  ? 1.02
+                  : 1.01;
             } else {
-              playbackRate = Math.abs(correctionErrorMs) >= RATE_2_PERCENT_THRESHOLD_MS ? 0.98 : 0.99;
+              playbackRate =
+                Math.abs(correctionErrorMs) >= RATE_2_PERCENT_THRESHOLD_MS
+                  ? 0.98
+                  : 0.99;
             }
             this.currentCorrectionMethod = "rate";
             this.lastSamplesAdjusted = 0;

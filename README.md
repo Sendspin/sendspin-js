@@ -5,3 +5,11 @@
 TypeScript client library implementing the [Sendspin Protocol](https://github.com/Sendspin/spec) for clock-synchronized audio streaming.
 
 [![A project from the Open Home Foundation](https://www.openhomefoundation.org/badges/ohf-project.png)](https://www.openhomefoundation.org/)
+
+## Local development
+
+```
+yarn dev-server
+```
+
+Then browse to http://localhost:6001
