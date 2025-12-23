@@ -8,6 +8,8 @@ import type {
   PlayerState,
   StreamFormat,
   GoodbyeReason,
+  ControllerCommand,
+  ControllerCommands,
 } from "./types";
 
 export class SendspinPlayer {
@@ -150,6 +152,39 @@ export class SendspinPlayer {
   // Set sync delay (in milliseconds)
   setSyncDelay(delayMs: number): void {
     this.audioProcessor.setSyncDelay(delayMs);
+  }
+
+  // ========================================
+  // Controller Commands (sent to server)
+  // ========================================
+
+  /**
+   * Send a controller command to the server.
+   * Use this for playback control when the server manages the audio source.
+   *
+   * @example
+   * // Simple commands (no parameters)
+   * player.sendCommand('play');
+   * player.sendCommand('pause');
+   * player.sendCommand('next');
+   * player.sendCommand('previous');
+   * player.sendCommand('stop');
+   * player.sendCommand('shuffle');
+   * player.sendCommand('unshuffle');
+   * player.sendCommand('repeat_off');
+   * player.sendCommand('repeat_one');
+   * player.sendCommand('repeat_all');
+   * player.sendCommand('switch');
+   *
+   * // Commands with required parameters
+   * player.sendCommand('volume', { volume: 50 });
+   * player.sendCommand('mute', { mute: true });
+   */
+  sendCommand<T extends ControllerCommand>(
+    command: T,
+    params: ControllerCommands[T],
+  ): void {
+    this.protocolHandler.sendCommand(command, params);
   }
 
   // Getters for reactive state

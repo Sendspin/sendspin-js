@@ -1,10 +1,13 @@
 import type { SendspinTimeFilter } from "./time-filter";
 import type {
+  ClientCommand,
   ClientGoodbye,
   ClientHello,
   ClientState,
   ClientTime,
   Codec,
+  ControllerCommand,
+  ControllerCommands,
   GoodbyeReason,
   MessageType,
   ServerCommand,
@@ -305,7 +308,7 @@ export class ProtocolHandler {
         client_id: this.playerId,
         name: this.clientName,
         version: 1,
-        supported_roles: ["player@v1"],
+        supported_roles: ["player@v1", "controller@v1"],
         device_info: {
           product_name: "Web Browser",
           manufacturer:
@@ -438,5 +441,21 @@ export class ProtocolHandler {
         reason,
       },
     } satisfies ClientGoodbye);
+  }
+
+  // Send controller command to server
+  sendCommand<T extends ControllerCommand>(
+    command: T,
+    params: ControllerCommands[T],
+  ): void {
+    this.wsManager.send({
+      type: "client/command" as MessageType.CLIENT_COMMAND,
+      payload: {
+        controller: {
+          command,
+          ...(params as object),
+        },
+      },
+    } satisfies ClientCommand);
   }
 }

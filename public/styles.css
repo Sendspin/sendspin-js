@@ -177,10 +177,46 @@ header h1 {
   font-size: 1.25rem;
   background-color: transparent;
   border: 1px solid var(--border-color);
+  color: var(--text-color);
 }
 
 .btn-icon:hover {
   background-color: var(--border-color);
+}
+
+.btn-icon.btn-large {
+  min-width: 52px;
+  height: 52px;
+  font-size: 1.5rem;
+}
+
+.transport-controls {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.transport-controls .btn-icon {
+  filter: grayscale(1) brightness(2);
+}
+
+.playback-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+
+.playback-options .btn {
+  flex: 1;
+  min-width: 120px;
+}
+
+.btn-icon.active {
+  background-color: var(--primary-color);
+  border-color: var(--primary-color);
 }
 
 .btn:disabled {
@@ -188,13 +224,15 @@ header h1 {
   cursor: not-allowed;
 }
 
-#controls-section {
+#controls-section,
+#server-controls-section {
   opacity: 0.5;
   pointer-events: none;
   transition: opacity 0.3s;
 }
 
-#controls-section.enabled {
+#controls-section.enabled,
+#server-controls-section.enabled {
   opacity: 1;
   pointer-events: auto;
 }
