@@ -6,7 +6,9 @@
  */
 
 // Detect if running on localhost for development
-const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+const isLocalhost =
+  window.location.hostname === "localhost" ||
+  window.location.hostname === "127.0.0.1";
 
 // Import the SDK from local build (development) or unpkg CDN (production)
 const sdkPath = isLocalhost
