@@ -1,4 +1,40 @@
-import type { PlayerState, StreamFormat } from "./types";
+import type {
+  PlayerState,
+  StreamFormat,
+  ServerStatePayload,
+  GroupUpdatePayload,
+} from "./types";
+
+/**
+ * Apply a diff to an object, returning a new copy.
+ * - Fields from diff are merged into the copy
+ * - null values delete the key from the result
+ * - Nested objects are merged recursively (one level deep)
+ */
+function applyDiff<T extends object>(existing: T, diff: Partial<T>): T {
+  const result = { ...existing };
+  for (const key of Object.keys(diff) as (keyof T)[]) {
+    const value = diff[key];
+    if (value === null) {
+      delete result[key];
+    } else if (value !== undefined) {
+      // If both existing and new value are plain objects, merge recursively
+      const existingValue = result[key];
+      if (
+        typeof value === "object" &&
+        !Array.isArray(value) &&
+        typeof existingValue === "object" &&
+        existingValue !== null &&
+        !Array.isArray(existingValue)
+      ) {
+        result[key] = applyDiff(existingValue as object, value as object) as T[keyof T];
+      } else {
+        result[key] = value as T[keyof T];
+      }
+    }
+  }
+  return result;
+}
 
 export class StateManager {
   private _volume: number = 100;
@@ -10,6 +46,12 @@ export class StateManager {
   private _streamStartAudioTime: number = 0;
   private _streamGeneration: number = 0;
 
+  // Cached server state (from server/state messages)
+  private _serverState: ServerStatePayload = {};
+
+  // Cached group state (from group/update messages)
+  private _groupState: GroupUpdatePayload = {};
+
   // Interval references for cleanup
   private timeSyncInterval: number | null = null;
   private stateUpdateInterval: number | null = null;
@@ -20,6 +62,8 @@ export class StateManager {
     volume: number;
     muted: boolean;
     playerState: PlayerState;
+    serverState: ServerStatePayload;
+    groupState: GroupUpdatePayload;
   }) => void;
 
   constructor(
@@ -28,6 +72,8 @@ export class StateManager {
       volume: number;
       muted: boolean;
       playerState: PlayerState;
+      serverState: ServerStatePayload;
+      groupState: GroupUpdatePayload;
     }) => void,
   ) {
     this.onStateChangeCallback = onStateChange;
@@ -149,6 +195,8 @@ export class StateManager {
     this._currentStreamFormat = null;
     this._streamStartServerTime = 0;
     this._streamStartAudioTime = 0;
+    this._serverState = {};
+    this._groupState = {};
     this.clearAllIntervals();
   }
 
@@ -160,7 +208,30 @@ export class StateManager {
         volume: this._volume,
         muted: this._muted,
         playerState: this._playerState,
+        serverState: this._serverState,
+        groupState: this._groupState,
       });
     }
+  }
+
+  // Update server state (merges delta, null clears fields)
+  updateServerState(update: ServerStatePayload): void {
+    this._serverState = applyDiff(this._serverState, update);
+    this.notifyStateChange();
+  }
+
+  // Update group state (merges delta, null clears fields)
+  updateGroupState(update: GroupUpdatePayload): void {
+    this._groupState = applyDiff(this._groupState, update);
+    this.notifyStateChange();
+  }
+
+  // Getters for cached state
+  get serverState(): ServerStatePayload {
+    return this._serverState;
+  }
+
+  get groupState(): GroupUpdatePayload {
+    return this._groupState;
   }
 }

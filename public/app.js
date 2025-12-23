@@ -66,6 +66,14 @@ const syncError = document.getElementById("sync-error");
 const outputLatency = document.getElementById("output-latency");
 const resyncCount = document.getElementById("resync-count");
 
+// Now Playing elements
+const trackTitle = document.getElementById("track-title");
+const trackArtist = document.getElementById("track-artist");
+const trackAlbum = document.getElementById("track-album");
+const groupName = document.getElementById("group-name");
+const artwork = document.getElementById("artwork");
+const artworkPlaceholder = document.getElementById("artwork-placeholder");
+
 // Player instance
 let player = null;
 let statusUpdateInterval = null;
@@ -251,6 +259,42 @@ function updateStatusDisplay() {
 function onStateChange(state) {
   console.log("Player state changed:", state);
   updateStatusDisplay();
+
+  // Update now playing from cached server state
+  if (state.serverState?.metadata) {
+    updateNowPlaying(state.serverState.metadata);
+  }
+
+  // Update group info from cached group state
+  if (state.groupState) {
+    updateGroupInfo(state.groupState);
+  }
+}
+
+/**
+ * Update now playing display with metadata
+ */
+function updateNowPlaying(metadata) {
+  trackTitle.textContent = metadata.title || "-";
+  trackArtist.textContent = metadata.artist || "-";
+  trackAlbum.textContent = metadata.album || "-";
+
+  // Handle artwork
+  if (metadata.artwork_url) {
+    artwork.src = metadata.artwork_url;
+    artwork.style.display = "block";
+    artworkPlaceholder.style.display = "none";
+  } else {
+    artwork.style.display = "none";
+    artworkPlaceholder.style.display = "flex";
+  }
+}
+
+/**
+ * Update group info display
+ */
+function updateGroupInfo(group) {
+  groupName.textContent = group.group_name || "";
 }
 
 /**

@@ -42,6 +42,23 @@
           </div>
         </section>
 
+        <!-- Now Playing Section -->
+        <section class="card" id="now-playing-section">
+          <h2>Now Playing</h2>
+          <div class="now-playing">
+            <div class="album-art">
+              <img id="artwork" src="" alt="" style="display: none" />
+              <div id="artwork-placeholder">🎵</div>
+            </div>
+            <div class="track-info">
+              <div id="track-title" class="track-title">-</div>
+              <div id="track-artist" class="track-artist">-</div>
+              <div id="track-album" class="track-album">-</div>
+              <div id="group-name" class="group-name"></div>
+            </div>
+          </div>
+        </section>
+
         <!-- Server Controls -->
         <section class="card" id="server-controls-section">
           <h2>Server Controls</h2>
@@ -216,7 +233,21 @@ const player = new SendspinPlayer({
   clientName: 'My Web Player',
   audioOutputMode: 'direct',
   onStateChange: (state) => {
-    console.log('State changed:', state);
+    // Local player state
+    console.log('Playing:', state.isPlaying);
+    console.log('Volume:', state.volume, 'Muted:', state.muted);
+
+    // Server state (metadata, controller info)
+    if (state.serverState?.metadata) {
+      const meta = state.serverState.metadata;
+      console.log('Track:', meta.title, '-', meta.artist);
+    }
+
+    // Group state (playback state, group info)
+    if (state.groupState) {
+      console.log('Group:', state.groupState.group_name);
+      console.log('Playback:', state.groupState.playback_state);
+    }
   }
 });
 

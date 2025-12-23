@@ -9,9 +9,11 @@ import type {
   ControllerCommand,
   ControllerCommands,
   GoodbyeReason,
+  GroupUpdate,
   MessageType,
   ServerCommand,
   ServerMessage,
+  ServerState,
   StreamClear,
   StreamEnd,
   StreamStart,
@@ -106,8 +108,11 @@ export class ProtocolHandler {
         break;
 
       case "server/state":
+        this.stateManager.updateServerState((message as ServerState).payload);
+        break;
+
       case "group/update":
-        // Handle these if needed in the future
+        this.stateManager.updateGroupState((message as GroupUpdate).payload);
         break;
     }
   }
@@ -308,7 +313,7 @@ export class ProtocolHandler {
         client_id: this.playerId,
         name: this.clientName,
         version: 1,
-        supported_roles: ["player@v1", "controller@v1"],
+        supported_roles: ["player@v1", "controller@v1", "metadata@v1"],
         device_info: {
           product_name: "Web Browser",
           manufacturer:
