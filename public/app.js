@@ -5,8 +5,23 @@
  * to build a synchronized audio player.
  */
 
-// Import the SDK from unpkg CDN
-import { SendspinPlayer } from 'https://unpkg.com/@music-assistant/sendspin-js@latest/dist/index.js';
+// Detect if running on localhost for development
+const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+
+// Import the SDK from local build (development) or unpkg CDN (production)
+const sdkPath = isLocalhost ? '../dist/index.js' : 'https://unpkg.com/@music-assistant/sendspin-js@latest/dist/index.js';
+const { SendspinPlayer } = await import(sdkPath);
+
+console.log(`Loading SDK from: ${sdkPath}`);
+
+// LocalStorage keys
+const STORAGE_KEYS = {
+  SERVER_URL: 'sendspin-server-url',
+  PLAYER_ID: 'sendspin-player-id',
+  VOLUME: 'sendspin-volume',
+  MUTED: 'sendspin-muted',
+  SYNC_DELAY: 'sendspin-sync-delay',
+};
 
 // DOM Elements
 const serverUrlInput = document.getElementById('server-url');
@@ -39,11 +54,11 @@ let statusUpdateInterval = null;
  * Generate a unique player ID
  */
 function generatePlayerId() {
-  const stored = localStorage.getItem('sendspin-player-id');
+  const stored = localStorage.getItem(STORAGE_KEYS.PLAYER_ID);
   if (stored) return stored;
 
   const id = 'web-player-' + Math.random().toString(36).substring(2, 10);
-  localStorage.setItem('sendspin-player-id', id);
+  localStorage.setItem(STORAGE_KEYS.PLAYER_ID, id);
   return id;
 }
 
@@ -67,6 +82,52 @@ function isIOS() {
 function getServerFromUrl() {
   const params = new URLSearchParams(window.location.search);
   return params.get('server') || '';
+}
+
+/**
+ * Normalize server URL to a valid HTTP(S) URL
+ *
+ * Handles various input formats:
+ * - ws://host:port -> http://host:port
+ * - wss://host:port -> https://host:port
+ * - http://host:port -> http://host:port (unchanged)
+ * - https://host:port -> https://host:port (unchanged)
+ * - host:port -> http://host:port
+ * - host -> http://host:8095 (default Sendspin port)
+ */
+function normalizeServerUrl(input) {
+  if (!input) return '';
+
+  let url = input.trim();
+
+  // Convert WebSocket protocols to HTTP
+  if (url.startsWith('ws://')) {
+    url = 'http://' + url.slice(5);
+  } else if (url.startsWith('wss://')) {
+    url = 'https://' + url.slice(6);
+  } else if (!url.startsWith('http://') && !url.startsWith('https://')) {
+    // No protocol specified, add http://
+    url = 'http://' + url;
+  }
+
+  // Parse the URL to check if port is specified
+  try {
+    const parsed = new URL(url);
+
+    // Add default port if not specified
+    if (!parsed.port && !input.includes(':' + parsed.port)) {
+      // Check if the original input had a port
+      const hostPart = input.replace(/^(wss?|https?):\/\//, '');
+      if (!hostPart.includes(':')) {
+        parsed.port = '8095';
+      }
+    }
+
+    return parsed.toString().replace(/\/$/, ''); // Remove trailing slash
+  } catch {
+    // If URL parsing fails, return the original with http prefix
+    return url;
+  }
 }
 
 /**
@@ -199,16 +260,69 @@ function onStateChange(state) {
 }
 
 /**
+ * Load saved settings from localStorage
+ */
+function loadSettings() {
+  // Load volume
+  const savedVolume = localStorage.getItem(STORAGE_KEYS.VOLUME);
+  if (savedVolume !== null) {
+    const volume = parseInt(savedVolume, 10);
+    volumeSlider.value = volume;
+    volumeValue.textContent = `${volume}%`;
+  }
+
+  // Load muted state
+  const savedMuted = localStorage.getItem(STORAGE_KEYS.MUTED);
+  if (savedMuted !== null) {
+    updateMuteIcon(savedMuted === 'true');
+  }
+
+  // Load sync delay
+  const savedSyncDelay = localStorage.getItem(STORAGE_KEYS.SYNC_DELAY);
+  if (savedSyncDelay !== null) {
+    syncDelayInput.value = savedSyncDelay;
+  }
+}
+
+/**
+ * Save volume to localStorage
+ */
+function saveVolume(volume) {
+  localStorage.setItem(STORAGE_KEYS.VOLUME, volume.toString());
+}
+
+/**
+ * Save muted state to localStorage
+ */
+function saveMuted(muted) {
+  localStorage.setItem(STORAGE_KEYS.MUTED, muted.toString());
+}
+
+/**
+ * Save sync delay to localStorage
+ */
+function saveSyncDelay(delay) {
+  localStorage.setItem(STORAGE_KEYS.SYNC_DELAY, delay.toString());
+}
+
+/**
  * Connect to the Sendspin server
  */
 async function connect() {
-  const serverUrl = serverUrlInput.value.trim();
+  const rawUrl = serverUrlInput.value.trim();
 
-  if (!serverUrl) {
+  if (!rawUrl) {
     showToast('Please enter a server URL', 'error');
     serverUrlInput.focus();
     return;
   }
+
+  // Normalize the URL
+  const serverUrl = normalizeServerUrl(rawUrl);
+
+  // Update the input with normalized URL
+  serverUrlInput.value = serverUrl;
+  localStorage.setItem(STORAGE_KEYS.SERVER_URL, serverUrl);
 
   // Validate URL format
   try {
@@ -227,6 +341,10 @@ async function connect() {
     // Use media-element for mobile (better background playback support)
     const isMobile = isAndroid() || isIOS();
 
+    // Get saved settings
+    const savedVolume = parseInt(localStorage.getItem(STORAGE_KEYS.VOLUME) || '80', 10);
+    const savedSyncDelay = parseInt(localStorage.getItem(STORAGE_KEYS.SYNC_DELAY) || '0', 10);
+
     player = new SendspinPlayer({
       playerId: generatePlayerId(),
       baseUrl: serverUrl,
@@ -235,10 +353,18 @@ async function connect() {
       audioElement: isMobile ? audioElement : undefined,
       isAndroid: isAndroid(),
       useOutputLatencyCompensation: true,
+      syncDelay: savedSyncDelay,
       onStateChange,
     });
 
     await player.connect();
+
+    // Apply saved volume
+    player.setVolume(savedVolume);
+
+    // Apply saved muted state
+    const savedMuted = localStorage.getItem(STORAGE_KEYS.MUTED) === 'true';
+    player.setMuted(savedMuted);
 
     updateConnectionUI(true);
     showToast('Connected to server', 'success');
@@ -291,11 +417,14 @@ function toggleConnection() {
  * Copy shareable URL to clipboard
  */
 async function copyShareUrl() {
-  const serverUrl = serverUrlInput.value.trim();
-  if (!serverUrl) {
+  const rawUrl = serverUrlInput.value.trim();
+  if (!rawUrl) {
     showToast('Please enter a server URL first', 'error');
     return;
   }
+
+  // Normalize and use the server URL
+  const serverUrl = normalizeServerUrl(rawUrl);
 
   const url = new URL(window.location.href);
   url.search = '';
@@ -322,6 +451,7 @@ async function copyShareUrl() {
 function updateVolume() {
   const volume = parseInt(volumeSlider.value, 10);
   volumeValue.textContent = `${volume}%`;
+  saveVolume(volume);
 
   if (player) {
     player.setVolume(volume);
@@ -343,6 +473,12 @@ function toggleMute() {
     const newMuted = !player.muted;
     player.setMuted(newMuted);
     updateMuteIcon(newMuted);
+    saveMuted(newMuted);
+  } else {
+    // Toggle UI even when not connected
+    const currentMuted = muteIcon.textContent === '🔇';
+    updateMuteIcon(!currentMuted);
+    saveMuted(!currentMuted);
   }
 }
 
@@ -351,10 +487,13 @@ function toggleMute() {
  */
 function applySyncDelay() {
   const delay = parseInt(syncDelayInput.value, 10) || 0;
+  saveSyncDelay(delay);
 
   if (player) {
     player.setSyncDelay(delay);
     showToast(`Sync delay set to ${delay}ms`, 'success');
+  } else {
+    showToast(`Sync delay saved: ${delay}ms`, 'success');
   }
 }
 
@@ -362,19 +501,23 @@ function applySyncDelay() {
  * Initialize the application
  */
 function init() {
+  // Load saved settings first
+  loadSettings();
+
   // Load server URL from query params or localStorage
   const serverFromUrl = getServerFromUrl();
-  const serverFromStorage = localStorage.getItem('sendspin-server-url');
+  const serverFromStorage = localStorage.getItem(STORAGE_KEYS.SERVER_URL);
 
   if (serverFromUrl) {
-    serverUrlInput.value = serverFromUrl;
+    // Normalize the URL from query params
+    serverUrlInput.value = normalizeServerUrl(serverFromUrl);
   } else if (serverFromStorage) {
     serverUrlInput.value = serverFromStorage;
   }
 
   // Save server URL to localStorage when changed
   serverUrlInput.addEventListener('input', () => {
-    localStorage.setItem('sendspin-server-url', serverUrlInput.value);
+    localStorage.setItem(STORAGE_KEYS.SERVER_URL, serverUrlInput.value);
   });
 
   // Event listeners
@@ -407,6 +550,9 @@ function init() {
 
   console.log('Sendspin Sample Player initialized');
   console.log('Player ID:', generatePlayerId());
+  if (isLocalhost) {
+    console.log('Development mode: using local SDK build');
+  }
 }
 
 // Initialize when DOM is ready
