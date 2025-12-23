@@ -3,7 +3,12 @@ import { ProtocolHandler } from "./protocol-handler";
 import { StateManager } from "./state-manager";
 import { WebSocketManager } from "./websocket-manager";
 import { SendspinTimeFilter } from "./time-filter";
-import type { SendspinPlayerConfig, PlayerState, StreamFormat } from "./types";
+import type {
+  SendspinPlayerConfig,
+  PlayerState,
+  StreamFormat,
+  GoodbyeReason,
+} from "./types";
 
 export class SendspinPlayer {
   private wsManager: WebSocketManager;
@@ -93,8 +98,20 @@ export class SendspinPlayer {
     );
   }
 
-  // Disconnect from Sendspin server
-  disconnect(): void {
+  /**
+   * Disconnect from Sendspin server
+   * @param reason - Optional reason for disconnecting (default: 'shutdown')
+   *   - 'another_server': Switching to a different Sendspin server
+   *   - 'shutdown': Client is shutting down
+   *   - 'restart': Client is restarting and will reconnect
+   *   - 'user_request': User explicitly requested to disconnect
+   */
+  disconnect(reason: GoodbyeReason = "shutdown"): void {
+    // Send goodbye message if connected
+    if (this.wsManager.isConnected()) {
+      this.protocolHandler.sendGoodbye(reason);
+    }
+
     // Clear intervals
     this.stateManager.clearAllIntervals();
 

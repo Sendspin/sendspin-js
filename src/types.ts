@@ -7,6 +7,7 @@ export enum MessageType {
   SERVER_TIME = "server/time",
   CLIENT_STATE = "client/state",
   SERVER_STATE = "server/state",
+  CLIENT_GOODBYE = "client/goodbye",
   SERVER_COMMAND = "server/command",
   STREAM_START = "stream/start",
   STREAM_CLEAR = "stream/clear",
@@ -14,6 +15,19 @@ export enum MessageType {
   STREAM_END = "stream/end",
   GROUP_UPDATE = "group/update",
 }
+
+/**
+ * Reason for client disconnect.
+ * - 'another_server': Client is switching to a different Sendspin server
+ * - 'shutdown': Client is shutting down
+ * - 'restart': Client is restarting and will reconnect
+ * - 'user_request': User explicitly requested to disconnect
+ */
+export type GoodbyeReason =
+  | "another_server"
+  | "shutdown"
+  | "restart"
+  | "user_request";
 
 export interface ClientHello {
   type: MessageType.CLIENT_HELLO;
@@ -55,6 +69,13 @@ export interface ClientState {
       volume: number;
       muted: boolean;
     };
+  };
+}
+
+export interface ClientGoodbye {
+  type: MessageType.CLIENT_GOODBYE;
+  payload: {
+    reason: GoodbyeReason;
   };
 }
 
@@ -130,7 +151,7 @@ export type ServerMessage =
   | ServerCommand
   | GroupUpdate;
 
-export type ClientMessage = ClientHello | ClientTime | ClientState;
+export type ClientMessage = ClientHello | ClientTime | ClientState | ClientGoodbye;
 
 export type StreamFormat = {
   codec: string;

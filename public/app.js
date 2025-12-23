@@ -377,7 +377,8 @@ function disconnect() {
   }
 
   if (player) {
-    player.disconnect();
+    // Use 'user_request' reason when user explicitly clicks disconnect
+    player.disconnect("user_request");
     player = null;
   }
 
@@ -524,10 +525,10 @@ function init() {
     }
   });
 
-  // Cleanup on page unload
+  // Cleanup on page unload - use 'shutdown' reason (browser/tab closing)
   window.addEventListener("beforeunload", () => {
     if (player) {
-      player.disconnect();
+      player.disconnect("shutdown");
     }
   });
 
