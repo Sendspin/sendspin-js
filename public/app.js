@@ -87,49 +87,18 @@ function getServerFromUrl() {
 }
 
 /**
- * Normalize server URL to a valid HTTP(S) URL
- *
- * Handles various input formats:
- * - ws://host:port -> http://host:port
- * - wss://host:port -> https://host:port
- * - http://host:port -> http://host:port (unchanged)
- * - https://host:port -> https://host:port (unchanged)
- * - host:port -> http://host:port
- * - host -> http://host:8095 (default Sendspin port)
+ * Normalize server URL to ensure it has a protocol prefix
  */
 function normalizeServerUrl(input) {
   if (!input) return "";
 
-  let url = input.trim();
+  const url = input.trim();
 
-  // Convert WebSocket protocols to HTTP
-  if (url.startsWith("ws://")) {
-    url = "http://" + url.slice(5);
-  } else if (url.startsWith("wss://")) {
-    url = "https://" + url.slice(6);
-  } else if (!url.startsWith("http://") && !url.startsWith("https://")) {
-    // No protocol specified, add http://
-    url = "http://" + url;
+  if (!url.startsWith("http://") && !url.startsWith("https://")) {
+    return "http://" + url;
   }
 
-  // Parse the URL to check if port is specified
-  try {
-    const parsed = new URL(url);
-
-    // Add default port if not specified
-    if (!parsed.port && !input.includes(":" + parsed.port)) {
-      // Check if the original input had a port
-      const hostPart = input.replace(/^(wss?|https?):\/\//, "");
-      if (!hostPart.includes(":")) {
-        parsed.port = "8095";
-      }
-    }
-
-    return parsed.toString().replace(/\/$/, ""); // Remove trailing slash
-  } catch {
-    // If URL parsing fails, return the original with http prefix
-    return url;
-  }
+  return url;
 }
 
 /**
