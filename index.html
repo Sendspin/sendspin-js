@@ -42,9 +42,33 @@
           </div>
         </section>
 
-        <!-- Playback Controls -->
+        <!-- Server Controls -->
+        <section class="card" id="server-controls-section">
+          <h2>Server Controls</h2>
+          <div class="form-group">
+            <label>Transport</label>
+            <div class="transport-controls">
+              <button id="prev-btn" class="btn btn-icon" title="Previous">⏮</button>
+              <button id="play-btn" class="btn btn-icon btn-large" title="Play">▶</button>
+              <button id="pause-btn" class="btn btn-icon btn-large" title="Pause">⏸</button>
+              <button id="stop-btn" class="btn btn-icon" title="Stop">⏹</button>
+              <button id="next-btn" class="btn btn-icon" title="Next">⏭</button>
+            </div>
+            <div class="playback-options">
+              <button id="shuffle-btn" class="btn btn-secondary" title="Shuffle">🔀 Shuffle</button>
+              <button id="unshuffle-btn" class="btn btn-secondary" title="Unshuffle">🔀 Unshuffle</button>
+              <button id="repeat-off-btn" class="btn btn-secondary" title="Repeat Off">🔁 Repeat Off</button>
+              <button id="repeat-one-btn" class="btn btn-secondary" title="Repeat One">🔂 Repeat One</button>
+              <button id="repeat-all-btn" class="btn btn-secondary" title="Repeat All">🔁 Repeat All</button>
+              <button id="switch-group-btn" class="btn btn-secondary" title="Switch Group">📻 Switch Group</button>
+            </div>
+            <small>Send commands to the server (controls the audio source)</small>
+          </div>
+        </section>
+
+        <!-- Local Playback Controls -->
         <section class="card" id="controls-section">
-          <h2>Playback Controls</h2>
+          <h2>Local Controls</h2>
           <div class="volume-control">
             <label for="volume-slider">Volume</label>
             <div class="volume-row">
@@ -149,12 +173,21 @@ const player = new SendspinPlayer({
 // Connect to server
 await player.connect();
 
-// Control playback
+// Local volume control (affects this player only)
 player.setVolume(80);
 player.setMuted(false);
 
+// Send commands to server (controls the source)
+player.sendCommand('play');
+player.sendCommand('pause');
+player.sendCommand('next');
+player.sendCommand('previous');
+player.sendCommand('volume', { volume: 50 });
+player.sendCommand('mute', { mute: true });
+player.sendCommand('shuffle');
+player.sendCommand('repeat_all');
+
 // Disconnect with reason (optional)
-// Reasons: 'shutdown', 'user_request', 'restart', 'another_server'
 player.disconnect('user_request');</code></pre>
         </section>
       </main>

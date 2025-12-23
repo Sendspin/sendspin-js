@@ -7,6 +7,7 @@ export enum MessageType {
   SERVER_TIME = "server/time",
   CLIENT_STATE = "client/state",
   SERVER_STATE = "server/state",
+  CLIENT_COMMAND = "client/command",
   CLIENT_GOODBYE = "client/goodbye",
   SERVER_COMMAND = "server/command",
   STREAM_START = "stream/start",
@@ -28,6 +29,28 @@ export type GoodbyeReason =
   | "shutdown"
   | "restart"
   | "user_request";
+
+/**
+ * Map of controller commands to their required parameters.
+ * Commands with `void` require no parameters.
+ */
+export interface ControllerCommands {
+  play: void;
+  pause: void;
+  stop: void;
+  next: void;
+  previous: void;
+  volume: { volume: number };
+  mute: { mute: boolean };
+  repeat_off: void;
+  repeat_one: void;
+  repeat_all: void;
+  shuffle: void;
+  unshuffle: void;
+  switch: void;
+}
+
+export type ControllerCommand = keyof ControllerCommands;
 
 export interface ClientHello {
   type: MessageType.CLIENT_HELLO;
@@ -76,6 +99,17 @@ export interface ClientGoodbye {
   type: MessageType.CLIENT_GOODBYE;
   payload: {
     reason: GoodbyeReason;
+  };
+}
+
+export interface ClientCommand {
+  type: MessageType.CLIENT_COMMAND;
+  payload: {
+    controller: {
+      command: ControllerCommand;
+      volume?: number;
+      mute?: boolean;
+    };
   };
 }
 
@@ -155,6 +189,7 @@ export type ClientMessage =
   | ClientHello
   | ClientTime
   | ClientState
+  | ClientCommand
   | ClientGoodbye;
 
 export type StreamFormat = {

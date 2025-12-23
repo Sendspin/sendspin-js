@@ -32,6 +32,7 @@ const serverUrlInput = document.getElementById("server-url");
 const connectBtn = document.getElementById("connect-btn");
 const copyUrlBtn = document.getElementById("copy-url-btn");
 const controlsSection = document.getElementById("controls-section");
+const serverControlsSection = document.getElementById("server-controls-section");
 const volumeSlider = document.getElementById("volume-slider");
 const volumeValue = document.getElementById("volume-value");
 const muteBtn = document.getElementById("mute-btn");
@@ -39,6 +40,19 @@ const muteIcon = document.getElementById("mute-icon");
 const syncDelayInput = document.getElementById("sync-delay");
 const applySyncDelayBtn = document.getElementById("apply-sync-delay");
 const audioElement = document.getElementById("audio-element");
+
+// Transport control buttons
+const prevBtn = document.getElementById("prev-btn");
+const playBtn = document.getElementById("play-btn");
+const pauseBtn = document.getElementById("pause-btn");
+const stopBtn = document.getElementById("stop-btn");
+const nextBtn = document.getElementById("next-btn");
+const shuffleBtn = document.getElementById("shuffle-btn");
+const unshuffleBtn = document.getElementById("unshuffle-btn");
+const repeatOffBtn = document.getElementById("repeat-off-btn");
+const repeatOneBtn = document.getElementById("repeat-one-btn");
+const repeatAllBtn = document.getElementById("repeat-all-btn");
+const switchGroupBtn = document.getElementById("switch-group-btn");
 
 // Status elements
 const connectionStatus = document.getElementById("connection-status");
@@ -138,12 +152,14 @@ function updateConnectionUI(connected) {
     connectionStatus.textContent = "Connected";
     connectionStatus.className = "status-value connected";
     controlsSection.classList.add("enabled");
+    serverControlsSection.classList.add("enabled");
   } else {
     connectBtn.textContent = "Connect";
     connectBtn.classList.remove("connected");
     connectionStatus.textContent = "Disconnected";
     connectionStatus.className = "status-value disconnected";
     controlsSection.classList.remove("enabled");
+    serverControlsSection.classList.remove("enabled");
     resetStatusDisplay();
   }
   connectBtn.disabled = false;
@@ -509,6 +525,74 @@ function init() {
   volumeSlider.addEventListener("input", updateVolume);
   muteBtn.addEventListener("click", toggleMute);
   applySyncDelayBtn.addEventListener("click", applySyncDelay);
+
+  // Transport control event listeners
+  prevBtn.addEventListener("click", () => {
+    if (player) {
+      player.sendCommand("previous");
+      showToast("Previous");
+    }
+  });
+  playBtn.addEventListener("click", () => {
+    if (player) {
+      player.sendCommand("play");
+      showToast("Play");
+    }
+  });
+  pauseBtn.addEventListener("click", () => {
+    if (player) {
+      player.sendCommand("pause");
+      showToast("Pause");
+    }
+  });
+  stopBtn.addEventListener("click", () => {
+    if (player) {
+      player.sendCommand("stop");
+      showToast("Stop");
+    }
+  });
+  nextBtn.addEventListener("click", () => {
+    if (player) {
+      player.sendCommand("next");
+      showToast("Next");
+    }
+  });
+  shuffleBtn.addEventListener("click", () => {
+    if (player) {
+      player.sendCommand("shuffle");
+      showToast("Shuffle");
+    }
+  });
+  unshuffleBtn.addEventListener("click", () => {
+    if (player) {
+      player.sendCommand("unshuffle");
+      showToast("Unshuffle");
+    }
+  });
+  repeatOffBtn.addEventListener("click", () => {
+    if (player) {
+      player.sendCommand("repeat_off");
+      showToast("Repeat Off");
+    }
+  });
+  repeatOneBtn.addEventListener("click", () => {
+    if (player) {
+      player.sendCommand("repeat_one");
+      showToast("Repeat One");
+    }
+  });
+  repeatAllBtn.addEventListener("click", () => {
+    if (player) {
+      player.sendCommand("repeat_all");
+      showToast("Repeat All");
+    }
+  });
+  switchGroupBtn.addEventListener("click", () => {
+    if (player) {
+      player.sendCommand("switch");
+      showToast("Switch Group");
+    }
+  });
 
   // Handle Enter key in server URL input
   serverUrlInput.addEventListener("keydown", (e) => {
