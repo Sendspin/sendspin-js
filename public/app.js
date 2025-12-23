@@ -32,7 +32,9 @@ const serverUrlInput = document.getElementById("server-url");
 const connectBtn = document.getElementById("connect-btn");
 const copyUrlBtn = document.getElementById("copy-url-btn");
 const controlsSection = document.getElementById("controls-section");
-const serverControlsSection = document.getElementById("server-controls-section");
+const serverControlsSection = document.getElementById(
+  "server-controls-section",
+);
 const volumeSlider = document.getElementById("volume-slider");
 const volumeValue = document.getElementById("volume-value");
 const muteBtn = document.getElementById("mute-btn");
