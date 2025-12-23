@@ -1,6 +1,9 @@
 :root {
-  --primary-color: #4a9eff;
-  --primary-hover: #3a8eef;
+  --ha-blue: #03a9f4;
+  --ha-blue-dark: #0288d1;
+  --ha-blue-light: #4fc3f7;
+  --primary-color: var(--ha-blue);
+  --primary-hover: var(--ha-blue-dark);
   --success-color: #22c55e;
   --warning-color: #f59e0b;
   --error-color: #ef4444;
@@ -40,7 +43,7 @@ header {
 header h1 {
   font-size: 2rem;
   margin-bottom: 0.5rem;
-  background: linear-gradient(135deg, var(--primary-color), #a855f7);
+  background: linear-gradient(135deg, var(--ha-blue-light), var(--ha-blue));
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
