@@ -27,7 +27,10 @@ function applyDiff<T extends object>(existing: T, diff: Partial<T>): T {
         existingValue !== null &&
         !Array.isArray(existingValue)
       ) {
-        result[key] = applyDiff(existingValue as object, value as object) as T[keyof T];
+        result[key] = applyDiff(
+          existingValue as object,
+          value as object,
+        ) as T[keyof T];
       } else {
         result[key] = value as T[keyof T];
       }
