@@ -6,11 +6,11 @@
  */
 
 // Detect if running on localhost for development
-const isLocalhost = false; // temp disabled window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
 
 // Import the SDK from local build (development) or unpkg CDN (production)
 const sdkPath = isLocalhost
-  ? "../dist/index.js"
+  ? "./dev/index.js"
   : "https://unpkg.com/@music-assistant/sendspin-js@latest/dist/index.js";
 const { SendspinPlayer } = await import(sdkPath);
 
