@@ -162,6 +162,8 @@ export class SendspinPlayer {
    * Send a controller command to the server.
    * Use this for playback control when the server manages the audio source.
    *
+   * @throws Error if the command is not supported by the server
+   *
    * @example
    * // Simple commands (no parameters)
    * player.sendCommand('play');
@@ -184,6 +186,14 @@ export class SendspinPlayer {
     command: T,
     params: ControllerCommands[T],
   ): void {
+    const supportedCommands =
+      this.stateManager.serverState.controller?.supported_commands;
+    if (supportedCommands && !supportedCommands.includes(command)) {
+      throw new Error(
+        `Command '${command}' is not supported by the server. ` +
+          `Supported commands: ${supportedCommands.join(", ")}`,
+      );
+    }
     this.protocolHandler.sendCommand(command, params);
   }
 

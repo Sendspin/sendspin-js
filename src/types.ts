@@ -127,9 +127,40 @@ export interface ServerTime {
   };
 }
 
+export interface ServerStateMetadata {
+  title?: string | null;
+  artist?: string | null;
+  album?: string | null;
+  artwork_url?: string | null;
+  year?: number | null;
+  track_number?: number | null;
+  progress?: {
+    position_ms: number;
+    duration_ms: number;
+  } | null;
+  repeat?: "off" | "one" | "all" | null;
+  shuffle?: boolean | null;
+}
+
+export interface ServerStateController {
+  supported_commands?: string[];
+  volume?: number;
+  muted?: boolean;
+}
+
+export interface ServerStatePlayer {
+  // Player-specific state from server
+}
+
+export interface ServerStatePayload {
+  metadata?: ServerStateMetadata;
+  controller?: ServerStateController;
+  player?: ServerStatePlayer;
+}
+
 export interface ServerState {
   type: MessageType.SERVER_STATE;
-  payload: Record<string, unknown>;
+  payload: ServerStatePayload;
 }
 
 export interface StreamStart {
@@ -170,9 +201,15 @@ export interface ServerCommand {
   };
 }
 
+export interface GroupUpdatePayload {
+  playback_state?: "playing" | "stopped";
+  group_id?: string;
+  group_name?: string;
+}
+
 export interface GroupUpdate {
   type: MessageType.GROUP_UPDATE;
-  payload: Record<string, unknown>;
+  payload: GroupUpdatePayload;
 }
 
 export type ServerMessage =
@@ -283,12 +320,16 @@ export interface SendspinPlayerConfig {
    */
   useOutputLatencyCompensation?: boolean;
 
-  /** Callback when player state changes */
+  /** Callback when player state changes (local or from server) */
   onStateChange?: (state: {
     isPlaying: boolean;
     volume: number;
     muted: boolean;
     playerState: PlayerState;
+    /** Cached server state (merged from server/state messages) */
+    serverState: ServerStatePayload;
+    /** Cached group state (merged from group/update messages) */
+    groupState: GroupUpdatePayload;
   }) => void;
 
   /**
