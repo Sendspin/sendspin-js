@@ -151,7 +151,11 @@ export type ServerMessage =
   | ServerCommand
   | GroupUpdate;
 
-export type ClientMessage = ClientHello | ClientTime | ClientState | ClientGoodbye;
+export type ClientMessage =
+  | ClientHello
+  | ClientTime
+  | ClientState
+  | ClientGoodbye;
 
 export type StreamFormat = {
   codec: string;

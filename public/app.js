@@ -377,7 +377,6 @@ function disconnect() {
   }
 
   if (player) {
-    // Use 'user_request' reason when user explicitly clicks disconnect
     player.disconnect("user_request");
     player = null;
   }
@@ -525,7 +524,7 @@ function init() {
     }
   });
 
-  // Cleanup on page unload - use 'shutdown' reason (browser/tab closing)
+  // Cleanup on page unload
   window.addEventListener("beforeunload", () => {
     if (player) {
       player.disconnect("shutdown");
