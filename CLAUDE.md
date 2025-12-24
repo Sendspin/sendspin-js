@@ -76,6 +76,6 @@ When adding new features to the SDK, **always update the sample player** to demo
 
 1. Add UI controls in `index.html` if the feature is user-facing
 2. Implement the feature usage in `public/app.js`
-3. Update the code example in `index.html` (the `<pre><code>` block at the bottom) to show API usage
+3. Update the code example in `README.md` to show API usage
 
 This ensures the sample player serves as comprehensive documentation for all SDK capabilities.
