@@ -113,7 +113,15 @@ function getServerFromUrl() {
 }
 
 /**
- * Normalize server URL to ensure it has a protocol prefix
+ * Check if the page is served over HTTPS
+ */
+function isSecureContext() {
+  return window.location.protocol === "https:";
+}
+
+/**
+ * Normalize server URL to ensure it has a protocol prefix.
+ * When running on HTTPS, defaults to HTTPS to avoid mixed content issues.
  */
 function normalizeServerUrl(input) {
   if (!input) return "";
@@ -121,10 +129,19 @@ function normalizeServerUrl(input) {
   const url = input.trim();
 
   if (!url.startsWith("http://") && !url.startsWith("https://")) {
-    return "http://" + url;
+    // Default to HTTPS when page is served over HTTPS to avoid mixed content
+    const protocol = isSecureContext() ? "https://" : "http://";
+    return protocol + url;
   }
 
   return url;
+}
+
+/**
+ * Check if URL would cause mixed content issues (HTTP URL on HTTPS page)
+ */
+function isMixedContentUrl(url) {
+  return isSecureContext() && url.startsWith("http://");
 }
 
 /**
@@ -367,6 +384,16 @@ async function connect() {
     new URL(serverUrl);
   } catch {
     showToast("Invalid URL format", "error");
+    serverUrlInput.focus();
+    return;
+  }
+
+  // Check for mixed content (HTTP URL on HTTPS page)
+  if (isMixedContentUrl(serverUrl)) {
+    showToast(
+      "Cannot connect to HTTP server from HTTPS page. Browsers block mixed content for security. Use an HTTPS server URL instead.",
+      "error",
+    );
     serverUrlInput.focus();
     return;
   }
