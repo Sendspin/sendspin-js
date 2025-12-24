@@ -228,27 +228,20 @@ header h1 {
 #now-playing-section,
 #server-controls-section,
 #controls-section,
-#status-section {
+#status-section,
+#connected-bar {
   display: none;
 }
 
 body.connected #now-playing-section,
 body.connected #server-controls-section,
 body.connected #controls-section,
-body.connected #status-section {
+body.connected #status-section,
+body.connected #connected-bar {
   display: block;
 }
 
-/* Share URL button hidden until connected */
-#copy-url-btn {
-  display: none;
-}
-
-body.connected #copy-url-btn {
-  display: inline-flex;
-}
-
-/* Compact connection card when not connected */
+/* Connection section: show when disconnected, hide when connected */
 #connection-section {
   max-width: 400px;
   margin-left: auto;
@@ -256,32 +249,53 @@ body.connected #copy-url-btn {
 }
 
 body.connected #connection-section {
-  max-width: none;
+  display: none;
 }
 
-/* Inline connection form when connected */
-body.connected #connection-section .form-group {
+/* Connected status bar */
+.connected-bar-content {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.connected-info {
   display: flex;
   align-items: center;
   gap: 0.75rem;
-  margin-bottom: 0;
-}
-
-body.connected #connection-section .form-group label,
-body.connected #connection-section .form-group small {
-  display: none;
-}
-
-body.connected #connection-section .form-group input {
+  min-width: 0;
   flex: 1;
 }
 
-body.connected #connection-section .button-group {
-  margin-top: 0;
+.connected-indicator {
+  width: 10px;
+  height: 10px;
+  background-color: var(--success-color);
+  border-radius: 50%;
+  flex-shrink: 0;
+  box-shadow: 0 0 8px var(--success-color);
 }
 
-body.connected #connection-section h2 {
-  display: none;
+.connected-server-url {
+  font-family: "Monaco", "Menlo", "Ubuntu Mono", monospace;
+  font-size: 0.9rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.connected-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+
+.connected-actions .btn {
+  padding: 0.5rem 1rem;
+  font-size: 0.9rem;
 }
 
 .volume-control {

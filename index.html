@@ -20,7 +20,7 @@
       </header>
 
       <main>
-        <!-- Connection Section -->
+        <!-- Connection Section (disconnected state) -->
         <section class="card" id="connection-section">
           <h2>Server Connection</h2>
           <div class="form-group">
@@ -36,9 +36,20 @@
           </div>
           <div class="button-group">
             <button id="connect-btn" class="btn btn-primary">Connect</button>
-            <button id="copy-url-btn" class="btn btn-secondary">
-              Copy Share URL
-            </button>
+          </div>
+        </section>
+
+        <!-- Connected Status Bar -->
+        <section class="card" id="connected-bar">
+          <div class="connected-bar-content">
+            <div class="connected-info">
+              <span class="connected-indicator"></span>
+              <span id="connected-server-url" class="connected-server-url"></span>
+            </div>
+            <div class="connected-actions">
+              <button id="copy-url-btn" class="btn btn-secondary">Share</button>
+              <button id="disconnect-btn" class="btn btn-primary connected">Disconnect</button>
+            </div>
           </div>
         </section>
 

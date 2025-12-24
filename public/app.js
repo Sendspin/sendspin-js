@@ -30,11 +30,9 @@ const STORAGE_KEYS = {
 // DOM Elements
 const serverUrlInput = document.getElementById("server-url");
 const connectBtn = document.getElementById("connect-btn");
+const disconnectBtn = document.getElementById("disconnect-btn");
 const copyUrlBtn = document.getElementById("copy-url-btn");
-const controlsSection = document.getElementById("controls-section");
-const serverControlsSection = document.getElementById(
-  "server-controls-section",
-);
+const connectedServerUrl = document.getElementById("connected-server-url");
 const volumeSlider = document.getElementById("volume-slider");
 const volumeValue = document.getElementById("volume-value");
 const muteBtn = document.getElementById("mute-btn");
@@ -172,17 +170,15 @@ function showToast(message, type = "info") {
 /**
  * Update UI based on connection state
  */
-function updateConnectionUI(connected) {
+function updateConnectionUI(connected, serverUrl = "") {
   if (connected) {
     document.body.classList.add("connected");
-    connectBtn.textContent = "Disconnect";
-    connectBtn.classList.add("connected");
+    connectedServerUrl.textContent = serverUrl;
     connectionStatus.textContent = "Connected";
     connectionStatus.className = "status-value connected";
   } else {
     document.body.classList.remove("connected");
-    connectBtn.textContent = "Connect";
-    connectBtn.classList.remove("connected");
+    connectedServerUrl.textContent = "";
     connectionStatus.textContent = "Disconnected";
     connectionStatus.className = "status-value disconnected";
     resetStatusDisplay();
@@ -436,7 +432,7 @@ async function connect() {
     const savedMuted = localStorage.getItem(STORAGE_KEYS.MUTED) === "true";
     player.setMuted(savedMuted);
 
-    updateConnectionUI(true);
+    updateConnectionUI(true, serverUrl);
     showToast("Connected to server", "success");
 
     // Start status update interval
@@ -473,28 +469,15 @@ function disconnect() {
 }
 
 /**
- * Toggle connection state
- */
-function toggleConnection() {
-  if (player?.isConnected) {
-    disconnect();
-  } else {
-    connect();
-  }
-}
-
-/**
  * Copy shareable URL to clipboard
  */
 async function copyShareUrl() {
-  const rawUrl = serverUrlInput.value.trim();
-  if (!rawUrl) {
-    showToast("Please enter a server URL first", "error");
+  // Get server URL from localStorage (more reliable when input is hidden)
+  const serverUrl = localStorage.getItem(STORAGE_KEYS.SERVER_URL);
+  if (!serverUrl) {
+    showToast("No server URL to share", "error");
     return;
   }
-
-  // Normalize and use the server URL
-  const serverUrl = normalizeServerUrl(rawUrl);
 
   const url = new URL(window.location.href);
   url.search = "";
@@ -591,7 +574,8 @@ function init() {
   });
 
   // Event listeners
-  connectBtn.addEventListener("click", toggleConnection);
+  connectBtn.addEventListener("click", connect);
+  disconnectBtn.addEventListener("click", disconnect);
   copyUrlBtn.addEventListener("click", copyShareUrl);
   volumeSlider.addEventListener("input", updateVolume);
   muteBtn.addEventListener("click", toggleMute);
@@ -668,7 +652,7 @@ function init() {
   // Handle Enter key in server URL input
   serverUrlInput.addEventListener("keydown", (e) => {
     if (e.key === "Enter") {
-      toggleConnection();
+      connect();
     }
   });
 
