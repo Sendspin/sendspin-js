@@ -688,6 +688,14 @@ function init() {
     }
   });
 
+  // Show HTTPS hint when page is served over HTTPS
+  if (isSecureContext()) {
+    const hint = document.getElementById("server-url-hint");
+    if (hint) {
+      hint.textContent = "HTTPS server URL required (browser blocks HTTP from HTTPS pages)";
+    }
+  }
+
   console.log("Sendspin Sample Player initialized");
   console.log("Player ID:", generatePlayerId());
   if (isLocalhost) {
