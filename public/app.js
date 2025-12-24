@@ -40,19 +40,10 @@ const muteIcon = document.getElementById("mute-icon");
 const syncDelayInput = document.getElementById("sync-delay");
 const applySyncDelayBtn = document.getElementById("apply-sync-delay");
 const audioElement = document.getElementById("audio-element");
-
-// Transport control buttons
-const prevBtn = document.getElementById("prev-btn");
-const playBtn = document.getElementById("play-btn");
-const pauseBtn = document.getElementById("pause-btn");
-const stopBtn = document.getElementById("stop-btn");
-const nextBtn = document.getElementById("next-btn");
-const shuffleBtn = document.getElementById("shuffle-btn");
-const unshuffleBtn = document.getElementById("unshuffle-btn");
-const repeatOffBtn = document.getElementById("repeat-off-btn");
-const repeatOneBtn = document.getElementById("repeat-one-btn");
-const repeatAllBtn = document.getElementById("repeat-all-btn");
-const switchGroupBtn = document.getElementById("switch-group-btn");
+const groupVolumeSlider = document.getElementById("group-volume-slider");
+const groupVolumeValue = document.getElementById("group-volume-value");
+const groupMuteBtn = document.getElementById("group-mute-btn");
+const groupMuteIcon = document.getElementById("group-mute-icon");
 
 // Status elements
 const connectionStatus = document.getElementById("connection-status");
@@ -83,7 +74,7 @@ function generatePlayerId() {
   const stored = localStorage.getItem(STORAGE_KEYS.PLAYER_ID);
   if (stored) return stored;
 
-  const id = "web-player-" + Math.random().toString(36).substring(2, 10);
+  const id = "sendspin-js-demo-" + Math.random().toString(36).substring(2, 10);
   localStorage.setItem(STORAGE_KEYS.PLAYER_ID, id);
   return id;
 }
@@ -127,9 +118,8 @@ function normalizeServerUrl(input) {
   const url = input.trim();
 
   if (!url.startsWith("http://") && !url.startsWith("https://")) {
-    // Default to HTTPS when page is served over HTTPS to avoid mixed content
-    const protocol = isSecureContext() ? "https://" : "http://";
-    return protocol + url;
+    // If user forgot protocol, prefix based on current page protocol
+    return location.protocol + "//" + url;
   }
 
   return url;
@@ -198,6 +188,7 @@ function updateConnectionUI(connected, serverUrl = "") {
     resetStatusDisplay();
   }
   connectBtn.disabled = false;
+  connectBtn.textContent = "Connect";
 }
 
 /**
@@ -213,6 +204,8 @@ function resetStatusDisplay() {
   syncError.textContent = "-";
   outputLatency.textContent = "-";
   resyncCount.textContent = "-";
+  groupVolumeValue.textContent = "-";
+  groupMuteIcon.textContent = "🔊";
 }
 
 /**
@@ -292,6 +285,11 @@ function onStateChange(state) {
   if (state.groupState) {
     updateGroupInfo(state.groupState);
   }
+
+  // Update group volume from controller state
+  if (state.serverState?.controller) {
+    updateGroupVolume(state.serverState.controller);
+  }
 }
 
 /**
@@ -318,6 +316,19 @@ function updateNowPlaying(metadata) {
  */
 function updateGroupInfo(group) {
   groupName.textContent = group.group_name || "";
+}
+
+/**
+ * Update group volume display from controller state
+ */
+function updateGroupVolume(controller) {
+  if (controller.volume !== undefined) {
+    groupVolumeSlider.value = controller.volume;
+    groupVolumeValue.textContent = `${controller.volume}%`;
+  }
+  if (controller.muted !== undefined) {
+    groupMuteIcon.textContent = controller.muted ? "🔇" : "🔊";
+  }
 }
 
 /**
@@ -576,51 +587,22 @@ function init() {
   volumeSlider.addEventListener("input", updateVolume);
   muteBtn.addEventListener("click", toggleMute);
   applySyncDelayBtn.addEventListener("click", applySyncDelay);
+  groupVolumeSlider.addEventListener("input", () => {
+    player.sendCommand("volume", {
+      volume: parseInt(groupVolumeSlider.value, 10),
+    });
+  });
+  groupMuteBtn.addEventListener("click", () => {
+    const currentMuted = groupMuteIcon.textContent === "🔇";
+    player.sendCommand("mute", { mute: !currentMuted });
+  });
 
   // Transport control event listeners
-  prevBtn.addEventListener("click", () => {
-    player.sendCommand("previous");
-    showToast("Previous");
-  });
-  playBtn.addEventListener("click", () => {
-    player.sendCommand("play");
-    showToast("Play");
-  });
-  pauseBtn.addEventListener("click", () => {
-    player.sendCommand("pause");
-    showToast("Pause");
-  });
-  stopBtn.addEventListener("click", () => {
-    player.sendCommand("stop");
-    showToast("Stop");
-  });
-  nextBtn.addEventListener("click", () => {
-    player.sendCommand("next");
-    showToast("Next");
-  });
-  shuffleBtn.addEventListener("click", () => {
-    player.sendCommand("shuffle");
-    showToast("Shuffle");
-  });
-  unshuffleBtn.addEventListener("click", () => {
-    player.sendCommand("unshuffle");
-    showToast("Unshuffle");
-  });
-  repeatOffBtn.addEventListener("click", () => {
-    player.sendCommand("repeat_off");
-    showToast("Repeat Off");
-  });
-  repeatOneBtn.addEventListener("click", () => {
-    player.sendCommand("repeat_one");
-    showToast("Repeat One");
-  });
-  repeatAllBtn.addEventListener("click", () => {
-    player.sendCommand("repeat_all");
-    showToast("Repeat All");
-  });
-  switchGroupBtn.addEventListener("click", () => {
-    player.sendCommand("switch");
-    showToast("Switch Group");
+  document.querySelectorAll(".transport-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      player.sendCommand(btn.dataset.command);
+      showToast(btn.title);
+    });
   });
 
   // Handle Enter key in server URL input

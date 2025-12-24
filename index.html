@@ -52,11 +52,16 @@
           <div class="connected-bar-content">
             <div class="connected-info">
               <span class="connected-indicator"></span>
-              <span id="connected-server-url" class="connected-server-url"></span>
+              <span
+                id="connected-server-url"
+                class="connected-server-url"
+              ></span>
             </div>
             <div class="connected-actions">
               <button id="copy-url-btn" class="btn btn-secondary">Share</button>
-              <button id="disconnect-btn" class="btn btn-primary connected">Disconnect</button>
+              <button id="disconnect-btn" class="btn btn-primary connected">
+                Disconnect
+              </button>
             </div>
           </div>
         </section>
@@ -82,65 +87,82 @@
         <section class="card" id="server-controls-section">
           <h2>Server Controls</h2>
           <div class="form-group">
-            <label>Transport</label>
             <div class="transport-controls">
-              <button id="prev-btn" class="btn btn-icon" title="Previous">
+              <button
+                class="btn btn-icon transport-btn"
+                data-command="previous"
+                title="Previous"
+              >
                 ⏮
               </button>
-              <button id="play-btn" class="btn btn-icon btn-large" title="Play">
+              <button
+                class="btn btn-icon btn-large transport-btn"
+                data-command="play"
+                title="Play"
+              >
                 ▶
               </button>
               <button
-                id="pause-btn"
-                class="btn btn-icon btn-large"
+                class="btn btn-icon btn-large transport-btn"
+                data-command="pause"
                 title="Pause"
               >
                 ⏸
               </button>
-              <button id="stop-btn" class="btn btn-icon" title="Stop">⏹</button>
-              <button id="next-btn" class="btn btn-icon" title="Next">
+              <button
+                class="btn btn-icon transport-btn"
+                data-command="stop"
+                title="Stop"
+              >
+                ⏹
+              </button>
+              <button
+                class="btn btn-icon transport-btn"
+                data-command="next"
+                title="Next"
+              >
                 ⏭
               </button>
             </div>
             <div class="playback-options">
               <button
-                id="shuffle-btn"
-                class="btn btn-secondary"
+                class="btn btn-secondary transport-btn"
+                data-command="shuffle"
                 title="Shuffle"
               >
                 🔀 Shuffle
               </button>
               <button
-                id="unshuffle-btn"
-                class="btn btn-secondary"
+                class="btn btn-secondary transport-btn"
+                data-command="unshuffle"
                 title="Unshuffle"
               >
                 🔀 Unshuffle
               </button>
               <button
-                id="repeat-off-btn"
-                class="btn btn-secondary"
+                class="btn btn-secondary transport-btn"
+                data-command="repeat_off"
                 title="Repeat Off"
               >
                 🔁 Repeat Off
               </button>
               <button
-                id="repeat-one-btn"
-                class="btn btn-secondary"
+                class="btn btn-secondary transport-btn"
+                data-command="repeat_one"
                 title="Repeat One"
               >
                 🔂 Repeat One
               </button>
               <button
-                id="repeat-all-btn"
-                class="btn btn-secondary"
+                class="btn btn-secondary transport-btn"
+                data-command="repeat_all"
                 title="Repeat All"
               >
                 🔁 Repeat All
               </button>
               <button
-                id="switch-group-btn"
-                class="btn btn-secondary"
+                class="btn btn-secondary transport-btn"
+                data-command="switch"
                 title="Switch Group"
               >
                 📻 Switch Group
@@ -149,6 +171,26 @@
             <small
               >Send commands to the server (controls the audio source)</small
             >
+          </div>
+          <div class="volume-control">
+            <label>Group Volume</label>
+            <div class="volume-row">
+              <button
+                id="group-mute-btn"
+                class="btn btn-icon"
+                title="Toggle Group Mute"
+              >
+                <span id="group-mute-icon">🔊</span>
+              </button>
+              <input
+                type="range"
+                id="group-volume-slider"
+                min="0"
+                max="100"
+                value="80"
+              />
+              <span id="group-volume-value">-</span>
+            </div>
           </div>
         </section>
 
@@ -236,14 +278,11 @@
             </div>
           </div>
         </section>
-
       </main>
 
       <footer>
         <p>
-          <a
-            href="https://github.com/sendspin/sendspin-js"
-            target="_blank"
+          <a href="https://github.com/sendspin/sendspin-js" target="_blank"
             >GitHub</a
           >
           |
