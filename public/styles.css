@@ -224,17 +224,64 @@ header h1 {
   cursor: not-allowed;
 }
 
+/* Hidden sections until connected */
+#now-playing-section,
+#server-controls-section,
 #controls-section,
-#server-controls-section {
-  opacity: 0.5;
-  pointer-events: none;
-  transition: opacity 0.3s;
+#status-section {
+  display: none;
 }
 
-#controls-section.enabled,
-#server-controls-section.enabled {
-  opacity: 1;
-  pointer-events: auto;
+body.connected #now-playing-section,
+body.connected #server-controls-section,
+body.connected #controls-section,
+body.connected #status-section {
+  display: block;
+}
+
+/* Share URL button hidden until connected */
+#copy-url-btn {
+  display: none;
+}
+
+body.connected #copy-url-btn {
+  display: inline-flex;
+}
+
+/* Compact connection card when not connected */
+#connection-section {
+  max-width: 400px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+body.connected #connection-section {
+  max-width: none;
+}
+
+/* Inline connection form when connected */
+body.connected #connection-section .form-group {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0;
+}
+
+body.connected #connection-section .form-group label,
+body.connected #connection-section .form-group small {
+  display: none;
+}
+
+body.connected #connection-section .form-group input {
+  flex: 1;
+}
+
+body.connected #connection-section .button-group {
+  margin-top: 0;
+}
+
+body.connected #connection-section h2 {
+  display: none;
 }
 
 .volume-control {

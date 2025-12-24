@@ -174,19 +174,17 @@ function showToast(message, type = "info") {
  */
 function updateConnectionUI(connected) {
   if (connected) {
+    document.body.classList.add("connected");
     connectBtn.textContent = "Disconnect";
     connectBtn.classList.add("connected");
     connectionStatus.textContent = "Connected";
     connectionStatus.className = "status-value connected";
-    controlsSection.classList.add("enabled");
-    serverControlsSection.classList.add("enabled");
   } else {
+    document.body.classList.remove("connected");
     connectBtn.textContent = "Connect";
     connectBtn.classList.remove("connected");
     connectionStatus.textContent = "Disconnected";
     connectionStatus.className = "status-value disconnected";
-    controlsSection.classList.remove("enabled");
-    serverControlsSection.classList.remove("enabled");
     resetStatusDisplay();
   }
   connectBtn.disabled = false;
