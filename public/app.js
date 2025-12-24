@@ -30,11 +30,9 @@ const STORAGE_KEYS = {
 // DOM Elements
 const serverUrlInput = document.getElementById("server-url");
 const connectBtn = document.getElementById("connect-btn");
+const disconnectBtn = document.getElementById("disconnect-btn");
 const copyUrlBtn = document.getElementById("copy-url-btn");
-const controlsSection = document.getElementById("controls-section");
-const serverControlsSection = document.getElementById(
-  "server-controls-section",
-);
+const connectedServerUrl = document.getElementById("connected-server-url");
 const volumeSlider = document.getElementById("volume-slider");
 const volumeValue = document.getElementById("volume-value");
 const muteBtn = document.getElementById("mute-btn");
@@ -42,19 +40,10 @@ const muteIcon = document.getElementById("mute-icon");
 const syncDelayInput = document.getElementById("sync-delay");
 const applySyncDelayBtn = document.getElementById("apply-sync-delay");
 const audioElement = document.getElementById("audio-element");
-
-// Transport control buttons
-const prevBtn = document.getElementById("prev-btn");
-const playBtn = document.getElementById("play-btn");
-const pauseBtn = document.getElementById("pause-btn");
-const stopBtn = document.getElementById("stop-btn");
-const nextBtn = document.getElementById("next-btn");
-const shuffleBtn = document.getElementById("shuffle-btn");
-const unshuffleBtn = document.getElementById("unshuffle-btn");
-const repeatOffBtn = document.getElementById("repeat-off-btn");
-const repeatOneBtn = document.getElementById("repeat-one-btn");
-const repeatAllBtn = document.getElementById("repeat-all-btn");
-const switchGroupBtn = document.getElementById("switch-group-btn");
+const groupVolumeSlider = document.getElementById("group-volume-slider");
+const groupVolumeValue = document.getElementById("group-volume-value");
+const groupMuteBtn = document.getElementById("group-mute-btn");
+const groupMuteIcon = document.getElementById("group-mute-icon");
 
 // Status elements
 const connectionStatus = document.getElementById("connection-status");
@@ -85,7 +74,7 @@ function generatePlayerId() {
   const stored = localStorage.getItem(STORAGE_KEYS.PLAYER_ID);
   if (stored) return stored;
 
-  const id = "web-player-" + Math.random().toString(36).substring(2, 10);
+  const id = "sendspin-js-demo-" + Math.random().toString(36).substring(2, 10);
   localStorage.setItem(STORAGE_KEYS.PLAYER_ID, id);
   return id;
 }
@@ -113,7 +102,15 @@ function getServerFromUrl() {
 }
 
 /**
- * Normalize server URL to ensure it has a protocol prefix
+ * Check if the page is served over HTTPS
+ */
+function isSecureContext() {
+  return window.location.protocol === "https:";
+}
+
+/**
+ * Normalize server URL to ensure it has a protocol prefix.
+ * When running on HTTPS, defaults to HTTPS to avoid mixed content issues.
  */
 function normalizeServerUrl(input) {
   if (!input) return "";
@@ -121,10 +118,32 @@ function normalizeServerUrl(input) {
   const url = input.trim();
 
   if (!url.startsWith("http://") && !url.startsWith("https://")) {
-    return "http://" + url;
+    // If user forgot protocol, prefix based on current page protocol
+    return location.protocol + "//" + url;
   }
 
   return url;
+}
+
+/**
+ * Check if URL would cause mixed content issues (HTTP URL on HTTPS page)
+ * Note: localhost is considered a secure context, so HTTP to localhost is allowed
+ */
+function isMixedContentUrl(url) {
+  if (!isSecureContext() || !url.startsWith("http://")) {
+    return false;
+  }
+  // localhost is a secure context, so HTTP is allowed
+  try {
+    const parsed = new URL(url);
+    const host = parsed.hostname;
+    if (host === "localhost" || host === "127.0.0.1" || host === "::1") {
+      return false;
+    }
+  } catch {
+    // Invalid URL, let it fail later
+  }
+  return true;
 }
 
 /**
@@ -155,24 +174,21 @@ function showToast(message, type = "info") {
 /**
  * Update UI based on connection state
  */
-function updateConnectionUI(connected) {
+function updateConnectionUI(connected, serverUrl = "") {
   if (connected) {
-    connectBtn.textContent = "Disconnect";
-    connectBtn.classList.add("connected");
+    document.body.classList.add("connected");
+    connectedServerUrl.textContent = serverUrl;
     connectionStatus.textContent = "Connected";
     connectionStatus.className = "status-value connected";
-    controlsSection.classList.add("enabled");
-    serverControlsSection.classList.add("enabled");
   } else {
-    connectBtn.textContent = "Connect";
-    connectBtn.classList.remove("connected");
+    document.body.classList.remove("connected");
+    connectedServerUrl.textContent = "";
     connectionStatus.textContent = "Disconnected";
     connectionStatus.className = "status-value disconnected";
-    controlsSection.classList.remove("enabled");
-    serverControlsSection.classList.remove("enabled");
     resetStatusDisplay();
   }
   connectBtn.disabled = false;
+  connectBtn.textContent = "Connect";
 }
 
 /**
@@ -188,14 +204,14 @@ function resetStatusDisplay() {
   syncError.textContent = "-";
   outputLatency.textContent = "-";
   resyncCount.textContent = "-";
+  groupVolumeValue.textContent = "-";
+  groupMuteIcon.textContent = "🔊";
 }
 
 /**
  * Update status display with current player info
  */
 function updateStatusDisplay() {
-  if (!player) return;
-
   // Playback status
   if (player.isPlaying) {
     playbackStatus.textContent = "Playing";
@@ -269,6 +285,11 @@ function onStateChange(state) {
   if (state.groupState) {
     updateGroupInfo(state.groupState);
   }
+
+  // Update group volume from controller state
+  if (state.serverState?.controller) {
+    updateGroupVolume(state.serverState.controller);
+  }
 }
 
 /**
@@ -295,6 +316,19 @@ function updateNowPlaying(metadata) {
  */
 function updateGroupInfo(group) {
   groupName.textContent = group.group_name || "";
+}
+
+/**
+ * Update group volume display from controller state
+ */
+function updateGroupVolume(controller) {
+  if (controller.volume !== undefined) {
+    groupVolumeSlider.value = controller.volume;
+    groupVolumeValue.textContent = `${controller.volume}%`;
+  }
+  if (controller.muted !== undefined) {
+    groupMuteIcon.textContent = controller.muted ? "🔇" : "🔊";
+  }
 }
 
 /**
@@ -371,6 +405,16 @@ async function connect() {
     return;
   }
 
+  // Check for mixed content (HTTP URL on HTTPS page)
+  if (isMixedContentUrl(serverUrl)) {
+    showToast(
+      "Cannot connect to HTTP server from HTTPS page. Browsers block mixed content for security. Use an HTTPS server URL instead.",
+      "error",
+    );
+    serverUrlInput.focus();
+    return;
+  }
+
   connectBtn.disabled = true;
   connectBtn.textContent = "Connecting...";
 
@@ -397,7 +441,6 @@ async function connect() {
       audioElement: isMobile ? audioElement : undefined,
       isAndroid: isAndroid(),
       useOutputLatencyCompensation: true,
-      useHardwareVolume: false,
       syncDelay: savedSyncDelay,
       onStateChange,
     });
@@ -411,7 +454,7 @@ async function connect() {
     const savedMuted = localStorage.getItem(STORAGE_KEYS.MUTED) === "true";
     player.setMuted(savedMuted);
 
-    updateConnectionUI(true);
+    updateConnectionUI(true, serverUrl);
     showToast("Connected to server", "success");
 
     // Start status update interval
@@ -448,28 +491,15 @@ function disconnect() {
 }
 
 /**
- * Toggle connection state
- */
-function toggleConnection() {
-  if (player?.isConnected) {
-    disconnect();
-  } else {
-    connect();
-  }
-}
-
-/**
  * Copy shareable URL to clipboard
  */
 async function copyShareUrl() {
-  const rawUrl = serverUrlInput.value.trim();
-  if (!rawUrl) {
-    showToast("Please enter a server URL first", "error");
+  // Get server URL from localStorage (more reliable when input is hidden)
+  const serverUrl = localStorage.getItem(STORAGE_KEYS.SERVER_URL);
+  if (!serverUrl) {
+    showToast("No server URL to share", "error");
     return;
   }
-
-  // Normalize and use the server URL
-  const serverUrl = normalizeServerUrl(rawUrl);
 
   const url = new URL(window.location.href);
   url.search = "";
@@ -497,10 +527,7 @@ function updateVolume() {
   const volume = parseInt(volumeSlider.value, 10);
   volumeValue.textContent = `${volume}%`;
   saveVolume(volume);
-
-  if (player) {
-    player.setVolume(volume);
-  }
+  player.setVolume(volume);
 }
 
 /**
@@ -514,17 +541,10 @@ function updateMuteIcon(muted) {
  * Toggle mute state
  */
 function toggleMute() {
-  if (player) {
-    const newMuted = !player.muted;
-    player.setMuted(newMuted);
-    updateMuteIcon(newMuted);
-    saveMuted(newMuted);
-  } else {
-    // Toggle UI even when not connected
-    const currentMuted = muteIcon.textContent === "🔇";
-    updateMuteIcon(!currentMuted);
-    saveMuted(!currentMuted);
-  }
+  const newMuted = !player.muted;
+  player.setMuted(newMuted);
+  updateMuteIcon(newMuted);
+  saveMuted(newMuted);
 }
 
 /**
@@ -533,13 +553,8 @@ function toggleMute() {
 function applySyncDelay() {
   const delay = parseInt(syncDelayInput.value, 10) || 0;
   saveSyncDelay(delay);
-
-  if (player) {
-    player.setSyncDelay(delay);
-    showToast(`Sync delay set to ${delay}ms`, "success");
-  } else {
-    showToast(`Sync delay saved: ${delay}ms`, "success");
-  }
+  player.setSyncDelay(delay);
+  showToast(`Sync delay set to ${delay}ms`, "success");
 }
 
 /**
@@ -566,84 +581,34 @@ function init() {
   });
 
   // Event listeners
-  connectBtn.addEventListener("click", toggleConnection);
+  connectBtn.addEventListener("click", connect);
+  disconnectBtn.addEventListener("click", disconnect);
   copyUrlBtn.addEventListener("click", copyShareUrl);
   volumeSlider.addEventListener("input", updateVolume);
   muteBtn.addEventListener("click", toggleMute);
   applySyncDelayBtn.addEventListener("click", applySyncDelay);
+  groupVolumeSlider.addEventListener("input", () => {
+    player.sendCommand("volume", {
+      volume: parseInt(groupVolumeSlider.value, 10),
+    });
+  });
+  groupMuteBtn.addEventListener("click", () => {
+    const currentMuted = groupMuteIcon.textContent === "🔇";
+    player.sendCommand("mute", { mute: !currentMuted });
+  });
 
   // Transport control event listeners
-  prevBtn.addEventListener("click", () => {
-    if (player) {
-      player.sendCommand("previous");
-      showToast("Previous");
-    }
-  });
-  playBtn.addEventListener("click", () => {
-    if (player) {
-      player.sendCommand("play");
-      showToast("Play");
-    }
-  });
-  pauseBtn.addEventListener("click", () => {
-    if (player) {
-      player.sendCommand("pause");
-      showToast("Pause");
-    }
-  });
-  stopBtn.addEventListener("click", () => {
-    if (player) {
-      player.sendCommand("stop");
-      showToast("Stop");
-    }
-  });
-  nextBtn.addEventListener("click", () => {
-    if (player) {
-      player.sendCommand("next");
-      showToast("Next");
-    }
-  });
-  shuffleBtn.addEventListener("click", () => {
-    if (player) {
-      player.sendCommand("shuffle");
-      showToast("Shuffle");
-    }
-  });
-  unshuffleBtn.addEventListener("click", () => {
-    if (player) {
-      player.sendCommand("unshuffle");
-      showToast("Unshuffle");
-    }
-  });
-  repeatOffBtn.addEventListener("click", () => {
-    if (player) {
-      player.sendCommand("repeat_off");
-      showToast("Repeat Off");
-    }
-  });
-  repeatOneBtn.addEventListener("click", () => {
-    if (player) {
-      player.sendCommand("repeat_one");
-      showToast("Repeat One");
-    }
-  });
-  repeatAllBtn.addEventListener("click", () => {
-    if (player) {
-      player.sendCommand("repeat_all");
-      showToast("Repeat All");
-    }
-  });
-  switchGroupBtn.addEventListener("click", () => {
-    if (player) {
-      player.sendCommand("switch");
-      showToast("Switch Group");
-    }
+  document.querySelectorAll(".transport-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      player.sendCommand(btn.dataset.command);
+      showToast(btn.title);
+    });
   });
 
   // Handle Enter key in server URL input
   serverUrlInput.addEventListener("keydown", (e) => {
     if (e.key === "Enter") {
-      toggleConnection();
+      connect();
     }
   });
 
@@ -660,6 +625,14 @@ function init() {
       player.disconnect("shutdown");
     }
   });
+
+  // Show HTTPS warning when page is served over HTTPS
+  if (isSecureContext()) {
+    const httpsWarning = document.getElementById("https-warning");
+    if (httpsWarning) {
+      httpsWarning.style.display = "block";
+    }
+  }
 
   console.log("Sendspin Sample Player initialized");
   console.log("Player ID:", generatePlayerId());

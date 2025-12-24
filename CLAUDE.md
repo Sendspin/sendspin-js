@@ -4,7 +4,7 @@ This file provides guidance for Claude Code when working with this repository.
 
 ## Project Overview
 
-sendspin-js is a TypeScript SDK implementing the [Sendspin Protocol](https://github.com/Sendspin/spec) for clock-synchronized audio streaming. It allows web applications to receive and play audio streams synchronized across multiple devices.
+sendspin-js is a TypeScript SDK implementing the [Sendspin Protocol](https://www.sendspin-audio.com) for clock-synchronized audio streaming. It allows web applications to receive and play audio streams synchronized across multiple devices.
 
 ## Project Structure
 
@@ -76,6 +76,6 @@ When adding new features to the SDK, **always update the sample player** to demo
 
 1. Add UI controls in `index.html` if the feature is user-facing
 2. Implement the feature usage in `public/app.js`
-3. Update the code example in `index.html` (the `<pre><code>` block at the bottom) to show API usage
+3. Update the code example in `README.md` to show API usage
 
 This ensures the sample player serves as comprehensive documentation for all SDK capabilities.

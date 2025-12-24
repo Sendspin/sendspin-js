@@ -214,27 +214,83 @@ header h1 {
   min-width: 120px;
 }
 
-.btn-icon.active {
-  background-color: var(--primary-color);
-  border-color: var(--primary-color);
-}
-
 .btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
 
+/* Hidden sections until connected */
+#now-playing-section,
+#server-controls-section,
 #controls-section,
-#server-controls-section {
-  opacity: 0.5;
-  pointer-events: none;
-  transition: opacity 0.3s;
+#status-section,
+#connected-bar {
+  display: none;
 }
 
-#controls-section.enabled,
-#server-controls-section.enabled {
-  opacity: 1;
-  pointer-events: auto;
+body.connected #now-playing-section,
+body.connected #server-controls-section,
+body.connected #controls-section,
+body.connected #status-section,
+body.connected #connected-bar {
+  display: block;
+}
+
+/* Connection section: show when disconnected, hide when connected */
+#connection-section {
+  max-width: 400px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+body.connected #connection-section {
+  display: none;
+}
+
+/* Connected status bar */
+.connected-bar-content {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.connected-info {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-width: 0;
+  flex: 1;
+}
+
+.connected-indicator {
+  width: 10px;
+  height: 10px;
+  background-color: var(--success-color);
+  border-radius: 50%;
+  flex-shrink: 0;
+  box-shadow: 0 0 8px var(--success-color);
+}
+
+.connected-server-url {
+  font-family: "Monaco", "Menlo", "Ubuntu Mono", monospace;
+  font-size: 0.9rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.connected-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+
+.connected-actions .btn {
+  padding: 0.5rem 1rem;
+  font-size: 0.9rem;
 }
 
 .volume-control {
@@ -351,6 +407,27 @@ header h1 {
   color: var(--warning-color);
 }
 
+/* HTTPS Warning */
+.https-warning {
+  background-color: rgba(245, 158, 11, 0.1);
+  border: 1px solid var(--warning-color);
+  border-radius: 8px;
+  padding: 1rem;
+  margin-bottom: 1rem;
+}
+
+.https-warning strong {
+  color: var(--warning-color);
+  display: block;
+  margin-bottom: 0.5rem;
+}
+
+.https-warning p {
+  color: var(--text-muted);
+  font-size: 0.875rem;
+  margin: 0;
+}
+
 /* Now Playing Section */
 .now-playing {
   display: flex;
@@ -419,21 +496,6 @@ header h1 {
   font-size: 0.75rem;
   color: var(--primary-color);
   margin-top: 0.25rem;
-}
-
-pre {
-  background-color: var(--input-bg);
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  padding: 1rem;
-  overflow-x: auto;
-  font-size: 0.875rem;
-  line-height: 1.5;
-}
-
-code {
-  font-family: "Monaco", "Menlo", "Ubuntu Mono", monospace;
-  color: var(--text-color);
 }
 
 footer {
