@@ -137,9 +137,23 @@ function normalizeServerUrl(input) {
 
 /**
  * Check if URL would cause mixed content issues (HTTP URL on HTTPS page)
+ * Note: localhost is considered a secure context, so HTTP to localhost is allowed
  */
 function isMixedContentUrl(url) {
-  return isSecureContext() && url.startsWith("http://");
+  if (!isSecureContext() || !url.startsWith("http://")) {
+    return false;
+  }
+  // localhost is a secure context, so HTTP is allowed
+  try {
+    const parsed = new URL(url);
+    const host = parsed.hostname;
+    if (host === "localhost" || host === "127.0.0.1" || host === "::1") {
+      return false;
+    }
+  } catch {
+    // Invalid URL, let it fail later
+  }
+  return true;
 }
 
 /**
@@ -205,8 +219,6 @@ function resetStatusDisplay() {
  * Update status display with current player info
  */
 function updateStatusDisplay() {
-  if (!player) return;
-
   // Playback status
   if (player.isPlaying) {
     playbackStatus.textContent = "Playing";
@@ -418,7 +430,6 @@ async function connect() {
       audioElement: isMobile ? audioElement : undefined,
       isAndroid: isAndroid(),
       useOutputLatencyCompensation: true,
-      useHardwareVolume: false,
       syncDelay: savedSyncDelay,
       onStateChange,
     });
@@ -505,10 +516,7 @@ function updateVolume() {
   const volume = parseInt(volumeSlider.value, 10);
   volumeValue.textContent = `${volume}%`;
   saveVolume(volume);
-
-  if (player) {
-    player.setVolume(volume);
-  }
+  player.setVolume(volume);
 }
 
 /**
@@ -522,17 +530,10 @@ function updateMuteIcon(muted) {
  * Toggle mute state
  */
 function toggleMute() {
-  if (player) {
-    const newMuted = !player.muted;
-    player.setMuted(newMuted);
-    updateMuteIcon(newMuted);
-    saveMuted(newMuted);
-  } else {
-    // Toggle UI even when not connected
-    const currentMuted = muteIcon.textContent === "🔇";
-    updateMuteIcon(!currentMuted);
-    saveMuted(!currentMuted);
-  }
+  const newMuted = !player.muted;
+  player.setMuted(newMuted);
+  updateMuteIcon(newMuted);
+  saveMuted(newMuted);
 }
 
 /**
@@ -541,13 +542,8 @@ function toggleMute() {
 function applySyncDelay() {
   const delay = parseInt(syncDelayInput.value, 10) || 0;
   saveSyncDelay(delay);
-
-  if (player) {
-    player.setSyncDelay(delay);
-    showToast(`Sync delay set to ${delay}ms`, "success");
-  } else {
-    showToast(`Sync delay saved: ${delay}ms`, "success");
-  }
+  player.setSyncDelay(delay);
+  showToast(`Sync delay set to ${delay}ms`, "success");
 }
 
 /**
@@ -583,70 +579,48 @@ function init() {
 
   // Transport control event listeners
   prevBtn.addEventListener("click", () => {
-    if (player) {
-      player.sendCommand("previous");
-      showToast("Previous");
-    }
+    player.sendCommand("previous");
+    showToast("Previous");
   });
   playBtn.addEventListener("click", () => {
-    if (player) {
-      player.sendCommand("play");
-      showToast("Play");
-    }
+    player.sendCommand("play");
+    showToast("Play");
   });
   pauseBtn.addEventListener("click", () => {
-    if (player) {
-      player.sendCommand("pause");
-      showToast("Pause");
-    }
+    player.sendCommand("pause");
+    showToast("Pause");
   });
   stopBtn.addEventListener("click", () => {
-    if (player) {
-      player.sendCommand("stop");
-      showToast("Stop");
-    }
+    player.sendCommand("stop");
+    showToast("Stop");
   });
   nextBtn.addEventListener("click", () => {
-    if (player) {
-      player.sendCommand("next");
-      showToast("Next");
-    }
+    player.sendCommand("next");
+    showToast("Next");
   });
   shuffleBtn.addEventListener("click", () => {
-    if (player) {
-      player.sendCommand("shuffle");
-      showToast("Shuffle");
-    }
+    player.sendCommand("shuffle");
+    showToast("Shuffle");
   });
   unshuffleBtn.addEventListener("click", () => {
-    if (player) {
-      player.sendCommand("unshuffle");
-      showToast("Unshuffle");
-    }
+    player.sendCommand("unshuffle");
+    showToast("Unshuffle");
   });
   repeatOffBtn.addEventListener("click", () => {
-    if (player) {
-      player.sendCommand("repeat_off");
-      showToast("Repeat Off");
-    }
+    player.sendCommand("repeat_off");
+    showToast("Repeat Off");
   });
   repeatOneBtn.addEventListener("click", () => {
-    if (player) {
-      player.sendCommand("repeat_one");
-      showToast("Repeat One");
-    }
+    player.sendCommand("repeat_one");
+    showToast("Repeat One");
   });
   repeatAllBtn.addEventListener("click", () => {
-    if (player) {
-      player.sendCommand("repeat_all");
-      showToast("Repeat All");
-    }
+    player.sendCommand("repeat_all");
+    showToast("Repeat All");
   });
   switchGroupBtn.addEventListener("click", () => {
-    if (player) {
-      player.sendCommand("switch");
-      showToast("Switch Group");
-    }
+    player.sendCommand("switch");
+    showToast("Switch Group");
   });
 
   // Handle Enter key in server URL input
@@ -670,11 +644,11 @@ function init() {
     }
   });
 
-  // Show HTTPS hint when page is served over HTTPS
+  // Show HTTPS warning when page is served over HTTPS
   if (isSecureContext()) {
-    const hint = document.getElementById("server-url-hint");
-    if (hint) {
-      hint.textContent = "HTTPS server URL required (browser blocks HTTP from HTTPS pages)";
+    const httpsWarning = document.getElementById("https-warning");
+    if (httpsWarning) {
+      httpsWarning.style.display = "block";
     }
   }
 

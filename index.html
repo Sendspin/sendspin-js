@@ -23,6 +23,14 @@
         <!-- Connection Section (disconnected state) -->
         <section class="card" id="connection-section">
           <h2>Server Connection</h2>
+          <div class="https-warning" id="https-warning" style="display: none">
+            <strong>HTTPS Required</strong>
+            <p>
+              This demo player is hosted on HTTPS. Browser security prevents
+              connecting to HTTP servers (like local Sendspin servers). You need
+              a Sendspin server with HTTPS enabled.
+            </p>
+          </div>
           <div class="form-group">
             <label for="server-url">Server URL</label>
             <input
@@ -229,70 +237,12 @@
           </div>
         </section>
 
-        <!-- Code Example -->
-        <section class="card">
-          <h2>Code Example</h2>
-          <p>
-            This player is built with vanilla JavaScript using the sendspin-js
-            SDK:
-          </p>
-          <pre><code>import { SendspinPlayer } from '@music-assistant/sendspin-js';
-
-const player = new SendspinPlayer({
-  playerId: 'my-player-id',
-  baseUrl: 'http://your-server:8095',
-  clientName: 'My Web Player',
-  audioOutputMode: 'direct',
-  onStateChange: (state) => {
-    // Local player state
-    console.log('Playing:', state.isPlaying);
-    console.log('Volume:', state.volume, 'Muted:', state.muted);
-
-    // Server state (metadata, controller info)
-    if (state.serverState?.metadata) {
-      const meta = state.serverState.metadata;
-      console.log('Track:', meta.title, '-', meta.artist);
-    }
-
-    // Group state (playback state, group info)
-    if (state.groupState) {
-      console.log('Group:', state.groupState.group_name);
-      console.log('Playback:', state.groupState.playback_state);
-    }
-  }
-});
-
-// Connect to server
-await player.connect();
-
-// Local volume control (affects this player only)
-player.setVolume(80);
-player.setMuted(false);
-
-// Send commands to server (controls the source)
-player.sendCommand('play');
-player.sendCommand('pause');
-player.sendCommand('stop');
-player.sendCommand('next');
-player.sendCommand('previous');
-player.sendCommand('volume', { volume: 50 });
-player.sendCommand('mute', { mute: true });
-player.sendCommand('shuffle');
-player.sendCommand('unshuffle');
-player.sendCommand('repeat_off');
-player.sendCommand('repeat_one');
-player.sendCommand('repeat_all');
-player.sendCommand('switch');  // Switch group
-
-// Disconnect with reason (optional)
-player.disconnect('user_request');</code></pre>
-        </section>
       </main>
 
       <footer>
         <p>
           <a
-            href="https://github.com/music-assistant/sendspin-js"
+            href="https://github.com/sendspin/sendspin-js"
             target="_blank"
             >GitHub</a
           >
@@ -303,7 +253,7 @@ player.disconnect('user_request');</code></pre>
             >npm</a
           >
           | Part of the
-          <a href="https://github.com/Sendspin/spec" target="_blank"
+          <a href="https://www.sendspin-audio.com" target="_blank"
             >Sendspin Protocol</a
           >
         </p>

@@ -214,11 +214,6 @@ header h1 {
   min-width: 120px;
 }
 
-.btn-icon.active {
-  background-color: var(--primary-color);
-  border-color: var(--primary-color);
-}
-
 .btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
@@ -412,6 +407,27 @@ body.connected #connection-section {
   color: var(--warning-color);
 }
 
+/* HTTPS Warning */
+.https-warning {
+  background-color: rgba(245, 158, 11, 0.1);
+  border: 1px solid var(--warning-color);
+  border-radius: 8px;
+  padding: 1rem;
+  margin-bottom: 1rem;
+}
+
+.https-warning strong {
+  color: var(--warning-color);
+  display: block;
+  margin-bottom: 0.5rem;
+}
+
+.https-warning p {
+  color: var(--text-muted);
+  font-size: 0.875rem;
+  margin: 0;
+}
+
 /* Now Playing Section */
 .now-playing {
   display: flex;
@@ -480,21 +496,6 @@ body.connected #connection-section {
   font-size: 0.75rem;
   color: var(--primary-color);
   margin-top: 0.25rem;
-}
-
-pre {
-  background-color: var(--input-bg);
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  padding: 1rem;
-  overflow-x: auto;
-  font-size: 0.875rem;
-  line-height: 1.5;
-}
-
-code {
-  font-family: "Monaco", "Menlo", "Ubuntu Mono", monospace;
-  color: var(--text-color);
 }
 
 footer {
