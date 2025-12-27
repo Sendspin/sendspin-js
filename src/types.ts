@@ -251,37 +251,39 @@ export interface SupportedFormat {
 }
 
 export interface SendspinPlayerConfig {
-  /** Unique player identifier */
-  playerId: string;
+  /** Unique player identifier. Auto-generated if not provided. */
+  playerId?: string;
 
   /** Base URL of the Sendspin server (e.g., "http://192.168.1.100:8095") */
   baseUrl: string;
 
-  /** Human-readable name for this player */
+  /** Human-readable name for this player. Auto-generated if not provided. */
   clientName?: string;
 
   /**
    * Audio output mode:
    * - "direct": Output directly to audioContext.destination (e.g., Cast receiver)
    * - "media-element": Use HTMLAudioElement for MediaSession support (e.g., mobile browsers)
+   *
+   * Default: "media-element" on iOS/Android, "direct" otherwise.
    */
   audioOutputMode?: AudioOutputMode;
 
   /**
    * HTMLAudioElement for media-element output mode.
-   * Required when audioOutputMode is "media-element".
+   * Auto-created if not provided when using media-element mode.
    */
   audioElement?: HTMLAudioElement;
 
   /**
    * Whether running on Android (affects MediaSession workarounds).
-   * Only relevant for "media-element" output mode.
+   * Auto-detected from user agent if not provided.
    */
   isAndroid?: boolean;
 
   /**
    * Almost-silent audio data URL for Android MediaSession workaround.
-   * Required for Android when audioOutputMode is "media-element".
+   * Required for Android when using media-element mode.
    */
   silentAudioSrc?: string;
 
