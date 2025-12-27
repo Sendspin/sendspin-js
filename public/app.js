@@ -39,7 +39,6 @@ const muteBtn = document.getElementById("mute-btn");
 const muteIcon = document.getElementById("mute-icon");
 const syncDelayInput = document.getElementById("sync-delay");
 const applySyncDelayBtn = document.getElementById("apply-sync-delay");
-const audioElement = document.getElementById("audio-element");
 const groupVolumeSlider = document.getElementById("group-volume-slider");
 const groupVolumeValue = document.getElementById("group-volume-value");
 const groupMuteBtn = document.getElementById("group-mute-btn");
@@ -70,27 +69,13 @@ let statusUpdateInterval = null;
 /**
  * Generate a unique player ID
  */
-function generatePlayerId() {
+function getPlayerId() {
   const stored = localStorage.getItem(STORAGE_KEYS.PLAYER_ID);
   if (stored) return stored;
 
   const id = "sendspin-js-demo-" + Math.random().toString(36).substring(2, 10);
   localStorage.setItem(STORAGE_KEYS.PLAYER_ID, id);
   return id;
-}
-
-/**
- * Detect if running on Android
- */
-function isAndroid() {
-  return /Android/i.test(navigator.userAgent);
-}
-
-/**
- * Detect if running on iOS
- */
-function isIOS() {
-  return /iPad|iPhone|iPod/.test(navigator.userAgent);
 }
 
 /**
@@ -419,10 +404,6 @@ async function connect() {
   connectBtn.textContent = "Connecting...";
 
   try {
-    // Determine audio output mode based on platform
-    // Use media-element for mobile (better background playback support)
-    const isMobile = isAndroid() || isIOS();
-
     // Get saved settings
     const savedVolume = parseInt(
       localStorage.getItem(STORAGE_KEYS.VOLUME) || "80",
@@ -434,13 +415,9 @@ async function connect() {
     );
 
     player = new SendspinPlayer({
-      playerId: generatePlayerId(),
+      playerId: getPlayerId(),
       baseUrl: serverUrl,
       clientName: "Sendspin Sample Player",
-      audioOutputMode: isMobile ? "media-element" : "direct",
-      audioElement: isMobile ? audioElement : undefined,
-      isAndroid: isAndroid(),
-      useOutputLatencyCompensation: true,
       syncDelay: savedSyncDelay,
       onStateChange,
     });
@@ -635,7 +612,7 @@ function init() {
   }
 
   console.log("Sendspin Sample Player initialized");
-  console.log("Player ID:", generatePlayerId());
+  console.log("Player ID:", getPlayerId());
   if (isLocalhost) {
     console.log("Development mode: using local SDK build");
   }

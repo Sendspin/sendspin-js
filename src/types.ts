@@ -251,8 +251,8 @@ export interface SupportedFormat {
 }
 
 export interface SendspinPlayerConfig {
-  /** Unique player identifier */
-  playerId: string;
+  /** Unique player identifier. Auto-generated if not provided. */
+  playerId?: string;
 
   /** Base URL of the Sendspin server (e.g., "http://192.168.1.100:8095") */
   baseUrl: string;
@@ -276,6 +276,7 @@ export interface SendspinPlayerConfig {
   /**
    * Whether running on Android (affects MediaSession workarounds).
    * Only relevant for "media-element" output mode.
+   * Auto-detected from user agent if not provided.
    */
   isAndroid?: boolean;
 
