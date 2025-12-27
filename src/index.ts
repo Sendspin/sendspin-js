@@ -58,11 +58,7 @@ export class SendspinPlayer {
     // - Otherwise, use direct
     const outputMode =
       config.audioOutputMode ??
-      (config.audioElement
-        ? "media-element"
-        : isMobile
-          ? "media-element"
-          : "direct");
+      (config.audioElement || isMobile ? "media-element" : "direct");
 
     // Auto-create audio element for mobile if not provided and using media-element mode
     let audioElement = config.audioElement;
