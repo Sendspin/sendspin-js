@@ -12,6 +12,25 @@ import type {
   ControllerCommands,
 } from "./types";
 
+// Platform detection utilities
+function detectIsAndroid(): boolean {
+  if (typeof navigator === "undefined") return false;
+  return /Android/i.test(navigator.userAgent);
+}
+
+function detectIsIOS(): boolean {
+  if (typeof navigator === "undefined") return false;
+  return /iPad|iPhone|iPod/.test(navigator.userAgent);
+}
+
+function detectIsMobile(): boolean {
+  return detectIsAndroid() || detectIsIOS();
+}
+
+function generateRandomId(): string {
+  return Math.random().toString(36).substring(2, 6);
+}
+
 export class SendspinPlayer {
   private wsManager: WebSocketManager;
   private audioProcessor: AudioProcessor;
@@ -23,7 +42,45 @@ export class SendspinPlayer {
   private wsUrl: string = "";
 
   constructor(config: SendspinPlayerConfig) {
-    this.config = config;
+    // Apply defaults for playerId and clientName (share same random ID)
+    const randomId = generateRandomId();
+    const playerId = config.playerId ?? `sendspin-js-${randomId}`;
+    const clientName = config.clientName ?? `Sendspin JS Client (${randomId})`;
+
+    // Auto-detect platform
+    const isAndroid = config.isAndroid ?? detectIsAndroid();
+    const isMobile = detectIsMobile();
+
+    // Determine output mode:
+    // - If explicitly set, use that
+    // - If audioElement provided, use media-element
+    // - If mobile (iOS/Android), default to media-element
+    // - Otherwise, use direct
+    const outputMode =
+      config.audioOutputMode ??
+      (config.audioElement || isMobile ? "media-element" : "direct");
+
+    // Auto-create audio element for mobile if not provided and using media-element mode
+    let audioElement = config.audioElement;
+    if (
+      outputMode === "media-element" &&
+      !audioElement &&
+      typeof document !== "undefined"
+    ) {
+      audioElement = document.createElement("audio");
+      audioElement.style.display = "none";
+      document.body.appendChild(audioElement);
+    }
+
+    // Store config with resolved defaults
+    this.config = {
+      ...config,
+      playerId,
+      clientName,
+      isAndroid,
+      audioElement,
+      audioOutputMode: outputMode,
+    };
 
     // Initialize time filter (shared between audio processor and protocol handler)
     this.timeFilter = new SendspinTimeFilter();
@@ -31,18 +88,13 @@ export class SendspinPlayer {
     // Initialize state manager with callback
     this.stateManager = new StateManager(config.onStateChange);
 
-    // Determine output mode (default to media-element if audioElement provided, otherwise direct)
-    const outputMode =
-      config.audioOutputMode ??
-      (config.audioElement ? "media-element" : "direct");
-
     // Initialize audio processor
     this.audioProcessor = new AudioProcessor(
       this.stateManager,
       this.timeFilter,
       outputMode,
-      config.audioElement,
-      config.isAndroid ?? false,
+      audioElement,
+      isAndroid,
       config.silentAudioSrc,
       config.syncDelay ?? 0,
       config.useHardwareVolume ?? false,
@@ -53,13 +105,13 @@ export class SendspinPlayer {
 
     // Initialize protocol handler
     this.protocolHandler = new ProtocolHandler(
-      config.playerId,
+      playerId,
       this.wsManager,
       this.audioProcessor,
       this.stateManager,
       this.timeFilter,
       {
-        clientName: config.clientName,
+        clientName,
         codecs: config.codecs,
         bufferCapacity: config.bufferCapacity,
         useHardwareVolume: config.useHardwareVolume,
@@ -246,3 +298,6 @@ export class SendspinPlayer {
 // Re-export types for convenience
 export * from "./types";
 export { SendspinTimeFilter } from "./time-filter";
+
+// Export platform detection utilities
+export { detectIsAndroid, detectIsIOS, detectIsMobile };

@@ -58,7 +58,7 @@ export class ProtocolHandler {
     this.bufferCapacity = config.bufferCapacity ?? 1024 * 1024 * 5; // 5MB default
     this.useHardwareVolume = config.useHardwareVolume ?? false;
     this.useOutputLatencyCompensation =
-      config.useOutputLatencyCompensation ?? false;
+      config.useOutputLatencyCompensation ?? true;
     this.onVolumeCommand = config.onVolumeCommand;
     this.getExternalVolume = config.getExternalVolume;
   }
