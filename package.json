@@ -16,6 +16,7 @@
     "dist"
   ],
   "scripts": {
+    "prebuild": "node scripts/bundle-silent-audio.js",
     "build": "tsc",
     "dev": "tsc --watch",
     "dev-server": "rm -rf public/dev && concurrently \"tsc --watch\" \"rollup -c --watch\" \"serve . -l 6001\"",
