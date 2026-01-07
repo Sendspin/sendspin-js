@@ -2,17 +2,54 @@ import type {
   AudioBufferQueueItem,
   StreamFormat,
   AudioOutputMode,
+  CorrectionMode,
 } from "./types";
 import type { StateManager } from "./state-manager";
 import type { SendspinTimeFilter } from "./time-filter";
 
 // Sync correction constants
-const HARD_RESYNC_THRESHOLD_MS = 200; // Hard resync for extreme errors
-const RATE_2_PERCENT_THRESHOLD_MS = 40; // Use 2% rate above this
-const SAMPLE_CORRECTION_THRESHOLD_MS = 15; // Use sample manipulation below this
-const SYNC_ERROR_DEADBAND_MS = 1; // Don't correct if error < 1ms
 const OUTPUT_LATENCY_ALPHA = 0.01; // EMA smoothing factor for outputLatency
 const SYNC_ERROR_ALPHA = 0.1; // EMA smoothing factor for sync error (filters jitter)
+const OUTPUT_LATENCY_STORAGE_KEY = "sendspin-output-latency-us"; // LocalStorage key
+const OUTPUT_LATENCY_PERSIST_INTERVAL_MS = 10_000;
+
+// Mode-specific sync correction thresholds
+const CORRECTION_THRESHOLDS: Record<
+  CorrectionMode,
+  {
+    resyncAboveMs: number; // ms - hard resync for extreme errors
+    rate2AboveMs: number; // ms - use 2% rate above this
+    rate1AboveMs: number; // ms - use 1% rate above this
+    samplesBelowMs: number; // ms - use sample manipulation below this
+    deadbandBelowMs: number; // ms - don't correct if error < this
+    kalmanThreshold: number; // Only correct if the error is below this
+  }
+> = {
+  sync: {
+    resyncAboveMs: 200, // Hard resync for large errors
+    rate2AboveMs: 40, // Use 2% rate when error exceeds this
+    rate1AboveMs: 15, // Use 1% rate when error exceeds this
+    samplesBelowMs: 15, // Use sample insertion/deletion below this
+    deadbandBelowMs: 1, // Ignore corrections below this
+    kalmanThreshold: 5000, // Higher threshold; starts correcting earlier
+  },
+  quality: {
+    resyncAboveMs: 50, // Tighter resync threshold to avoid drifting too far
+    rate2AboveMs: Infinity, // Disabled - never use rate correction
+    rate1AboveMs: Infinity, // Disabled - never use rate correction
+    samplesBelowMs: 50, // Use sample insertion/deletion below this
+    deadbandBelowMs: 1, // Keep deadband tight for accurate sync
+    kalmanThreshold: 2000, // Lower threshold; wait for a more stable filter to reduce number of resyncs
+  },
+  "quality-local": {
+    resyncAboveMs: 500, // Last resort only (prefer keeping uninterupted playback even if out of sync)
+    rate2AboveMs: Infinity, // Disabled - never use rate correction
+    rate1AboveMs: Infinity, // Disabled - never use rate correction
+    samplesBelowMs: 500, // Use samples for any error < resyncAboveMs
+    deadbandBelowMs: 5, // Larger deadband to avoid frequent small adjustments
+    kalmanThreshold: 3000, // Lower threshold to only start correcting once the filter is stable
+  },
+};
 
 export class AudioProcessor {
   private audioContext: AudioContext | null = null;
@@ -31,12 +68,28 @@ export class AudioProcessor {
   private smoothedSyncErrorMs: number = 0; // EMA-filtered sync error for corrections
   private resyncCount: number = 0;
   private currentPlaybackRate: number = 1.0;
-  private currentCorrectionMethod: "none" | "samples" | "rate" | "resync" =
-    "none";
+  private currentCorrectionMethod:
+    | "waiting-for-time-sync"
+    | "none"
+    | "samples"
+    | "rate"
+    | "resync" = "none";
   private lastSamplesAdjusted: number = 0;
 
   // Output latency smoothing (EMA to filter Chrome jitter)
   private smoothedOutputLatencyUs: number | null = null;
+  private lastLatencyPersistAtMs: number | null = null;
+
+  // Correction mode
+  private _correctionMode: CorrectionMode = "sync";
+  private _debugLogging: boolean = false;
+  private _lastLoggedCorrectionMethod:
+    | "waiting-for-time-sync"
+    | "none"
+    | "samples"
+    | "rate"
+    | "resync" = "none";
+  private _lastLoggedTime: number = 0;
 
   // Native Opus decoder (uses WebCodecs API)
   private webCodecsDecoder: AudioDecoder | null = null;
@@ -58,7 +111,75 @@ export class AudioProcessor {
     private silentAudioSrc?: string,
     private syncDelayMs: number = 0,
     private useHardwareVolume: boolean = false,
-  ) {}
+    correctionMode: CorrectionMode = "sync",
+  ) {
+    this._correctionMode = correctionMode;
+
+    // Load persisted output latency from localStorage
+    this.loadPersistedLatency();
+  }
+
+  // Load persisted output latency from localStorage
+  private loadPersistedLatency(): void {
+    try {
+      const stored = localStorage.getItem(OUTPUT_LATENCY_STORAGE_KEY);
+      if (stored) {
+        const latency = parseFloat(stored);
+        if (!isNaN(latency) && latency >= 0) {
+          this.smoothedOutputLatencyUs = latency;
+          if (this._debugLogging) {
+            console.log(
+              `Sendspin: Loaded persisted output latency: ${(latency / 1000).toFixed(1)}ms`,
+            );
+          }
+        }
+      }
+    } catch {
+      // localStorage may not be available (e.g., in some iframe contexts)
+    }
+  }
+
+  // Persist output latency to localStorage
+  private persistLatency(): void {
+    if (this.smoothedOutputLatencyUs === null) return;
+    try {
+      localStorage.setItem(
+        OUTPUT_LATENCY_STORAGE_KEY,
+        this.smoothedOutputLatencyUs.toString(),
+      );
+    } catch {
+      // localStorage may not be available
+    }
+  }
+
+  // Get current correction mode
+  get correctionMode(): CorrectionMode {
+    return this._correctionMode;
+  }
+
+  // Set correction mode at runtime
+  setCorrectionMode(mode: CorrectionMode): void {
+    const oldMode = this._correctionMode;
+    this._correctionMode = mode;
+    const thresholds = CORRECTION_THRESHOLDS[mode];
+    if (this._debugLogging) {
+      console.log(
+        `Sendspin: Correction mode changed: '${oldMode}' -> '${mode}' ` +
+          `(resyncAboveMs=${thresholds.resyncAboveMs}ms, rate2AboveMs=${thresholds.rate2AboveMs}ms, rate1AboveMs=${thresholds.rate1AboveMs}ms, ` +
+          `samplesBelowMs=${thresholds.samplesBelowMs}ms, deadbandBelowMs=${thresholds.deadbandBelowMs}ms)`,
+      );
+    }
+  }
+
+  // Enable/disable debug logging for sync corrections
+  setDebugLogging(enabled: boolean): void {
+    this._debugLogging = enabled;
+  }
+
+  // Get debug logging state
+  get debugLogging(): boolean {
+    return this._debugLogging;
+  }
 
   // Update sync delay at runtime
   setSyncDelay(delayMs: number): void {
@@ -78,8 +199,14 @@ export class AudioProcessor {
     resyncCount: number;
     outputLatencyMs: number;
     playbackRate: number;
-    correctionMethod: "none" | "samples" | "rate" | "resync";
+    correctionMethod:
+      | "waiting-for-time-sync"
+      | "none"
+      | "samples"
+      | "rate"
+      | "resync";
     samplesAdjusted: number;
+    correctionMode: CorrectionMode;
   } {
     return {
       clockDriftPercent: this.timeFilter.drift * 100,
@@ -89,6 +216,7 @@ export class AudioProcessor {
       playbackRate: this.currentPlaybackRate,
       correctionMethod: this.currentCorrectionMethod,
       samplesAdjusted: this.lastSamplesAdjusted,
+      correctionMode: this._correctionMode,
     };
   }
 
@@ -110,6 +238,21 @@ export class AudioProcessor {
       this.smoothedOutputLatencyUs =
         OUTPUT_LATENCY_ALPHA * rawLatencyUs +
         (1 - OUTPUT_LATENCY_ALPHA) * this.smoothedOutputLatencyUs;
+    }
+
+    const nowMs =
+      typeof performance !== "undefined" ? performance.now() : Date.now();
+    if (
+      this.lastLatencyPersistAtMs === null ||
+      nowMs - this.lastLatencyPersistAtMs >= OUTPUT_LATENCY_PERSIST_INTERVAL_MS
+    ) {
+      this.persistLatency();
+      this.lastLatencyPersistAtMs = nowMs;
+      if (this._debugLogging) {
+        console.debug(
+          `Sendspin: Persisted smoothed output latency: ${this.smoothedOutputLatencyUs} µs`,
+        );
+      }
     }
 
     return this.smoothedOutputLatencyUs;
@@ -803,7 +946,18 @@ export class AudioProcessor {
             (1 - SYNC_ERROR_ALPHA) * this.smoothedSyncErrorMs;
           const correctionErrorMs = this.smoothedSyncErrorMs;
 
-          if (Math.abs(correctionErrorMs) > HARD_RESYNC_THRESHOLD_MS) {
+          // Get thresholds for current correction mode
+          const thresholds = CORRECTION_THRESHOLDS[this._correctionMode];
+
+          if (this.timeFilter.error > thresholds.kalmanThreshold) {
+            // Don't trust time filter yet, continue playing without corrections
+            // until the filter stabilizes
+            playbackTime = this.nextPlaybackTime;
+            playbackRate = 1.0;
+            this.currentCorrectionMethod = "waiting-for-time-sync";
+            this.lastSamplesAdjusted = 0;
+            chunk.buffer = this.copyBuffer(chunk.buffer);
+          } else if (Math.abs(correctionErrorMs) > thresholds.resyncAboveMs) {
             // Tier 4: Hard resync if sync error exceeds threshold
             this.resyncCount++;
             this.smoothedSyncErrorMs = 0;
@@ -812,17 +966,15 @@ export class AudioProcessor {
             this.currentCorrectionMethod = "resync";
             this.lastSamplesAdjusted = 0;
             chunk.buffer = this.copyBuffer(chunk.buffer);
-          } else if (Math.abs(correctionErrorMs) < SYNC_ERROR_DEADBAND_MS) {
+          } else if (Math.abs(correctionErrorMs) < thresholds.deadbandBelowMs) {
             // Tier 1: Within deadband - no correction needed
             playbackTime = this.nextPlaybackTime;
             playbackRate = 1.0;
             this.currentCorrectionMethod = "none";
             this.lastSamplesAdjusted = 0;
             chunk.buffer = this.copyBuffer(chunk.buffer);
-          } else if (
-            Math.abs(correctionErrorMs) < SAMPLE_CORRECTION_THRESHOLD_MS
-          ) {
-            // Tier 2: Small error (<15ms) - use single sample insertion/deletion
+          } else if (Math.abs(correctionErrorMs) < thresholds.samplesBelowMs) {
+            // Tier 2: Small error - use single sample insertion/deletion
             playbackTime = this.nextPlaybackTime;
             playbackRate = 1.0;
             const samplesToAdjust = correctionErrorMs > 0 ? -1 : 1;
@@ -833,20 +985,28 @@ export class AudioProcessor {
             this.currentCorrectionMethod = "samples";
             this.lastSamplesAdjusted = samplesToAdjust;
           } else {
-            // Tier 3: Medium error (15-200ms) - use playback rate adjustment
+            // Tier 3: Medium error - use playback rate adjustment
             playbackTime = this.nextPlaybackTime;
+            const absErrorMs = Math.abs(correctionErrorMs);
+
             if (correctionErrorMs > 0) {
               playbackRate =
-                Math.abs(correctionErrorMs) >= RATE_2_PERCENT_THRESHOLD_MS
+                absErrorMs >= thresholds.rate2AboveMs
                   ? 1.02
-                  : 1.01;
+                  : absErrorMs >= thresholds.rate1AboveMs
+                    ? 1.01
+                    : 1.0;
             } else {
               playbackRate =
-                Math.abs(correctionErrorMs) >= RATE_2_PERCENT_THRESHOLD_MS
+                absErrorMs >= thresholds.rate2AboveMs
                   ? 0.98
-                  : 0.99;
+                  : absErrorMs >= thresholds.rate1AboveMs
+                    ? 0.99
+                    : 1.0;
             }
-            this.currentCorrectionMethod = "rate";
+
+            this.currentCorrectionMethod =
+              playbackRate === 1.0 ? "none" : "rate";
             this.lastSamplesAdjusted = 0;
             chunk.buffer = this.copyBuffer(chunk.buffer);
           }
@@ -858,6 +1018,27 @@ export class AudioProcessor {
           this.currentCorrectionMethod = "resync";
           this.lastSamplesAdjusted = 0;
           chunk.buffer = this.copyBuffer(chunk.buffer);
+        }
+      }
+
+      // Debug logging when correction method changes
+      if (this._debugLogging) {
+        if (this.currentCorrectionMethod !== this._lastLoggedCorrectionMethod) {
+          const thresholds = CORRECTION_THRESHOLDS[this._correctionMode];
+          console.log(
+            `Sendspin: [${this._correctionMode}] Correction: ${this._lastLoggedCorrectionMethod} -> ${this.currentCorrectionMethod} ` +
+              `| error=${this.smoothedSyncErrorMs.toFixed(1)}ms ` +
+              `| rate=${playbackRate} | resyncs=${this.resyncCount} | error=${this.timeFilter.error}` +
+              `| thresholds: resync>${thresholds.resyncAboveMs}ms, samples<${thresholds.samplesBelowMs}ms, rate1>=${thresholds.rate1AboveMs}ms, rate2>=${thresholds.rate2AboveMs}ms`,
+          );
+          this._lastLoggedCorrectionMethod = this.currentCorrectionMethod;
+          this._lastLoggedTime = performance.now();
+        } else if (performance.now() - this._lastLoggedTime > 2000) {
+          console.log(
+            `Sendspin: error=${this.smoothedSyncErrorMs.toFixed(1)}ms ` +
+              `| error=${this.timeFilter.error}`,
+          );
+          this._lastLoggedTime = performance.now();
         }
       }
 

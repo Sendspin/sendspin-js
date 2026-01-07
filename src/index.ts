@@ -10,6 +10,7 @@ import type {
   GoodbyeReason,
   ControllerCommand,
   ControllerCommands,
+  CorrectionMode,
 } from "./types";
 
 // Platform detection utilities
@@ -98,6 +99,7 @@ export class SendspinPlayer {
       config.silentAudioSrc,
       config.syncDelay ?? 0,
       config.useHardwareVolume ?? false,
+      config.correctionMode ?? "sync",
     );
 
     // Initialize WebSocket manager
@@ -206,6 +208,30 @@ export class SendspinPlayer {
     this.audioProcessor.setSyncDelay(delayMs);
   }
 
+  /**
+   * Set the sync correction mode at runtime.
+   * @param mode - The correction mode to use:
+   *   - "sync": Multi-device sync, may use pitch-changing playback-rate adjustments for faster convergence.
+   *   - "quality": No playback-rate changes; uses sample fixes and tighter resyncs, so expect fewer adjustments but occasional jumps. Starts out of sync until the clock converges.
+   *   - "quality-local": Avoids playback-rate changes; may drift vs. other players and only resyncs
+   *     as a last resort.
+   */
+  setCorrectionMode(mode: CorrectionMode): void {
+    this.audioProcessor.setCorrectionMode(mode);
+  }
+
+  /**
+   * Enable or disable debug logging for sync corrections.
+   * When enabled, logs to console when correction method changes.
+   */
+  setDebugLogging(enabled: boolean): void {
+    this.audioProcessor.setDebugLogging(enabled);
+  }
+  // Get debug logging state
+  get debugLogging(): boolean {
+    return this.audioProcessor.debugLogging;
+  }
+
   // ========================================
   // Controller Commands (sent to server)
   // ========================================
@@ -274,6 +300,11 @@ export class SendspinPlayer {
     return this.wsManager.isConnected();
   }
 
+  // Get current correction mode
+  get correctionMode(): CorrectionMode {
+    return this.audioProcessor.correctionMode;
+  }
+
   // Time sync info for debugging
   get timeSyncInfo(): { synced: boolean; offset: number; error: number } {
     return {
@@ -290,6 +321,14 @@ export class SendspinPlayer {
     resyncCount: number;
     outputLatencyMs: number;
     playbackRate: number;
+    correctionMethod:
+      | "waiting-for-time-sync"
+      | "none"
+      | "samples"
+      | "rate"
+      | "resync";
+    samplesAdjusted: number;
+    correctionMode: CorrectionMode;
   } {
     return this.audioProcessor.syncInfo;
   }
