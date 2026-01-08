@@ -1013,72 +1013,70 @@ export class AudioProcessor {
             this.currentCorrectionMethod = "none";
             this.lastSamplesAdjusted = 0;
             chunk.buffer = this.copyBuffer(chunk.buffer);
-          } else if (Math.abs(correctionErrorMs) > thresholds.resyncAboveMs) {
+          } else {
             // Clock is precise OR timeout elapsed - proceed with corrections
             this.currentClockPrecision = isClockImprecise
               ? "imprecise-timeout"
               : "precise";
-            // Tier 4: Hard resync if sync error exceeds threshold
-            this.resyncCount++;
-            this.smoothedSyncErrorMs = 0;
-            this.cutScheduledSources(targetPlaybackTime);
-            playbackTime = targetPlaybackTime;
-            playbackRate = 1.0;
-            this.currentCorrectionMethod = "resync";
-            this.lastSamplesAdjusted = 0;
-            chunk.buffer = this.copyBuffer(chunk.buffer);
-          } else if (Math.abs(correctionErrorMs) < thresholds.deadbandBelowMs) {
-            // Tier 1: Within deadband - no correction needed
-            this.currentClockPrecision = isClockImprecise
-              ? "imprecise-timeout"
-              : "precise";
-            playbackTime = this.nextPlaybackTime;
-            playbackRate = 1.0;
-            this.currentCorrectionMethod = "none";
-            this.lastSamplesAdjusted = 0;
-            chunk.buffer = this.copyBuffer(chunk.buffer);
-          } else if (Math.abs(correctionErrorMs) < thresholds.samplesBelowMs) {
-            // Tier 2: Small error - use single sample insertion/deletion
-            this.currentClockPrecision = isClockImprecise
-              ? "imprecise-timeout"
-              : "precise";
-            playbackTime = this.nextPlaybackTime;
-            playbackRate = 1.0;
-            const samplesToAdjust = correctionErrorMs > 0 ? -1 : 1;
-            chunk.buffer = this.adjustBufferSamples(
-              chunk.buffer,
-              samplesToAdjust,
-            );
-            this.currentCorrectionMethod = "samples";
-            this.lastSamplesAdjusted = samplesToAdjust;
-          } else {
-            // Tier 3: Medium error - use playback rate adjustment
-            this.currentClockPrecision = isClockImprecise
-              ? "imprecise-timeout"
-              : "precise";
-            playbackTime = this.nextPlaybackTime;
-            const absErrorMs = Math.abs(correctionErrorMs);
 
-            if (correctionErrorMs > 0) {
-              playbackRate =
-                absErrorMs >= thresholds.rate2AboveMs
-                  ? 1.02
-                  : absErrorMs >= thresholds.rate1AboveMs
-                    ? 1.01
-                    : 1.0;
+            if (Math.abs(correctionErrorMs) > thresholds.resyncAboveMs) {
+              // Tier 4: Hard resync if sync error exceeds threshold
+              this.resyncCount++;
+              this.smoothedSyncErrorMs = 0;
+              this.cutScheduledSources(targetPlaybackTime);
+              playbackTime = targetPlaybackTime;
+              playbackRate = 1.0;
+              this.currentCorrectionMethod = "resync";
+              this.lastSamplesAdjusted = 0;
+              chunk.buffer = this.copyBuffer(chunk.buffer);
+            } else if (
+              Math.abs(correctionErrorMs) < thresholds.deadbandBelowMs
+            ) {
+              // Tier 1: Within deadband - no correction needed
+              playbackTime = this.nextPlaybackTime;
+              playbackRate = 1.0;
+              this.currentCorrectionMethod = "none";
+              this.lastSamplesAdjusted = 0;
+              chunk.buffer = this.copyBuffer(chunk.buffer);
+            } else if (
+              Math.abs(correctionErrorMs) < thresholds.samplesBelowMs
+            ) {
+              // Tier 2: Small error - use single sample insertion/deletion
+              playbackTime = this.nextPlaybackTime;
+              playbackRate = 1.0;
+              const samplesToAdjust = correctionErrorMs > 0 ? -1 : 1;
+              chunk.buffer = this.adjustBufferSamples(
+                chunk.buffer,
+                samplesToAdjust,
+              );
+              this.currentCorrectionMethod = "samples";
+              this.lastSamplesAdjusted = samplesToAdjust;
             } else {
-              playbackRate =
-                absErrorMs >= thresholds.rate2AboveMs
-                  ? 0.98
-                  : absErrorMs >= thresholds.rate1AboveMs
-                    ? 0.99
-                    : 1.0;
-            }
+              // Tier 3: Medium error - use playback rate adjustment
+              playbackTime = this.nextPlaybackTime;
+              const absErrorMs = Math.abs(correctionErrorMs);
 
-            this.currentCorrectionMethod =
-              playbackRate === 1.0 ? "none" : "rate";
-            this.lastSamplesAdjusted = 0;
-            chunk.buffer = this.copyBuffer(chunk.buffer);
+              if (correctionErrorMs > 0) {
+                playbackRate =
+                  absErrorMs >= thresholds.rate2AboveMs
+                    ? 1.02
+                    : absErrorMs >= thresholds.rate1AboveMs
+                      ? 1.01
+                      : 1.0;
+              } else {
+                playbackRate =
+                  absErrorMs >= thresholds.rate2AboveMs
+                    ? 0.98
+                    : absErrorMs >= thresholds.rate1AboveMs
+                      ? 0.99
+                      : 1.0;
+              }
+
+              this.currentCorrectionMethod =
+                playbackRate === 1.0 ? "none" : "rate";
+              this.lastSamplesAdjusted = 0;
+              chunk.buffer = this.copyBuffer(chunk.buffer);
+            }
           }
         } else {
           // Gap detected in server timestamps - hard resync
