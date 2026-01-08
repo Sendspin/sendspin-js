@@ -96,7 +96,7 @@ export class SendspinPlayer {
       outputMode,
       audioElement,
       isAndroid,
-      isAndroid ? SILENT_AUDIO_SRC : undefined,
+      config.silentAudioSrc ?? (isAndroid ? SILENT_AUDIO_SRC : undefined),
       config.syncDelay ?? 0,
       config.useHardwareVolume ?? false,
     );

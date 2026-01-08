@@ -282,6 +282,12 @@ export interface SendspinPlayerConfig {
   isAndroid?: boolean;
 
   /**
+   * Almost-silent audio data URL for Android MediaSession workaround.
+   * Overrides the bundled default when provided.
+   */
+  silentAudioSrc?: string;
+
+  /**
    * Codecs to use for audio streaming, in priority order.
    * Unsupported codecs for the current browser are automatically filtered out:
    * - Safari: No FLAC support
