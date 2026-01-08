@@ -213,7 +213,7 @@ export class SendspinPlayer {
    * Set the sync correction mode at runtime.
    * @param mode - The correction mode to use:
    *   - "sync": Multi-device sync, may use pitch-changing playback-rate adjustments for faster convergence.
-   *   - "quality": No playback-rate changes; uses sample fixes and tighter resyncs, so expect fewer adjustments but occasional jumps. Starts out of sync until the clock converges.
+   *   - "quality": No playback-rate changes; uses sample fixes and tighter resyncs, so expect fewer adjustments but occasional jumps. Starts out of sync until the clock converges. Not recommended for bad networks.
    *   - "quality-local": Avoids playback-rate changes; may drift vs. other players and only resyncs
    *     as a last resort.
    */
