@@ -18,6 +18,8 @@ const player = new SendspinPlayer({
   baseUrl: 'http://your-server:8095',
   clientName: 'My Web Player',
   audioOutputMode: 'direct',
+  // Optional: "sync" (default), "quality" (no pitch shifts), or "quality-local" (best for unsynced playback)
+  correctionMode: 'sync',
   onStateChange: (state) => {
     // Local player state
     console.log('Playing:', state.isPlaying);
