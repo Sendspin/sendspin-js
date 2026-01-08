@@ -239,10 +239,18 @@
               <option value="quality">Quality</option>
               <option value="quality-local">Quality (Local)</option>
             </select>
-            <small
-              >Choose between faster sync or higher-quality audio
-              corrections</small
-            >
+            <small>
+              <strong>Sync</strong>: fastest group sync; may use playback-rate
+              changes, so you might hear pitch shifts right after start.
+              <br />
+              <strong>Quality</strong>: no playback-rate changes; uses sample
+              fixes and tighter resyncs, so expect fewer shifts but occasional
+              jumps while clocks converge.
+              <br />
+              <strong>Quality (Local)</strong>: prioritize smooth local
+              playback; avoids rate changes and only resyncs as a last resort,
+              so it may drift vs. other devices.
+            </small>
           </div>
         </section>
 
