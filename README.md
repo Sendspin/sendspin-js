@@ -17,7 +17,6 @@ const player = new SendspinPlayer({
   playerId: 'my-player-id',
   baseUrl: 'http://your-server:8095',
   clientName: 'My Web Player',
-  audioOutputMode: 'direct',
   onStateChange: (state) => {
     // Local player state
     console.log('Playing:', state.isPlaying);
