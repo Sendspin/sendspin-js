@@ -283,7 +283,7 @@ export interface SendspinPlayerConfig {
 
   /**
    * Almost-silent audio data URL for Android MediaSession workaround.
-   * Required for Android when using media-element mode.
+   * Overrides the bundled default when provided.
    */
   silentAudioSrc?: string;
 
