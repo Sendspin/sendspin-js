@@ -3,6 +3,7 @@ import type {
   StreamFormat,
   AudioOutputMode,
   CorrectionMode,
+  ClockPrecision,
 } from "./types";
 import type { StateManager } from "./state-manager";
 import type { SendspinTimeFilter } from "./time-filter";
@@ -99,12 +100,9 @@ export class AudioProcessor {
   private smoothedSyncErrorMs: number = 0; // EMA-filtered sync error for corrections
   private resyncCount: number = 0;
   private currentPlaybackRate: number = 1.0;
-  private currentCorrectionMethod:
-    | "waiting-for-time-sync"
-    | "none"
-    | "samples"
-    | "rate"
-    | "resync" = "none";
+  private currentCorrectionMethod: "none" | "samples" | "rate" | "resync" =
+    "none";
+  private currentClockPrecision: ClockPrecision = "imprecise";
   private lastSamplesAdjusted: number = 0;
 
   // Output latency smoothing (EMA to filter Chrome jitter)
@@ -114,12 +112,8 @@ export class AudioProcessor {
   // Correction mode
   private _correctionMode: CorrectionMode = "sync";
   private _debugLogging: boolean = false;
-  private _lastLoggedCorrectionMethod:
-    | "waiting-for-time-sync"
-    | "none"
-    | "samples"
-    | "rate"
-    | "resync" = "none";
+  private _lastLoggedCorrectionMethod: "none" | "samples" | "rate" | "resync" =
+    "none";
   private _lastLoggedTime: number = 0;
 
   // Native Opus decoder (uses WebCodecs API)
@@ -230,14 +224,10 @@ export class AudioProcessor {
     resyncCount: number;
     outputLatencyMs: number;
     playbackRate: number;
-    correctionMethod:
-      | "waiting-for-time-sync"
-      | "none"
-      | "samples"
-      | "rate"
-      | "resync";
+    correctionMethod: "none" | "samples" | "rate" | "resync";
     samplesAdjusted: number;
     correctionMode: CorrectionMode;
+    clockPrecision: ClockPrecision;
   } {
     return {
       clockDriftPercent: this.timeFilter.drift * 100,
@@ -248,6 +238,7 @@ export class AudioProcessor {
       correctionMethod: this.currentCorrectionMethod,
       samplesAdjusted: this.lastSamplesAdjusted,
       correctionMode: this._correctionMode,
+      clockPrecision: this.currentClockPrecision,
     };
   }
 
@@ -999,12 +990,15 @@ export class AudioProcessor {
           if (timeFilterErrorMs > thresholds.timeFilterMaxErrorMs) {
             // Don't trust time filter yet, continue playing without corrections
             // until the filter stabilizes
+            this.currentClockPrecision = "imprecise";
             playbackTime = this.nextPlaybackTime;
             playbackRate = 1.0;
-            this.currentCorrectionMethod = "waiting-for-time-sync";
+            this.currentCorrectionMethod = "none";
             this.lastSamplesAdjusted = 0;
             chunk.buffer = this.copyBuffer(chunk.buffer);
           } else if (Math.abs(correctionErrorMs) > thresholds.resyncAboveMs) {
+            // Clock is precise enough for corrections
+            this.currentClockPrecision = "precise";
             // Tier 4: Hard resync if sync error exceeds threshold
             this.resyncCount++;
             this.smoothedSyncErrorMs = 0;
@@ -1016,6 +1010,7 @@ export class AudioProcessor {
             chunk.buffer = this.copyBuffer(chunk.buffer);
           } else if (Math.abs(correctionErrorMs) < thresholds.deadbandBelowMs) {
             // Tier 1: Within deadband - no correction needed
+            this.currentClockPrecision = "precise";
             playbackTime = this.nextPlaybackTime;
             playbackRate = 1.0;
             this.currentCorrectionMethod = "none";
@@ -1023,6 +1018,7 @@ export class AudioProcessor {
             chunk.buffer = this.copyBuffer(chunk.buffer);
           } else if (Math.abs(correctionErrorMs) < thresholds.samplesBelowMs) {
             // Tier 2: Small error - use single sample insertion/deletion
+            this.currentClockPrecision = "precise";
             playbackTime = this.nextPlaybackTime;
             playbackRate = 1.0;
             const samplesToAdjust = correctionErrorMs > 0 ? -1 : 1;
@@ -1034,6 +1030,7 @@ export class AudioProcessor {
             this.lastSamplesAdjusted = samplesToAdjust;
           } else {
             // Tier 3: Medium error - use playback rate adjustment
+            this.currentClockPrecision = "precise";
             playbackTime = this.nextPlaybackTime;
             const absErrorMs = Math.abs(correctionErrorMs);
 
@@ -1188,6 +1185,7 @@ export class AudioProcessor {
     this.resyncCount = 0;
     this.currentPlaybackRate = 1.0;
     this.currentCorrectionMethod = "none";
+    this.currentClockPrecision = "imprecise";
     this.lastSamplesAdjusted = 0;
     this.resetLatencySmoother();
   }

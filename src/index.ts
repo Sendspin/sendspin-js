@@ -12,6 +12,7 @@ import type {
   ControllerCommand,
   ControllerCommands,
   CorrectionMode,
+  ClockPrecision,
 } from "./types";
 
 // Platform detection utilities
@@ -322,14 +323,10 @@ export class SendspinPlayer {
     resyncCount: number;
     outputLatencyMs: number;
     playbackRate: number;
-    correctionMethod:
-      | "waiting-for-time-sync"
-      | "none"
-      | "samples"
-      | "rate"
-      | "resync";
+    correctionMethod: "none" | "samples" | "rate" | "resync";
     samplesAdjusted: number;
     correctionMode: CorrectionMode;
+    clockPrecision: ClockPrecision;
   } {
     return this.audioProcessor.syncInfo;
   }

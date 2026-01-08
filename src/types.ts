@@ -251,6 +251,13 @@ export type Codec = "pcm" | "opus" | "flac";
  */
 export type CorrectionMode = "sync" | "quality" | "quality-local";
 
+/**
+ * Clock precision state:
+ * - "precise": Time filter error is within threshold, corrections are reliable
+ * - "imprecise": Time filter error exceeds threshold, corrections are skipped
+ */
+export type ClockPrecision = "precise" | "imprecise";
+
 export interface SupportedFormat {
   codec: string;
   channels: number;
