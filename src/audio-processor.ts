@@ -26,6 +26,15 @@ const CORRECTION_THRESHOLDS: Record<
   }
 > = {
   sync: {
+    // Simulated results for how long it takes from playback start to correct to +/-5ms error:
+    // Average:
+    // - local devices: 9.107s (time played with distorted pitch 5815.7ms)
+    // - mobile devices on cellular: 12.453s (time played with distorted pitch 5819.5ms)
+    // - devices with already synchronized clocks: 2.689s (time played with distorted pitch 375.3ms)
+    // Worst-case:
+    // - local devices: 14.398s (time played with distorted pitch 10948.0ms)
+    // - mobile devices on cellular: 26.910s (time played with distorted pitch 10948.0ms)
+    // - devices with already synchronized clocks: 4.715s (time played with distorted pitch 1219.0ms)
     resyncAboveMs: 200, // Hard resync for large errors
     rate2AboveMs: 35, // Use 2% rate when error exceeds this
     rate1AboveMs: 8, // Use 1% rate when error exceeds this
@@ -34,6 +43,15 @@ const CORRECTION_THRESHOLDS: Record<
     timeFilterMaxErrorMs: 10, // Higher threshold; starts correcting earlier
   },
   quality: {
+    // Simulated results for how long it takes from playback start to correct to +/-5ms error:
+    // Average:
+    // - local devices: 3.642s
+    // - mobile devices on cellular: 209.429s
+    // - devices with already synchronized clocks: 6.353s
+    // Worst-case:
+    // - local devices: 34.339s
+    // - mobile devices on cellular: 3583.216s
+    // - devices with already synchronized clocks: 16.767s
     resyncAboveMs: 35, // Tighter resync threshold to avoid drifting too far
     rate2AboveMs: Infinity, // Disabled - never use rate correction
     rate1AboveMs: Infinity, // Disabled - never use rate correction
@@ -42,6 +60,15 @@ const CORRECTION_THRESHOLDS: Record<
     timeFilterMaxErrorMs: 2, // Lower threshold; wait for a more stable filter to reduce number of resyncs
   },
   "quality-local": {
+    // Simulated results for how long it takes from playback start to correct to +/-5ms error:
+    // Average:
+    // - local devices: 105.038s
+    // - mobile devices on cellular: 429.914s
+    // - devices with already synchronized clocks: 6.269s
+    // Worst-case:
+    // - local devices: 215.487s
+    // - mobile devices on cellular: 1005.376s
+    // - devices with already synchronized clocks: 16.767s
     resyncAboveMs: 600, // Last resort only (prefer keeping uninterupted playback even if out of sync)
     rate2AboveMs: Infinity, // Disabled - never use rate correction
     rate1AboveMs: Infinity, // Disabled - never use rate correction
