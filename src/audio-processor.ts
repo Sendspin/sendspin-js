@@ -27,27 +27,27 @@ const CORRECTION_THRESHOLDS: Record<
 > = {
   sync: {
     resyncAboveMs: 200, // Hard resync for large errors
-    rate2AboveMs: 40, // Use 2% rate when error exceeds this
-    rate1AboveMs: 15, // Use 1% rate when error exceeds this
-    samplesBelowMs: 15, // Use sample insertion/deletion below this
+    rate2AboveMs: 35, // Use 2% rate when error exceeds this
+    rate1AboveMs: 8, // Use 1% rate when error exceeds this
+    samplesBelowMs: 8, // Use sample insertion/deletion below this
     deadbandBelowMs: 1, // Ignore corrections below this
-    timeFilterMaxErrorMs: 5, // Higher threshold; starts correcting earlier
+    timeFilterMaxErrorMs: 10, // Higher threshold; starts correcting earlier
   },
   quality: {
-    resyncAboveMs: 50, // Tighter resync threshold to avoid drifting too far
+    resyncAboveMs: 35, // Tighter resync threshold to avoid drifting too far
     rate2AboveMs: Infinity, // Disabled - never use rate correction
     rate1AboveMs: Infinity, // Disabled - never use rate correction
-    samplesBelowMs: 50, // Use sample insertion/deletion below this
+    samplesBelowMs: 35, // Use sample insertion/deletion below this
     deadbandBelowMs: 1, // Keep deadband tight for accurate sync
     timeFilterMaxErrorMs: 2, // Lower threshold; wait for a more stable filter to reduce number of resyncs
   },
   "quality-local": {
-    resyncAboveMs: 500, // Last resort only (prefer keeping uninterupted playback even if out of sync)
+    resyncAboveMs: 600, // Last resort only (prefer keeping uninterupted playback even if out of sync)
     rate2AboveMs: Infinity, // Disabled - never use rate correction
     rate1AboveMs: Infinity, // Disabled - never use rate correction
-    samplesBelowMs: 500, // Use samples for any error < resyncAboveMs
+    samplesBelowMs: 600, // Use samples for any error < resyncAboveMs
     deadbandBelowMs: 5, // Larger deadband to avoid frequent small adjustments
-    timeFilterMaxErrorMs: 3, // Lower threshold to only start correcting once the filter is stable
+    timeFilterMaxErrorMs: 5, // Higher threshold; corrections are inaudible, so start correcting earlier
   },
 };
 
