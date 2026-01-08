@@ -28,53 +28,53 @@ const CORRECTION_THRESHOLDS: Record<
   sync: {
     // Simulated results for how long it takes from playback start to correct to +/-5ms error:
     // Average:
-    // - local devices: 9.107s (time played with distorted pitch 5815.7ms)
-    // - mobile devices on cellular: 12.453s (time played with distorted pitch 5819.5ms)
-    // - devices with already synchronized clocks: 2.689s (time played with distorted pitch 375.3ms)
+    // - local devices: 8.748s (time played with distorted pitch 5828.4ms)
+    // - mobile devices on cellular: 11.791s (time played with distorted pitch 5748.8ms)
+    // - devices with already synchronized clocks: 2.431s (time played with distorted pitch 368.0ms)
     // Worst-case:
-    // - local devices: 14.398s (time played with distorted pitch 10948.0ms)
-    // - mobile devices on cellular: 26.910s (time played with distorted pitch 10948.0ms)
-    // - devices with already synchronized clocks: 4.715s (time played with distorted pitch 1219.0ms)
+    // - local devices: 14.020s (time played with distorted pitch 10940.0ms)
+    // - mobile devices on cellular: 26.600s (time played with distorted pitch 10940.0ms)
+    // - devices with already synchronized clocks: 4.300s (time played with distorted pitch 1200.0ms)
     resyncAboveMs: 200, // Hard resync for large errors
     rate2AboveMs: 35, // Use 2% rate when error exceeds this
     rate1AboveMs: 8, // Use 1% rate when error exceeds this
     samplesBelowMs: 8, // Use sample insertion/deletion below this
     deadbandBelowMs: 1, // Ignore corrections below this
-    timeFilterMaxErrorMs: 10, // Higher threshold; starts correcting earlier
+    timeFilterMaxErrorMs: 15, // Higher threshold; starts correcting earlier
   },
   quality: {
     // Simulated results for how long it takes from playback start to correct to +/-5ms error:
     // Average:
-    // - local devices: 3.642s
-    // - mobile devices on cellular: 209.429s
-    // - devices with already synchronized clocks: 6.353s
+    // - local devices: 3.338s
+    // - mobile devices on cellular: 23.100s
+    // - devices with already synchronized clocks: 5.564s
     // Worst-case:
-    // - local devices: 34.339s
-    // - mobile devices on cellular: 3583.216s
-    // - devices with already synchronized clocks: 16.767s
+    // - local devices: 29.920s
+    // - mobile devices on cellular: 30.000s
+    // - devices with already synchronized clocks: 14.620s
     resyncAboveMs: 35, // Tighter resync threshold to avoid drifting too far
     rate2AboveMs: Infinity, // Disabled - never use rate correction
     rate1AboveMs: Infinity, // Disabled - never use rate correction
     samplesBelowMs: 35, // Use sample insertion/deletion below this
     deadbandBelowMs: 1, // Keep deadband tight for accurate sync
-    timeFilterMaxErrorMs: 2, // Lower threshold; wait for a more stable filter to reduce number of resyncs
+    timeFilterMaxErrorMs: 8, // Lower threshold; wait for a more stable filter to reduce number of resyncs
   },
   "quality-local": {
     // Simulated results for how long it takes from playback start to correct to +/-5ms error:
     // Average:
-    // - local devices: 105.038s
-    // - mobile devices on cellular: 429.914s
-    // - devices with already synchronized clocks: 6.269s
+    // - local devices: 26.825s
+    // - mobile devices on cellular: 28.980s
+    // - devices with already synchronized clocks: 5.461s
     // Worst-case:
-    // - local devices: 215.487s
-    // - mobile devices on cellular: 1005.376s
-    // - devices with already synchronized clocks: 16.767s
+    // - local devices: 30.000s
+    // - mobile devices on cellular: 30.000s
+    // - devices with already synchronized clocks: 14.620s
     resyncAboveMs: 600, // Last resort only (prefer keeping uninterrupted playback even if out of sync)
     rate2AboveMs: Infinity, // Disabled - never use rate correction
     rate1AboveMs: Infinity, // Disabled - never use rate correction
     samplesBelowMs: 600, // Use samples for any error < resyncAboveMs
     deadbandBelowMs: 5, // Larger deadband to avoid frequent small adjustments
-    timeFilterMaxErrorMs: 5, // Higher threshold; corrections are inaudible, so start correcting earlier
+    timeFilterMaxErrorMs: 10, // Moderate threshold; only start correcting once we are reasonably sure of the time
   },
 };
 
