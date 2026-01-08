@@ -22,7 +22,7 @@ const CORRECTION_THRESHOLDS: Record<
     rate1AboveMs: number; // ms - use 1% rate above this
     samplesBelowMs: number; // ms - use sample manipulation below this
     deadbandBelowMs: number; // ms - don't correct if error < this
-    kalmanThreshold: number; // Only correct if the error is below this
+    timeFilterMaxErrorMs: number; // Only correct if the error is below this
   }
 > = {
   sync: {
@@ -31,7 +31,7 @@ const CORRECTION_THRESHOLDS: Record<
     rate1AboveMs: 15, // Use 1% rate when error exceeds this
     samplesBelowMs: 15, // Use sample insertion/deletion below this
     deadbandBelowMs: 1, // Ignore corrections below this
-    kalmanThreshold: 5000, // Higher threshold; starts correcting earlier
+    timeFilterMaxErrorMs: 5, // Higher threshold; starts correcting earlier
   },
   quality: {
     resyncAboveMs: 50, // Tighter resync threshold to avoid drifting too far
@@ -39,7 +39,7 @@ const CORRECTION_THRESHOLDS: Record<
     rate1AboveMs: Infinity, // Disabled - never use rate correction
     samplesBelowMs: 50, // Use sample insertion/deletion below this
     deadbandBelowMs: 1, // Keep deadband tight for accurate sync
-    kalmanThreshold: 2000, // Lower threshold; wait for a more stable filter to reduce number of resyncs
+    timeFilterMaxErrorMs: 2, // Lower threshold; wait for a more stable filter to reduce number of resyncs
   },
   "quality-local": {
     resyncAboveMs: 500, // Last resort only (prefer keeping uninterupted playback even if out of sync)
@@ -47,7 +47,7 @@ const CORRECTION_THRESHOLDS: Record<
     rate1AboveMs: Infinity, // Disabled - never use rate correction
     samplesBelowMs: 500, // Use samples for any error < resyncAboveMs
     deadbandBelowMs: 5, // Larger deadband to avoid frequent small adjustments
-    kalmanThreshold: 3000, // Lower threshold to only start correcting once the filter is stable
+    timeFilterMaxErrorMs: 3, // Lower threshold to only start correcting once the filter is stable
   },
 };
 
@@ -949,7 +949,8 @@ export class AudioProcessor {
           // Get thresholds for current correction mode
           const thresholds = CORRECTION_THRESHOLDS[this._correctionMode];
 
-          if (this.timeFilter.error > thresholds.kalmanThreshold) {
+          const timeFilterErrorMs = this.timeFilter.error / 1000;
+          if (timeFilterErrorMs > thresholds.timeFilterMaxErrorMs) {
             // Don't trust time filter yet, continue playing without corrections
             // until the filter stabilizes
             playbackTime = this.nextPlaybackTime;
