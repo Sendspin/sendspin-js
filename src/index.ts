@@ -3,6 +3,7 @@ import { ProtocolHandler } from "./protocol-handler";
 import { StateManager } from "./state-manager";
 import { WebSocketManager } from "./websocket-manager";
 import { SendspinTimeFilter } from "./time-filter";
+import { SILENT_AUDIO_SRC } from "./silent-audio.generated";
 import type {
   SendspinPlayerConfig,
   PlayerState,
@@ -96,7 +97,7 @@ export class SendspinPlayer {
       outputMode,
       audioElement,
       isAndroid,
-      config.silentAudioSrc,
+      config.silentAudioSrc ?? (isAndroid ? SILENT_AUDIO_SRC : undefined),
       config.syncDelay ?? 0,
       config.useHardwareVolume ?? false,
       config.correctionMode ?? "sync",
