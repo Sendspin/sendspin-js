@@ -69,7 +69,7 @@ const CORRECTION_THRESHOLDS: Record<
     // - local devices: 215.487s
     // - mobile devices on cellular: 1005.376s
     // - devices with already synchronized clocks: 16.767s
-    resyncAboveMs: 600, // Last resort only (prefer keeping uninterupted playback even if out of sync)
+    resyncAboveMs: 600, // Last resort only (prefer keeping uninterrupted playback even if out of sync)
     rate2AboveMs: Infinity, // Disabled - never use rate correction
     rate1AboveMs: Infinity, // Disabled - never use rate correction
     samplesBelowMs: 600, // Use samples for any error < resyncAboveMs
