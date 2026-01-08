@@ -255,8 +255,9 @@ export type CorrectionMode = "sync" | "quality" | "quality-local";
  * Clock precision state:
  * - "precise": Time filter error is within threshold, corrections are reliable
  * - "imprecise": Time filter error exceeds threshold, corrections are skipped
+ * - "imprecise-timeout": Time filter error exceeds threshold but timeout elapsed, corrections proceed anyway
  */
-export type ClockPrecision = "precise" | "imprecise";
+export type ClockPrecision = "precise" | "imprecise" | "imprecise-timeout";
 
 export interface SupportedFormat {
   codec: string;

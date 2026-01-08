@@ -24,6 +24,7 @@ const CORRECTION_THRESHOLDS: Record<
     samplesBelowMs: number; // ms - use sample manipulation below this
     deadbandBelowMs: number; // ms - don't correct if error < this
     timeFilterMaxErrorMs: number; // Only correct if the error is below this
+    clockPrecisionTimeoutMs: number; // ms - max time to wait for clock precision after playback starts
   }
 > = {
   sync: {
@@ -42,6 +43,7 @@ const CORRECTION_THRESHOLDS: Record<
     samplesBelowMs: 8, // Use sample insertion/deletion below this
     deadbandBelowMs: 1, // Ignore corrections below this
     timeFilterMaxErrorMs: 15, // Higher threshold; starts correcting earlier
+    clockPrecisionTimeoutMs: 20_000, // 20s - then correct with imprecise clock
   },
   quality: {
     // Simulated results for how long it takes from playback start to correct to +/-5ms error:
@@ -59,6 +61,7 @@ const CORRECTION_THRESHOLDS: Record<
     samplesBelowMs: 35, // Use sample insertion/deletion below this
     deadbandBelowMs: 1, // Keep deadband tight for accurate sync
     timeFilterMaxErrorMs: 8, // Lower threshold; wait for a more stable filter to reduce number of resyncs
+    clockPrecisionTimeoutMs: Infinity, // Never force corrections with imprecise clock
   },
   "quality-local": {
     // Simulated results for how long it takes from playback start to correct to +/-5ms error:
@@ -76,6 +79,7 @@ const CORRECTION_THRESHOLDS: Record<
     samplesBelowMs: 600, // Use samples for any error < resyncAboveMs
     deadbandBelowMs: 5, // Larger deadband to avoid frequent small adjustments
     timeFilterMaxErrorMs: 10, // Moderate threshold; only start correcting once we are reasonably sure of the time
+    clockPrecisionTimeoutMs: Infinity, // Never force corrections with imprecise clock
   },
 };
 
@@ -103,6 +107,7 @@ export class AudioProcessor {
   private currentCorrectionMethod: "none" | "samples" | "rate" | "resync" =
     "none";
   private currentClockPrecision: ClockPrecision = "imprecise";
+  private playbackStartedAt: number | null = null; // performance.now() when playback started
   private lastSamplesAdjusted: number = 0;
 
   // Output latency smoothing (EMA to filter Chrome jitter)
@@ -958,6 +963,10 @@ export class AudioProcessor {
 
       // First chunk or after a gap: calculate from server timestamp
       if (this.nextPlaybackTime === 0 || this.lastScheduledServerTime === 0) {
+        // Track when playback started for clock precision timeout
+        if (this.playbackStartedAt === null) {
+          this.playbackStartedAt = performance.now();
+        }
         playbackTime = targetPlaybackTime;
         playbackRate = 1.0;
         chunk.buffer = this.copyBuffer(chunk.buffer);
@@ -987,9 +996,17 @@ export class AudioProcessor {
           const thresholds = CORRECTION_THRESHOLDS[this._correctionMode];
 
           const timeFilterErrorMs = this.timeFilter.error / 1000;
-          if (timeFilterErrorMs > thresholds.timeFilterMaxErrorMs) {
+          const isClockImprecise =
+            timeFilterErrorMs > thresholds.timeFilterMaxErrorMs;
+          const playbackDurationMs = this.playbackStartedAt
+            ? performance.now() - this.playbackStartedAt
+            : 0;
+          const timeoutElapsed =
+            playbackDurationMs > thresholds.clockPrecisionTimeoutMs;
+
+          if (isClockImprecise && !timeoutElapsed) {
             // Don't trust time filter yet, continue playing without corrections
-            // until the filter stabilizes
+            // until the filter stabilizes (or timeout elapses)
             this.currentClockPrecision = "imprecise";
             playbackTime = this.nextPlaybackTime;
             playbackRate = 1.0;
@@ -997,8 +1014,10 @@ export class AudioProcessor {
             this.lastSamplesAdjusted = 0;
             chunk.buffer = this.copyBuffer(chunk.buffer);
           } else if (Math.abs(correctionErrorMs) > thresholds.resyncAboveMs) {
-            // Clock is precise enough for corrections
-            this.currentClockPrecision = "precise";
+            // Clock is precise OR timeout elapsed - proceed with corrections
+            this.currentClockPrecision = isClockImprecise
+              ? "imprecise-timeout"
+              : "precise";
             // Tier 4: Hard resync if sync error exceeds threshold
             this.resyncCount++;
             this.smoothedSyncErrorMs = 0;
@@ -1010,7 +1029,9 @@ export class AudioProcessor {
             chunk.buffer = this.copyBuffer(chunk.buffer);
           } else if (Math.abs(correctionErrorMs) < thresholds.deadbandBelowMs) {
             // Tier 1: Within deadband - no correction needed
-            this.currentClockPrecision = "precise";
+            this.currentClockPrecision = isClockImprecise
+              ? "imprecise-timeout"
+              : "precise";
             playbackTime = this.nextPlaybackTime;
             playbackRate = 1.0;
             this.currentCorrectionMethod = "none";
@@ -1018,7 +1039,9 @@ export class AudioProcessor {
             chunk.buffer = this.copyBuffer(chunk.buffer);
           } else if (Math.abs(correctionErrorMs) < thresholds.samplesBelowMs) {
             // Tier 2: Small error - use single sample insertion/deletion
-            this.currentClockPrecision = "precise";
+            this.currentClockPrecision = isClockImprecise
+              ? "imprecise-timeout"
+              : "precise";
             playbackTime = this.nextPlaybackTime;
             playbackRate = 1.0;
             const samplesToAdjust = correctionErrorMs > 0 ? -1 : 1;
@@ -1030,7 +1053,9 @@ export class AudioProcessor {
             this.lastSamplesAdjusted = samplesToAdjust;
           } else {
             // Tier 3: Medium error - use playback rate adjustment
-            this.currentClockPrecision = "precise";
+            this.currentClockPrecision = isClockImprecise
+              ? "imprecise-timeout"
+              : "precise";
             playbackTime = this.nextPlaybackTime;
             const absErrorMs = Math.abs(correctionErrorMs);
 
@@ -1186,6 +1211,7 @@ export class AudioProcessor {
     this.currentPlaybackRate = 1.0;
     this.currentCorrectionMethod = "none";
     this.currentClockPrecision = "imprecise";
+    this.playbackStartedAt = null;
     this.lastSamplesAdjusted = 0;
     this.resetLatencySmoother();
   }
