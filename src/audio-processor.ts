@@ -83,7 +83,11 @@ export class AudioProcessor {
   private gainNode: GainNode | null = null;
   private streamDestination: MediaStreamAudioDestinationNode | null = null;
   private audioBufferQueue: AudioBufferQueueItem[] = [];
-  private scheduledSources: AudioBufferSourceNode[] = [];
+  private scheduledSources: {
+    source: AudioBufferSourceNode;
+    startTime: number;
+    endTime: number;
+  }[] = [];
   private queueProcessTimeout: number | null = null;
 
   // Seamless playback tracking
@@ -426,6 +430,21 @@ export class AudioProcessor {
       await this.audioContext.resume();
       console.log("Sendspin: AudioContext resumed");
     }
+  }
+
+  private cutScheduledSources(cutoffTime: number): void {
+    if (!this.audioContext) return;
+    const stopTime = Math.max(cutoffTime, this.audioContext.currentTime);
+    this.scheduledSources = this.scheduledSources.filter((entry) => {
+      if (entry.endTime <= stopTime) return true;
+      try {
+        entry.source.onended = null;
+        entry.source.stop(stopTime);
+      } catch (e) {
+        // Ignore errors if source already stopped
+      }
+      return false;
+    });
   }
 
   // Update volume based on current state
@@ -989,6 +1008,7 @@ export class AudioProcessor {
             // Tier 4: Hard resync if sync error exceeds threshold
             this.resyncCount++;
             this.smoothedSyncErrorMs = 0;
+            this.cutScheduledSources(targetPlaybackTime);
             playbackTime = targetPlaybackTime;
             playbackRate = 1.0;
             this.currentCorrectionMethod = "resync";
@@ -1041,6 +1061,7 @@ export class AudioProcessor {
         } else {
           // Gap detected in server timestamps - hard resync
           this.resyncCount++;
+          this.cutScheduledSources(targetPlaybackTime);
           playbackTime = targetPlaybackTime;
           playbackRate = 1.0;
           this.currentCorrectionMethod = "resync";
@@ -1094,9 +1115,14 @@ export class AudioProcessor {
       this.lastScheduledServerTime =
         chunk.serverTime + chunk.buffer.duration * 1_000_000;
 
-      this.scheduledSources.push(source);
+      const scheduledEntry = {
+        source,
+        startTime: playbackTime,
+        endTime: playbackTime + actualDuration,
+      };
+      this.scheduledSources.push(scheduledEntry);
       source.onended = () => {
-        const idx = this.scheduledSources.indexOf(source);
+        const idx = this.scheduledSources.indexOf(scheduledEntry);
         if (idx > -1) this.scheduledSources.splice(idx, 1);
       };
     }
@@ -1131,9 +1157,9 @@ export class AudioProcessor {
   // Clear all audio buffers and scheduled sources
   clearBuffers(): void {
     // Stop all scheduled audio sources
-    this.scheduledSources.forEach((source) => {
+    this.scheduledSources.forEach((entry) => {
       try {
-        source.stop();
+        entry.source.stop();
       } catch (e) {
         // Ignore errors if source already stopped
       }
