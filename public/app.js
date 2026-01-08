@@ -57,6 +57,7 @@ const outputLatency = document.getElementById("output-latency");
 const resyncCount = document.getElementById("resync-count");
 const correctionModeStatus = document.getElementById("correction-mode-status");
 const correctionMethod = document.getElementById("correction-method");
+const clockPrecision = document.getElementById("clock-precision");
 const playbackRate = document.getElementById("playback-rate");
 const samplesAdjusted = document.getElementById("samples-adjusted");
 const timeSyncSynced = document.getElementById("time-sync-synced");
@@ -276,6 +277,14 @@ function updateStatusDisplay() {
 
     if (sync.correctionMethod) {
       correctionMethod.textContent = sync.correctionMethod;
+    }
+
+    if (sync.clockPrecision) {
+      clockPrecision.textContent = sync.clockPrecision;
+      clockPrecision.className =
+        sync.clockPrecision !== "precise"
+          ? "status-value warning"
+          : "status-value";
     }
 
     if (sync.playbackRate !== undefined) {
