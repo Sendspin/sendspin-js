@@ -49,17 +49,15 @@ export class SendspinPlayer {
     const clientName = config.clientName ?? `Sendspin JS Client (${randomId})`;
 
     // Auto-detect platform
-    const isAndroid = config.isAndroid ?? detectIsAndroid();
+    const isAndroid = detectIsAndroid();
     const isMobile = detectIsMobile();
 
     // Determine output mode:
-    // - If explicitly set, use that
     // - If audioElement provided, use media-element
     // - If mobile (iOS/Android), default to media-element
     // - Otherwise, use direct
     const outputMode =
-      config.audioOutputMode ??
-      (config.audioElement || isMobile ? "media-element" : "direct");
+      config.audioElement || isMobile ? "media-element" : "direct";
 
     // Auto-create audio element for mobile if not provided and using media-element mode
     let audioElement = config.audioElement;
@@ -78,9 +76,7 @@ export class SendspinPlayer {
       ...config,
       playerId,
       clientName,
-      isAndroid,
       audioElement,
-      audioOutputMode: outputMode,
     };
 
     // Initialize time filter (shared between audio processor and protocol handler)
@@ -96,7 +92,7 @@ export class SendspinPlayer {
       outputMode,
       audioElement,
       isAndroid,
-      config.silentAudioSrc ?? (isAndroid ? SILENT_AUDIO_SRC : undefined),
+      isAndroid ? SILENT_AUDIO_SRC : undefined,
       config.syncDelay ?? 0,
       config.useHardwareVolume ?? false,
     );
