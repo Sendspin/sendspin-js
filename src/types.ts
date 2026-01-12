@@ -383,10 +383,26 @@ export interface SendspinPlayerConfig {
    * Should return current hardware volume (0-100) and muted state.
    */
   getExternalVolume?: () => { volume: number; muted: boolean };
+
+  /**
+   * Storage for persisting SDK state (e.g., cached output latency).
+   * Defaults to localStorage. Pass null to disable persistence.
+   */
+  storage?: SendspinStorage | null;
 }
 
 export interface AudioBufferQueueItem {
   buffer: AudioBuffer;
   serverTime: number;
   generation: number;
+}
+
+/**
+ * Storage interface for persisting SDK state.
+ * Compatible with Web Storage API (localStorage/sessionStorage).
+ * Provide a custom implementation to control where the SDK stores data.
+ */
+export interface SendspinStorage {
+  getItem(key: string): string | null;
+  setItem(key: string, value: string): void;
 }

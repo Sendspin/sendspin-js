@@ -4,6 +4,7 @@ import type {
   AudioOutputMode,
   CorrectionMode,
   ClockPrecision,
+  SendspinStorage,
 } from "./types";
 import type { StateManager } from "./state-manager";
 import type { SendspinTimeFilter } from "./time-filter";
@@ -142,17 +143,19 @@ export class AudioProcessor {
     private syncDelayMs: number = 0,
     private useHardwareVolume: boolean = false,
     correctionMode: CorrectionMode = "sync",
+    private storage: SendspinStorage | null = null,
   ) {
     this._correctionMode = correctionMode;
 
-    // Load persisted output latency from localStorage
+    // Load persisted output latency from storage
     this.loadPersistedLatency();
   }
 
-  // Load persisted output latency from localStorage
+  // Load persisted output latency from storage
   private loadPersistedLatency(): void {
+    if (!this.storage) return;
     try {
-      const stored = localStorage.getItem(OUTPUT_LATENCY_STORAGE_KEY);
+      const stored = this.storage.getItem(OUTPUT_LATENCY_STORAGE_KEY);
       if (stored) {
         const latency = parseFloat(stored);
         if (!isNaN(latency) && latency >= 0) {
@@ -165,20 +168,20 @@ export class AudioProcessor {
         }
       }
     } catch {
-      // localStorage may not be available (e.g., in some iframe contexts)
+      // Storage may fail depending on the implementation, ignore errors
     }
   }
 
-  // Persist output latency to localStorage
+  // Persist output latency to storage
   private persistLatency(): void {
-    if (this.smoothedOutputLatencyUs === null) return;
+    if (!this.storage || this.smoothedOutputLatencyUs === null) return;
     try {
-      localStorage.setItem(
+      this.storage.setItem(
         OUTPUT_LATENCY_STORAGE_KEY,
         this.smoothedOutputLatencyUs.toString(),
       );
     } catch {
-      // localStorage may not be available
+      // Storage may fail depending on the implementation, ignore errors
     }
   }
 

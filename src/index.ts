@@ -6,6 +6,7 @@ import { SendspinTimeFilter } from "./time-filter";
 import { SILENT_AUDIO_SRC } from "./silent-audio.generated";
 import type {
   SendspinPlayerConfig,
+  SendspinStorage,
   PlayerState,
   StreamFormat,
   GoodbyeReason,
@@ -92,6 +93,12 @@ export class SendspinPlayer {
     this.stateManager = new StateManager(config.onStateChange);
 
     // Initialize audio processor
+    let storage: SendspinStorage | null = null;
+    if (config.storage !== undefined) {
+      storage = config.storage;
+    } else if (typeof localStorage !== "undefined") {
+      storage = localStorage;
+    }
     this.audioProcessor = new AudioProcessor(
       this.stateManager,
       this.timeFilter,
@@ -102,6 +109,7 @@ export class SendspinPlayer {
       config.syncDelay ?? 0,
       config.useHardwareVolume ?? false,
       config.correctionMode ?? "sync",
+      storage,
     );
 
     // Initialize WebSocket manager
