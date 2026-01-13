@@ -134,6 +134,17 @@ export class ProtocolHandler {
     this.stateManager.setStateUpdateInterval(stateInterval);
   }
 
+  // Restart the periodic state update interval.
+  // Called after volume commands to prevent a pending periodic update
+  // from sending stale hardware volume shortly after the command response.
+  private restartStateUpdateInterval(): void {
+    const newInterval = window.setInterval(
+      () => this.sendStateUpdate(),
+      STATE_UPDATE_INTERVAL,
+    );
+    this.stateManager.setStateUpdateInterval(newInterval);
+  }
+
   // Schedule next time sync with adaptive interval based on sync quality
   private scheduleNextTimeSync(): void {
     const interval = this.computeTimeSyncInterval();
@@ -301,8 +312,10 @@ export class ProtocolHandler {
         break;
     }
 
-    // Send state update to confirm the change
-    this.sendStateUpdate();
+    // Reset periodic timer first, then send state with commanded values.
+    // Skip hardware read to avoid race where hardware hasn't applied the volume yet.
+    this.restartStateUpdateInterval();
+    this.sendStateUpdate(true);
   }
 
   // Send client hello with player identification
@@ -415,11 +428,12 @@ export class ProtocolHandler {
   }
 
   // Send state update
-  sendStateUpdate(): void {
-    // Get volume from external source if using hardware volume
+  // When skipHardwareRead is true, use stateManager values instead of reading from hardware.
+  // This avoids race conditions when responding to volume commands.
+  sendStateUpdate(skipHardwareRead = false): void {
     let volume = this.stateManager.volume;
     let muted = this.stateManager.muted;
-    if (this.useHardwareVolume && this.getExternalVolume) {
+    if (!skipHardwareRead && this.useHardwareVolume && this.getExternalVolume) {
       const externalVol = this.getExternalVolume();
       volume = externalVol.volume;
       muted = externalVol.muted;
