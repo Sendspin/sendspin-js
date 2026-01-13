@@ -201,6 +201,7 @@ function resetStatusDisplay() {
   resyncCount.textContent = "-";
   correctionModeStatus.textContent = "-";
   correctionMethod.textContent = "-";
+  clockPrecision.textContent = "-";
   playbackRate.textContent = "-";
   samplesAdjusted.textContent = "-";
   timeSyncSynced.textContent = "-";
