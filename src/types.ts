@@ -360,8 +360,9 @@ export interface SendspinPlayerConfig {
 
   /**
    * Getter for external volume state.
-   * Called when reporting state to server if useHardwareVolume is true.
+   * Called periodically when reporting state to server if useHardwareVolume is true.
    * Should return current hardware volume (0-100) and muted state.
+   * Not called immediately after volume commands to wait for hardware to apply the change.
    */
   getExternalVolume?: () => { volume: number; muted: boolean };
 
