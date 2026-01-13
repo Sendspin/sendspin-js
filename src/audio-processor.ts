@@ -1042,7 +1042,7 @@ export class AudioProcessor {
               this.lastSamplesAdjusted = 0;
               chunk.buffer = this.copyBuffer(chunk.buffer);
             } else if (
-              Math.abs(correctionErrorMs) < thresholds.samplesBelowMs
+              Math.abs(correctionErrorMs) <= thresholds.samplesBelowMs
             ) {
               // Tier 2: Small error - use single sample insertion/deletion
               playbackTime = this.nextPlaybackTime;
@@ -1099,16 +1099,16 @@ export class AudioProcessor {
           const thresholds = CORRECTION_THRESHOLDS[this._correctionMode];
           console.log(
             `Sendspin: [${this._correctionMode}] Correction: ${this._lastLoggedCorrectionMethod} -> ${this.currentCorrectionMethod} ` +
-              `| error=${this.smoothedSyncErrorMs.toFixed(1)}ms ` +
-              `| rate=${playbackRate} | resyncs=${this.resyncCount} | error=${this.timeFilter.error}` +
+              `| syncError=${this.smoothedSyncErrorMs.toFixed(1)}ms ` +
+              `| rate=${playbackRate} | resyncs=${this.resyncCount} | filterError=${this.timeFilter.error}` +
               `| thresholds: resync>${thresholds.resyncAboveMs}ms, samples<${thresholds.samplesBelowMs}ms, rate1>=${thresholds.rate1AboveMs}ms, rate2>=${thresholds.rate2AboveMs}ms`,
           );
           this._lastLoggedCorrectionMethod = this.currentCorrectionMethod;
           this._lastLoggedTime = performance.now();
         } else if (performance.now() - this._lastLoggedTime > 2000) {
           console.log(
-            `Sendspin: error=${this.smoothedSyncErrorMs.toFixed(1)}ms ` +
-              `| error=${this.timeFilter.error}`,
+            `Sendspin: syncError=${this.smoothedSyncErrorMs.toFixed(1)}ms ` +
+              `| filterError=${this.timeFilter.error}`,
           );
           this._lastLoggedTime = performance.now();
         }
