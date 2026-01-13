@@ -25,6 +25,7 @@ const STORAGE_KEYS = {
   VOLUME: "sendspin-volume",
   MUTED: "sendspin-muted",
   SYNC_DELAY: "sendspin-sync-delay",
+  CORRECTION_MODE: "sendspin-correction-mode",
 };
 
 // DOM Elements
@@ -39,6 +40,7 @@ const muteBtn = document.getElementById("mute-btn");
 const muteIcon = document.getElementById("mute-icon");
 const syncDelayInput = document.getElementById("sync-delay");
 const applySyncDelayBtn = document.getElementById("apply-sync-delay");
+const correctionModeSelect = document.getElementById("correction-mode");
 const groupVolumeSlider = document.getElementById("group-volume-slider");
 const groupVolumeValue = document.getElementById("group-volume-value");
 const groupMuteBtn = document.getElementById("group-mute-btn");
@@ -53,6 +55,14 @@ const clockDrift = document.getElementById("clock-drift");
 const syncError = document.getElementById("sync-error");
 const outputLatency = document.getElementById("output-latency");
 const resyncCount = document.getElementById("resync-count");
+const correctionModeStatus = document.getElementById("correction-mode-status");
+const correctionMethod = document.getElementById("correction-method");
+const clockPrecision = document.getElementById("clock-precision");
+const playbackRate = document.getElementById("playback-rate");
+const samplesAdjusted = document.getElementById("samples-adjusted");
+const timeSyncSynced = document.getElementById("time-sync-synced");
+const timeSyncOffset = document.getElementById("time-sync-offset");
+const timeSyncError = document.getElementById("time-sync-error");
 
 // Now Playing elements
 const trackTitle = document.getElementById("track-title");
@@ -189,6 +199,14 @@ function resetStatusDisplay() {
   syncError.textContent = "-";
   outputLatency.textContent = "-";
   resyncCount.textContent = "-";
+  correctionModeStatus.textContent = "-";
+  correctionMethod.textContent = "-";
+  clockPrecision.textContent = "-";
+  playbackRate.textContent = "-";
+  samplesAdjusted.textContent = "-";
+  timeSyncSynced.textContent = "-";
+  timeSyncOffset.textContent = "-";
+  timeSyncError.textContent = "-";
   groupVolumeValue.textContent = "-";
   groupMuteIcon.textContent = "🔊";
 }
@@ -251,6 +269,39 @@ function updateStatusDisplay() {
       resyncCount.className =
         sync.resyncCount > 5 ? "status-value warning" : "status-value";
     }
+
+    if (sync.correctionMode) {
+      correctionModeStatus.textContent = sync.correctionMode;
+    } else if (player.correctionMode) {
+      correctionModeStatus.textContent = player.correctionMode;
+    }
+
+    if (sync.correctionMethod) {
+      correctionMethod.textContent = sync.correctionMethod;
+    }
+
+    if (sync.clockPrecision) {
+      clockPrecision.textContent = sync.clockPrecision;
+      clockPrecision.className =
+        sync.clockPrecision !== "precise"
+          ? "status-value warning"
+          : "status-value";
+    }
+
+    if (sync.playbackRate !== undefined) {
+      playbackRate.textContent = sync.playbackRate.toFixed(3);
+    }
+
+    if (sync.samplesAdjusted !== undefined) {
+      samplesAdjusted.textContent = sync.samplesAdjusted.toString();
+    }
+  }
+
+  const timeSync = player.timeSyncInfo;
+  if (timeSync) {
+    timeSyncSynced.textContent = timeSync.synced ? "Yes" : "No";
+    timeSyncOffset.textContent = `${timeSync.offset.toFixed(0)}ms`;
+    timeSyncError.textContent = `${timeSync.error.toFixed(0)}ms`;
   }
 }
 
@@ -339,6 +390,13 @@ function loadSettings() {
   if (savedSyncDelay !== null) {
     syncDelayInput.value = savedSyncDelay;
   }
+
+  const savedCorrectionMode = localStorage.getItem(
+    STORAGE_KEYS.CORRECTION_MODE,
+  );
+  if (savedCorrectionMode !== null) {
+    correctionModeSelect.value = savedCorrectionMode;
+  }
 }
 
 /**
@@ -360,6 +418,13 @@ function saveMuted(muted) {
  */
 function saveSyncDelay(delay) {
   localStorage.setItem(STORAGE_KEYS.SYNC_DELAY, delay.toString());
+}
+
+/**
+ * Save correction mode to localStorage
+ */
+function saveCorrectionMode(mode) {
+  localStorage.setItem(STORAGE_KEYS.CORRECTION_MODE, mode);
 }
 
 /**
@@ -413,12 +478,15 @@ async function connect() {
       localStorage.getItem(STORAGE_KEYS.SYNC_DELAY) || "0",
       10,
     );
+    const savedCorrectionMode =
+      localStorage.getItem(STORAGE_KEYS.CORRECTION_MODE) || "sync";
 
     player = new SendspinPlayer({
       playerId: getPlayerId(),
       baseUrl: serverUrl,
       clientName: "Sendspin Sample Player",
       syncDelay: savedSyncDelay,
+      correctionMode: savedCorrectionMode,
       onStateChange,
     });
 
@@ -441,6 +509,7 @@ async function connect() {
     volumeSlider.value = player.volume;
     volumeValue.textContent = `${player.volume}%`;
     updateMuteIcon(player.muted);
+    correctionModeSelect.value = savedCorrectionMode;
   } catch (error) {
     console.error("Connection failed:", error);
     showToast(`Connection failed: ${error.message}`, "error");
@@ -535,6 +604,18 @@ function applySyncDelay() {
 }
 
 /**
+ * Apply correction mode
+ */
+function applyCorrectionMode() {
+  const mode = correctionModeSelect.value;
+  saveCorrectionMode(mode);
+  if (player) {
+    player.setCorrectionMode(mode);
+    showToast(`Correction mode set to ${mode}`, "success");
+  }
+}
+
+/**
  * Initialize the application
  */
 function init() {
@@ -564,6 +645,7 @@ function init() {
   volumeSlider.addEventListener("input", updateVolume);
   muteBtn.addEventListener("click", toggleMute);
   applySyncDelayBtn.addEventListener("click", applySyncDelay);
+  correctionModeSelect.addEventListener("change", applyCorrectionMode);
   groupVolumeSlider.addEventListener("input", () => {
     player.sendCommand("volume", {
       volume: parseInt(groupVolumeSlider.value, 10),

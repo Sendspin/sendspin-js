@@ -2,24 +2,98 @@ import type {
   AudioBufferQueueItem,
   StreamFormat,
   AudioOutputMode,
+  CorrectionMode,
+  ClockPrecision,
+  SendspinStorage,
 } from "./types";
 import type { StateManager } from "./state-manager";
 import type { SendspinTimeFilter } from "./time-filter";
 
 // Sync correction constants
-const HARD_RESYNC_THRESHOLD_MS = 200; // Hard resync for extreme errors
-const RATE_2_PERCENT_THRESHOLD_MS = 40; // Use 2% rate above this
-const SAMPLE_CORRECTION_THRESHOLD_MS = 15; // Use sample manipulation below this
-const SYNC_ERROR_DEADBAND_MS = 1; // Don't correct if error < 1ms
 const OUTPUT_LATENCY_ALPHA = 0.01; // EMA smoothing factor for outputLatency
 const SYNC_ERROR_ALPHA = 0.1; // EMA smoothing factor for sync error (filters jitter)
+const OUTPUT_LATENCY_STORAGE_KEY = "sendspin-output-latency-us"; // LocalStorage key
+const OUTPUT_LATENCY_PERSIST_INTERVAL_MS = 10_000;
+
+// Mode-specific sync correction thresholds
+const CORRECTION_THRESHOLDS: Record<
+  CorrectionMode,
+  {
+    resyncAboveMs: number; // ms - hard resync for extreme errors
+    rate2AboveMs: number; // ms - use 2% rate above this
+    rate1AboveMs: number; // ms - use 1% rate above this
+    samplesBelowMs: number; // ms - use sample manipulation below this
+    deadbandBelowMs: number; // ms - don't correct if error < this
+    timeFilterMaxErrorMs: number; // Only correct if the error is below this
+    clockPrecisionTimeoutMs: number; // ms - max time to wait for clock precision after playback starts
+  }
+> = {
+  sync: {
+    // Simulated results for how long it takes from playback start to correct to +/-5ms error:
+    // Average:
+    // - local devices: 8.748s (time played with distorted pitch 5828.4ms)
+    // - mobile devices on cellular: 11.791s (time played with distorted pitch 5748.8ms)
+    // - devices with already synchronized clocks: 2.431s (time played with distorted pitch 368.0ms)
+    // Worst-case:
+    // - local devices: 14.020s (time played with distorted pitch 10940.0ms)
+    // - mobile devices on cellular: 26.600s (time played with distorted pitch 10940.0ms)
+    // - devices with already synchronized clocks: 4.300s (time played with distorted pitch 1200.0ms)
+    resyncAboveMs: 200, // Hard resync for large errors
+    rate2AboveMs: 35, // Use 2% rate when error exceeds this
+    rate1AboveMs: 8, // Use 1% rate when error exceeds this
+    samplesBelowMs: 8, // Use sample insertion/deletion below this
+    deadbandBelowMs: 1, // Ignore corrections below this
+    timeFilterMaxErrorMs: 15, // Higher threshold; starts correcting earlier
+    clockPrecisionTimeoutMs: 20_000, // 20s - then correct with imprecise clock
+  },
+  quality: {
+    // Simulated results for how long it takes from playback start to correct to +/-5ms error:
+    // Average:
+    // - local devices: 3.338s
+    // - mobile devices on cellular: 23.100s
+    // - devices with already synchronized clocks: 5.564s
+    // Worst-case:
+    // - local devices: 29.920s
+    // - mobile devices on cellular: 30.000s
+    // - devices with already synchronized clocks: 14.620s
+    resyncAboveMs: 35, // Tighter resync threshold to avoid drifting too far
+    rate2AboveMs: Infinity, // Disabled - never use rate correction
+    rate1AboveMs: Infinity, // Disabled - never use rate correction
+    samplesBelowMs: 35, // Use sample insertion/deletion below this
+    deadbandBelowMs: 1, // Keep deadband tight for accurate sync
+    timeFilterMaxErrorMs: 8, // Lower threshold; wait for a more stable filter to reduce number of resyncs
+    clockPrecisionTimeoutMs: Infinity, // Never force corrections with imprecise clock
+  },
+  "quality-local": {
+    // Simulated results for how long it takes from playback start to correct to +/-5ms error:
+    // Average:
+    // - local devices: 26.825s
+    // - mobile devices on cellular: 28.980s
+    // - devices with already synchronized clocks: 5.461s
+    // Worst-case:
+    // - local devices: 30.000s
+    // - mobile devices on cellular: 30.000s
+    // - devices with already synchronized clocks: 14.620s
+    resyncAboveMs: 600, // Last resort only (prefer keeping uninterrupted playback even if out of sync)
+    rate2AboveMs: Infinity, // Disabled - never use rate correction
+    rate1AboveMs: Infinity, // Disabled - never use rate correction
+    samplesBelowMs: 600, // Use samples for any error < resyncAboveMs
+    deadbandBelowMs: 5, // Larger deadband to avoid frequent small adjustments
+    timeFilterMaxErrorMs: 10, // Moderate threshold; only start correcting once we are reasonably sure of the time
+    clockPrecisionTimeoutMs: Infinity, // Never force corrections with imprecise clock
+  },
+};
 
 export class AudioProcessor {
   private audioContext: AudioContext | null = null;
   private gainNode: GainNode | null = null;
   private streamDestination: MediaStreamAudioDestinationNode | null = null;
   private audioBufferQueue: AudioBufferQueueItem[] = [];
-  private scheduledSources: AudioBufferSourceNode[] = [];
+  private scheduledSources: {
+    source: AudioBufferSourceNode;
+    startTime: number;
+    endTime: number;
+  }[] = [];
   private queueProcessTimeout: number | null = null;
 
   // Seamless playback tracking
@@ -33,10 +107,20 @@ export class AudioProcessor {
   private currentPlaybackRate: number = 1.0;
   private currentCorrectionMethod: "none" | "samples" | "rate" | "resync" =
     "none";
+  private currentClockPrecision: ClockPrecision = "imprecise";
+  private playbackStartedAt: number | null = null; // performance.now() when playback started
   private lastSamplesAdjusted: number = 0;
 
   // Output latency smoothing (EMA to filter Chrome jitter)
   private smoothedOutputLatencyUs: number | null = null;
+  private lastLatencyPersistAtMs: number | null = null;
+
+  // Correction mode
+  private _correctionMode: CorrectionMode = "sync";
+  private _debugLogging: boolean = false;
+  private _lastLoggedCorrectionMethod: "none" | "samples" | "rate" | "resync" =
+    "none";
+  private _lastLoggedTime: number = 0;
 
   // Native Opus decoder (uses WebCodecs API)
   private webCodecsDecoder: AudioDecoder | null = null;
@@ -58,7 +142,77 @@ export class AudioProcessor {
     private silentAudioSrc?: string,
     private syncDelayMs: number = 0,
     private useHardwareVolume: boolean = false,
-  ) {}
+    correctionMode: CorrectionMode = "sync",
+    private storage: SendspinStorage | null = null,
+  ) {
+    this._correctionMode = correctionMode;
+
+    // Load persisted output latency from storage
+    this.loadPersistedLatency();
+  }
+
+  // Load persisted output latency from storage
+  private loadPersistedLatency(): void {
+    if (!this.storage) return;
+    try {
+      const stored = this.storage.getItem(OUTPUT_LATENCY_STORAGE_KEY);
+      if (stored) {
+        const latency = parseFloat(stored);
+        if (!isNaN(latency) && latency >= 0) {
+          this.smoothedOutputLatencyUs = latency;
+          if (this._debugLogging) {
+            console.log(
+              `Sendspin: Loaded persisted output latency: ${(latency / 1000).toFixed(1)}ms`,
+            );
+          }
+        }
+      }
+    } catch {
+      // Storage may fail depending on the implementation, ignore errors
+    }
+  }
+
+  // Persist output latency to storage
+  private persistLatency(): void {
+    if (!this.storage || this.smoothedOutputLatencyUs === null) return;
+    try {
+      this.storage.setItem(
+        OUTPUT_LATENCY_STORAGE_KEY,
+        this.smoothedOutputLatencyUs.toString(),
+      );
+    } catch {
+      // Storage may fail depending on the implementation, ignore errors
+    }
+  }
+
+  // Get current correction mode
+  get correctionMode(): CorrectionMode {
+    return this._correctionMode;
+  }
+
+  // Set correction mode at runtime
+  setCorrectionMode(mode: CorrectionMode): void {
+    const oldMode = this._correctionMode;
+    this._correctionMode = mode;
+    const thresholds = CORRECTION_THRESHOLDS[mode];
+    if (this._debugLogging) {
+      console.log(
+        `Sendspin: Correction mode changed: '${oldMode}' -> '${mode}' ` +
+          `(resyncAboveMs=${thresholds.resyncAboveMs}ms, rate2AboveMs=${thresholds.rate2AboveMs}ms, rate1AboveMs=${thresholds.rate1AboveMs}ms, ` +
+          `samplesBelowMs=${thresholds.samplesBelowMs}ms, deadbandBelowMs=${thresholds.deadbandBelowMs}ms)`,
+      );
+    }
+  }
+
+  // Enable/disable debug logging for sync corrections
+  setDebugLogging(enabled: boolean): void {
+    this._debugLogging = enabled;
+  }
+
+  // Get debug logging state
+  get debugLogging(): boolean {
+    return this._debugLogging;
+  }
 
   // Update sync delay at runtime
   setSyncDelay(delayMs: number): void {
@@ -80,6 +234,8 @@ export class AudioProcessor {
     playbackRate: number;
     correctionMethod: "none" | "samples" | "rate" | "resync";
     samplesAdjusted: number;
+    correctionMode: CorrectionMode;
+    clockPrecision: ClockPrecision;
   } {
     return {
       clockDriftPercent: this.timeFilter.drift * 100,
@@ -89,6 +245,8 @@ export class AudioProcessor {
       playbackRate: this.currentPlaybackRate,
       correctionMethod: this.currentCorrectionMethod,
       samplesAdjusted: this.lastSamplesAdjusted,
+      correctionMode: this._correctionMode,
+      clockPrecision: this.currentClockPrecision,
     };
   }
 
@@ -110,6 +268,21 @@ export class AudioProcessor {
       this.smoothedOutputLatencyUs =
         OUTPUT_LATENCY_ALPHA * rawLatencyUs +
         (1 - OUTPUT_LATENCY_ALPHA) * this.smoothedOutputLatencyUs;
+    }
+
+    const nowMs =
+      typeof performance !== "undefined" ? performance.now() : Date.now();
+    if (
+      this.lastLatencyPersistAtMs === null ||
+      nowMs - this.lastLatencyPersistAtMs >= OUTPUT_LATENCY_PERSIST_INTERVAL_MS
+    ) {
+      this.persistLatency();
+      this.lastLatencyPersistAtMs = nowMs;
+      if (this._debugLogging) {
+        console.debug(
+          `Sendspin: Persisted smoothed output latency: ${this.smoothedOutputLatencyUs} µs`,
+        );
+      }
     }
 
     return this.smoothedOutputLatencyUs;
@@ -256,6 +429,21 @@ export class AudioProcessor {
       await this.audioContext.resume();
       console.log("Sendspin: AudioContext resumed");
     }
+  }
+
+  private cutScheduledSources(cutoffTime: number): void {
+    if (!this.audioContext) return;
+    const stopTime = Math.max(cutoffTime, this.audioContext.currentTime);
+    this.scheduledSources = this.scheduledSources.filter((entry) => {
+      if (entry.endTime <= stopTime) return true;
+      try {
+        entry.source.onended = null;
+        entry.source.stop(stopTime);
+      } catch (e) {
+        // Ignore errors if source already stopped
+      }
+      return false;
+    });
   }
 
   // Update volume based on current state
@@ -778,6 +966,10 @@ export class AudioProcessor {
 
       // First chunk or after a gap: calculate from server timestamp
       if (this.nextPlaybackTime === 0 || this.lastScheduledServerTime === 0) {
+        // Track when playback started for clock precision timeout
+        if (this.playbackStartedAt === null) {
+          this.playbackStartedAt = performance.now();
+        }
         playbackTime = targetPlaybackTime;
         playbackRate = 1.0;
         chunk.buffer = this.copyBuffer(chunk.buffer);
@@ -803,61 +995,122 @@ export class AudioProcessor {
             (1 - SYNC_ERROR_ALPHA) * this.smoothedSyncErrorMs;
           const correctionErrorMs = this.smoothedSyncErrorMs;
 
-          if (Math.abs(correctionErrorMs) > HARD_RESYNC_THRESHOLD_MS) {
-            // Tier 4: Hard resync if sync error exceeds threshold
-            this.resyncCount++;
-            this.smoothedSyncErrorMs = 0;
-            playbackTime = targetPlaybackTime;
-            playbackRate = 1.0;
-            this.currentCorrectionMethod = "resync";
-            this.lastSamplesAdjusted = 0;
-            chunk.buffer = this.copyBuffer(chunk.buffer);
-          } else if (Math.abs(correctionErrorMs) < SYNC_ERROR_DEADBAND_MS) {
-            // Tier 1: Within deadband - no correction needed
+          // Get thresholds for current correction mode
+          const thresholds = CORRECTION_THRESHOLDS[this._correctionMode];
+
+          const timeFilterErrorMs = this.timeFilter.error / 1000;
+          const isClockImprecise =
+            timeFilterErrorMs > thresholds.timeFilterMaxErrorMs;
+          const playbackDurationMs = this.playbackStartedAt
+            ? performance.now() - this.playbackStartedAt
+            : 0;
+          const timeoutElapsed =
+            playbackDurationMs > thresholds.clockPrecisionTimeoutMs;
+
+          if (isClockImprecise && !timeoutElapsed) {
+            // Don't trust time filter yet, continue playing without corrections
+            // until the filter stabilizes (or timeout elapses)
+            this.currentClockPrecision = "imprecise";
             playbackTime = this.nextPlaybackTime;
             playbackRate = 1.0;
             this.currentCorrectionMethod = "none";
             this.lastSamplesAdjusted = 0;
             chunk.buffer = this.copyBuffer(chunk.buffer);
-          } else if (
-            Math.abs(correctionErrorMs) < SAMPLE_CORRECTION_THRESHOLD_MS
-          ) {
-            // Tier 2: Small error (<15ms) - use single sample insertion/deletion
-            playbackTime = this.nextPlaybackTime;
-            playbackRate = 1.0;
-            const samplesToAdjust = correctionErrorMs > 0 ? -1 : 1;
-            chunk.buffer = this.adjustBufferSamples(
-              chunk.buffer,
-              samplesToAdjust,
-            );
-            this.currentCorrectionMethod = "samples";
-            this.lastSamplesAdjusted = samplesToAdjust;
           } else {
-            // Tier 3: Medium error (15-200ms) - use playback rate adjustment
-            playbackTime = this.nextPlaybackTime;
-            if (correctionErrorMs > 0) {
-              playbackRate =
-                Math.abs(correctionErrorMs) >= RATE_2_PERCENT_THRESHOLD_MS
-                  ? 1.02
-                  : 1.01;
+            // Clock is precise OR timeout elapsed - proceed with corrections
+            this.currentClockPrecision = isClockImprecise
+              ? "imprecise-timeout"
+              : "precise";
+
+            if (Math.abs(correctionErrorMs) > thresholds.resyncAboveMs) {
+              // Tier 4: Hard resync if sync error exceeds threshold
+              this.resyncCount++;
+              this.smoothedSyncErrorMs = 0;
+              this.cutScheduledSources(targetPlaybackTime);
+              playbackTime = targetPlaybackTime;
+              playbackRate = 1.0;
+              this.currentCorrectionMethod = "resync";
+              this.lastSamplesAdjusted = 0;
+              chunk.buffer = this.copyBuffer(chunk.buffer);
+            } else if (
+              Math.abs(correctionErrorMs) < thresholds.deadbandBelowMs
+            ) {
+              // Tier 1: Within deadband - no correction needed
+              playbackTime = this.nextPlaybackTime;
+              playbackRate = 1.0;
+              this.currentCorrectionMethod = "none";
+              this.lastSamplesAdjusted = 0;
+              chunk.buffer = this.copyBuffer(chunk.buffer);
+            } else if (
+              Math.abs(correctionErrorMs) <= thresholds.samplesBelowMs
+            ) {
+              // Tier 2: Small error - use single sample insertion/deletion
+              playbackTime = this.nextPlaybackTime;
+              playbackRate = 1.0;
+              const samplesToAdjust = correctionErrorMs > 0 ? -1 : 1;
+              chunk.buffer = this.adjustBufferSamples(
+                chunk.buffer,
+                samplesToAdjust,
+              );
+              this.currentCorrectionMethod = "samples";
+              this.lastSamplesAdjusted = samplesToAdjust;
             } else {
-              playbackRate =
-                Math.abs(correctionErrorMs) >= RATE_2_PERCENT_THRESHOLD_MS
-                  ? 0.98
-                  : 0.99;
+              // Tier 3: Medium error - use playback rate adjustment
+              playbackTime = this.nextPlaybackTime;
+              const absErrorMs = Math.abs(correctionErrorMs);
+
+              if (correctionErrorMs > 0) {
+                playbackRate =
+                  absErrorMs >= thresholds.rate2AboveMs
+                    ? 1.02
+                    : absErrorMs >= thresholds.rate1AboveMs
+                      ? 1.01
+                      : 1.0;
+              } else {
+                playbackRate =
+                  absErrorMs >= thresholds.rate2AboveMs
+                    ? 0.98
+                    : absErrorMs >= thresholds.rate1AboveMs
+                      ? 0.99
+                      : 1.0;
+              }
+
+              this.currentCorrectionMethod =
+                playbackRate === 1.0 ? "none" : "rate";
+              this.lastSamplesAdjusted = 0;
+              chunk.buffer = this.copyBuffer(chunk.buffer);
             }
-            this.currentCorrectionMethod = "rate";
-            this.lastSamplesAdjusted = 0;
-            chunk.buffer = this.copyBuffer(chunk.buffer);
           }
         } else {
           // Gap detected in server timestamps - hard resync
           this.resyncCount++;
+          this.cutScheduledSources(targetPlaybackTime);
           playbackTime = targetPlaybackTime;
           playbackRate = 1.0;
           this.currentCorrectionMethod = "resync";
           this.lastSamplesAdjusted = 0;
           chunk.buffer = this.copyBuffer(chunk.buffer);
+        }
+      }
+
+      // Debug logging when correction method changes
+      if (this._debugLogging) {
+        if (this.currentCorrectionMethod !== this._lastLoggedCorrectionMethod) {
+          const thresholds = CORRECTION_THRESHOLDS[this._correctionMode];
+          console.log(
+            `Sendspin: [${this._correctionMode}] Correction: ${this._lastLoggedCorrectionMethod} -> ${this.currentCorrectionMethod} ` +
+              `| syncError=${this.smoothedSyncErrorMs.toFixed(1)}ms ` +
+              `| rate=${playbackRate} | resyncs=${this.resyncCount} | filterError=${this.timeFilter.error}` +
+              `| thresholds: resync>${thresholds.resyncAboveMs}ms, samples<${thresholds.samplesBelowMs}ms, rate1>=${thresholds.rate1AboveMs}ms, rate2>=${thresholds.rate2AboveMs}ms`,
+          );
+          this._lastLoggedCorrectionMethod = this.currentCorrectionMethod;
+          this._lastLoggedTime = performance.now();
+        } else if (performance.now() - this._lastLoggedTime > 2000) {
+          console.log(
+            `Sendspin: syncError=${this.smoothedSyncErrorMs.toFixed(1)}ms ` +
+              `| filterError=${this.timeFilter.error}`,
+          );
+          this._lastLoggedTime = performance.now();
         }
       }
 
@@ -885,9 +1138,14 @@ export class AudioProcessor {
       this.lastScheduledServerTime =
         chunk.serverTime + chunk.buffer.duration * 1_000_000;
 
-      this.scheduledSources.push(source);
+      const scheduledEntry = {
+        source,
+        startTime: playbackTime,
+        endTime: playbackTime + actualDuration,
+      };
+      this.scheduledSources.push(scheduledEntry);
       source.onended = () => {
-        const idx = this.scheduledSources.indexOf(source);
+        const idx = this.scheduledSources.indexOf(scheduledEntry);
         if (idx > -1) this.scheduledSources.splice(idx, 1);
       };
     }
@@ -922,9 +1180,9 @@ export class AudioProcessor {
   // Clear all audio buffers and scheduled sources
   clearBuffers(): void {
     // Stop all scheduled audio sources
-    this.scheduledSources.forEach((source) => {
+    this.scheduledSources.forEach((entry) => {
       try {
-        source.stop();
+        entry.source.stop();
       } catch (e) {
         // Ignore errors if source already stopped
       }
@@ -953,6 +1211,8 @@ export class AudioProcessor {
     this.resyncCount = 0;
     this.currentPlaybackRate = 1.0;
     this.currentCorrectionMethod = "none";
+    this.currentClockPrecision = "imprecise";
+    this.playbackStartedAt = null;
     this.lastSamplesAdjusted = 0;
     this.resetLatencySmoother();
   }

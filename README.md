@@ -17,6 +17,9 @@ const player = new SendspinPlayer({
   playerId: 'my-player-id',
   baseUrl: 'http://your-server:8095',
   clientName: 'My Web Player',
+  // Optional: "sync" (default), "quality" (no pitch shifts; not recommended for bad networks),
+  // or "quality-local" (best for unsynced playback)
+  correctionMode: 'sync',
   onStateChange: (state) => {
     // Local player state
     console.log('Playing:', state.isPlaying);

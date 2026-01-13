@@ -6,11 +6,14 @@ import { SendspinTimeFilter } from "./time-filter";
 import { SILENT_AUDIO_SRC } from "./silent-audio.generated";
 import type {
   SendspinPlayerConfig,
+  SendspinStorage,
   PlayerState,
   StreamFormat,
   GoodbyeReason,
   ControllerCommand,
   ControllerCommands,
+  CorrectionMode,
+  ClockPrecision,
 } from "./types";
 
 // Platform detection utilities
@@ -86,6 +89,12 @@ export class SendspinPlayer {
     this.stateManager = new StateManager(config.onStateChange);
 
     // Initialize audio processor
+    let storage: SendspinStorage | null = null;
+    if (config.storage !== undefined) {
+      storage = config.storage;
+    } else if (typeof localStorage !== "undefined") {
+      storage = localStorage;
+    }
     this.audioProcessor = new AudioProcessor(
       this.stateManager,
       this.timeFilter,
@@ -95,6 +104,8 @@ export class SendspinPlayer {
       isAndroid ? SILENT_AUDIO_SRC : undefined,
       config.syncDelay ?? 0,
       config.useHardwareVolume ?? false,
+      config.correctionMode ?? "sync",
+      storage,
     );
 
     // Initialize WebSocket manager
@@ -203,6 +214,30 @@ export class SendspinPlayer {
     this.audioProcessor.setSyncDelay(delayMs);
   }
 
+  /**
+   * Set the sync correction mode at runtime.
+   * @param mode - The correction mode to use:
+   *   - "sync": Multi-device sync, may use pitch-changing playback-rate adjustments for faster convergence.
+   *   - "quality": No playback-rate changes; uses sample fixes and tighter resyncs, so expect fewer adjustments but occasional jumps. Starts out of sync until the clock converges. Not recommended for bad networks.
+   *   - "quality-local": Avoids playback-rate changes; may drift vs. other players and only resyncs
+   *     as a last resort.
+   */
+  setCorrectionMode(mode: CorrectionMode): void {
+    this.audioProcessor.setCorrectionMode(mode);
+  }
+
+  /**
+   * Enable or disable debug logging for sync corrections.
+   * When enabled, logs to console when correction method changes.
+   */
+  setDebugLogging(enabled: boolean): void {
+    this.audioProcessor.setDebugLogging(enabled);
+  }
+  // Get debug logging state
+  get debugLogging(): boolean {
+    return this.audioProcessor.debugLogging;
+  }
+
   // ========================================
   // Controller Commands (sent to server)
   // ========================================
@@ -271,6 +306,11 @@ export class SendspinPlayer {
     return this.wsManager.isConnected();
   }
 
+  // Get current correction mode
+  get correctionMode(): CorrectionMode {
+    return this.audioProcessor.correctionMode;
+  }
+
   // Time sync info for debugging
   get timeSyncInfo(): { synced: boolean; offset: number; error: number } {
     return {
@@ -287,6 +327,10 @@ export class SendspinPlayer {
     resyncCount: number;
     outputLatencyMs: number;
     playbackRate: number;
+    correctionMethod: "none" | "samples" | "rate" | "resync";
+    samplesAdjusted: number;
+    correctionMode: CorrectionMode;
+    clockPrecision: ClockPrecision;
   } {
     return this.audioProcessor.syncInfo;
   }

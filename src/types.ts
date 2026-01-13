@@ -243,6 +243,22 @@ export type AudioOutputMode = "direct" | "media-element";
 
 export type Codec = "pcm" | "opus" | "flac";
 
+/**
+ * Audio sync correction mode:
+ * - "sync": Multi-device sync, may use pitch-changing playback-rate adjustments for faster convergence.
+ * - "quality": No rate changes; uses sample fixes and tighter resyncs, so you get fewer adjustments but occasional jumps. Starts out of sync until the clock converges. Not recommended for bad networks.
+ * - "quality-local": Avoids playback-rate changes; may drift vs. group sync and only resyncs as a last resort.
+ */
+export type CorrectionMode = "sync" | "quality" | "quality-local";
+
+/**
+ * Clock precision state:
+ * - "precise": Time filter error is within threshold, corrections are reliable
+ * - "imprecise": Time filter error exceeds threshold, corrections are skipped
+ * - "imprecise-timeout": Time filter error exceeds threshold but timeout elapsed, corrections proceed anyway
+ */
+export type ClockPrecision = "precise" | "imprecise" | "imprecise-timeout";
+
 export interface SupportedFormat {
   codec: string;
   channels: number;
@@ -290,6 +306,19 @@ export interface SendspinPlayerConfig {
   syncDelay?: number;
 
   /**
+   * Sync correction mode:
+   * - "sync" (default): Corrects out of sync playback using all methods and may use pitch-changing
+   *   playback-rate adjustments for faster convergence.
+   *   Best for multi-device sync but may cause audible pitch shifts, especially just
+   *   after starting of playback.
+   * - "quality": No playback-rate changes; uses sample fixes and tighter resyncs, so expect fewer adjustments but occasional jumps. Starts out of sync until the clock converges. Not recommended for bad networks.
+   * - "quality-local": Avoids playback-rate changes; may drift vs. other players and only resyncs
+   *   as a last resort.
+   *   Best for single-device playback where audio quality is priority.
+   */
+  correctionMode?: CorrectionMode;
+
+  /**
    * Use browser's output latency API for automatic latency compensation.
    * When enabled, reads AudioContext.baseLatency and outputLatency to
    * compensate for hardware delay (e.g., Bluetooth headphones).
@@ -335,10 +364,26 @@ export interface SendspinPlayerConfig {
    * Should return current hardware volume (0-100) and muted state.
    */
   getExternalVolume?: () => { volume: number; muted: boolean };
+
+  /**
+   * Storage for persisting SDK state (e.g., cached output latency).
+   * Defaults to localStorage. Pass null to disable persistence.
+   */
+  storage?: SendspinStorage | null;
 }
 
 export interface AudioBufferQueueItem {
   buffer: AudioBuffer;
   serverTime: number;
   generation: number;
+}
+
+/**
+ * Storage interface for persisting SDK state.
+ * Compatible with Web Storage API (localStorage/sessionStorage).
+ * Provide a custom implementation to control where the SDK stores data.
+ */
+export interface SendspinStorage {
+  getItem(key: string): string | null;
+  setItem(key: string, value: string): void;
 }
