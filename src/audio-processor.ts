@@ -1042,7 +1042,7 @@ export class AudioProcessor {
               this.lastSamplesAdjusted = 0;
               chunk.buffer = this.copyBuffer(chunk.buffer);
             } else if (
-              Math.abs(correctionErrorMs) < thresholds.samplesBelowMs
+              Math.abs(correctionErrorMs) <= thresholds.samplesBelowMs
             ) {
               // Tier 2: Small error - use single sample insertion/deletion
               playbackTime = this.nextPlaybackTime;
