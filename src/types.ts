@@ -277,31 +277,10 @@ export interface SendspinPlayerConfig {
   clientName?: string;
 
   /**
-   * Audio output mode:
-   * - "direct": Output directly to audioContext.destination (e.g., Cast receiver)
-   * - "media-element": Use HTMLAudioElement for MediaSession support (e.g., mobile browsers)
-   *
-   * Default: "media-element" on iOS/Android, "direct" otherwise.
-   */
-  audioOutputMode?: AudioOutputMode;
-
-  /**
    * HTMLAudioElement for media-element output mode.
-   * Auto-created if not provided when using media-element mode.
+   * Auto-created on mobile browsers if not provided.
    */
   audioElement?: HTMLAudioElement;
-
-  /**
-   * Whether running on Android (affects MediaSession workarounds).
-   * Auto-detected from user agent if not provided.
-   */
-  isAndroid?: boolean;
-
-  /**
-   * Almost-silent audio data URL for Android MediaSession workaround.
-   * Overrides the bundled default when provided.
-   */
-  silentAudioSrc?: string;
 
   /**
    * Codecs to use for audio streaming, in priority order.
@@ -344,10 +323,10 @@ export interface SendspinPlayerConfig {
    * When enabled, reads AudioContext.baseLatency and outputLatency to
    * compensate for hardware delay (e.g., Bluetooth headphones).
    *
-   * Note: API reliability varies by browser/platform. Works well on Android,
-   * less reliable on desktop browsers.
+   * Note: API reliability varies by browser/platform. But generally works well,
+   * especially on modern mobile browsers.
    *
-   * Default: false
+   * Default: true
    */
   useOutputLatencyCompensation?: boolean;
 
@@ -367,6 +346,8 @@ export interface SendspinPlayerConfig {
    * Use hardware/external volume control instead of software gain.
    * When true, the internal gain node stays at 1.0 and volume commands
    * are delegated to the onVolumeCommand callback.
+   *
+   * Default: false
    */
   useHardwareVolume?: boolean;
 
