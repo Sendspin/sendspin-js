@@ -374,6 +374,12 @@ export class AudioProcessor {
       return; // Already initialized
     }
 
+    // Set audio session to "playback" so audio continues when iOS device is muted
+    // (iOS 17+, no-op on other platforms)
+    if ((navigator as any).audioSession) {
+      (navigator as any).audioSession.type = "playback";
+    }
+
     const streamSampleRate =
       this.stateManager.currentStreamFormat?.sample_rate || 48000;
     this.audioContext = new AudioContext({ sampleRate: streamSampleRate });
