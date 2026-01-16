@@ -94,7 +94,6 @@ export class AudioProcessor {
     startTime: number;
     endTime: number;
   }[] = [];
-  private queueProcessTimeout: number | null = null;
 
   // Seamless playback tracking
   private nextPlaybackTime: number = 0; // AudioContext time when next chunk should start
@@ -703,14 +702,45 @@ export class AudioProcessor {
       generation: this.stateManager.streamGeneration,
     });
 
-    // Trigger queue processing (debounced)
-    if (this.queueProcessTimeout !== null) {
-      clearTimeout(this.queueProcessTimeout);
+    this.scheduleQueueProcessing();
+  }
+
+  private scheduleTimeout: ReturnType<typeof setTimeout> | null = null;
+  private queueProcessScheduled = false;
+
+  // Schedule queue processing without starvation.
+  // Uses a short timeout to allow out-of-order async decodes (FLAC) to batch.
+  // TODO: Consider a "max-wait" watchdog if timer throttling/clamping causes excessive scheduling latency.
+  private scheduleQueueProcessing(): void {
+    if (this.queueProcessScheduled) {
+      return;
     }
-    this.queueProcessTimeout = window.setTimeout(() => {
+    this.queueProcessScheduled = true;
+
+    if (typeof globalThis.setTimeout === "function") {
+      this.scheduleTimeout = globalThis.setTimeout(() => {
+        this.scheduleTimeout = null;
+        this.queueProcessScheduled = false;
+        this.processAudioQueue();
+      }, 15);
+      return;
+    }
+
+    const run = () => {
+      this.queueProcessScheduled = false;
       this.processAudioQueue();
-      this.queueProcessTimeout = null;
-    }, 50);
+    };
+
+    if (
+      typeof (globalThis as unknown as { queueMicrotask?: unknown })
+        .queueMicrotask === "function"
+    ) {
+      (
+        globalThis as unknown as { queueMicrotask: (cb: () => void) => void }
+      ).queueMicrotask(run);
+    } else {
+      Promise.resolve().then(run);
+    }
   }
 
   // Queue Opus packet to native decoder for async decoding (non-blocking)
@@ -905,15 +935,7 @@ export class AudioProcessor {
           generation: generation,
         });
 
-        // Debounce queue processing to allow multiple chunks to arrive
-        // This handles out-of-order arrivals from async FLAC decoding
-        if (this.queueProcessTimeout !== null) {
-          clearTimeout(this.queueProcessTimeout);
-        }
-        this.queueProcessTimeout = window.setTimeout(() => {
-          this.processAudioQueue();
-          this.queueProcessTimeout = null;
-        }, 50); // 50ms debounce - collect a larger batch before scheduling
+        this.scheduleQueueProcessing();
       } else {
         console.error("Sendspin: Failed to decode audio buffer");
       }
@@ -1189,14 +1211,13 @@ export class AudioProcessor {
     });
     this.scheduledSources = [];
 
-    // Clear pending queue processing
-    if (this.queueProcessTimeout !== null) {
-      clearTimeout(this.queueProcessTimeout);
-      this.queueProcessTimeout = null;
-    }
-
-    // Clear buffers
+    // Clear buffers and reset scheduling state
     this.audioBufferQueue = [];
+    if (this.scheduleTimeout !== null) {
+      clearTimeout(this.scheduleTimeout);
+      this.scheduleTimeout = null;
+    }
+    this.queueProcessScheduled = false;
 
     // Reset stream anchors
     this.stateManager.resetStreamAnchors();
