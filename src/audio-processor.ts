@@ -705,18 +705,42 @@ export class AudioProcessor {
     this.scheduleQueueProcessing();
   }
 
-  private scheduleTimeout: number | null = null;
+  private scheduleTimeout: ReturnType<typeof setTimeout> | null = null;
+  private queueProcessScheduled = false;
 
-  // Schedule queue processing with debouncing.
+  // Schedule queue processing without starvation.
   // Uses a short timeout to allow out-of-order async decodes (FLAC) to batch.
+  // TODO: Consider a "max-wait" watchdog if timer throttling/clamping causes excessive scheduling latency.
   private scheduleQueueProcessing(): void {
-    if (this.scheduleTimeout !== null) {
-      clearTimeout(this.scheduleTimeout);
+    if (this.queueProcessScheduled) {
+      return;
     }
-    this.scheduleTimeout = window.setTimeout(() => {
-      this.scheduleTimeout = null;
+    this.queueProcessScheduled = true;
+
+    if (typeof globalThis.setTimeout === "function") {
+      this.scheduleTimeout = globalThis.setTimeout(() => {
+        this.scheduleTimeout = null;
+        this.queueProcessScheduled = false;
+        this.processAudioQueue();
+      }, 15);
+      return;
+    }
+
+    const run = () => {
+      this.queueProcessScheduled = false;
       this.processAudioQueue();
-    }, 15);
+    };
+
+    if (
+      typeof (globalThis as unknown as { queueMicrotask?: unknown })
+        .queueMicrotask === "function"
+    ) {
+      (
+        globalThis as unknown as { queueMicrotask: (cb: () => void) => void }
+      ).queueMicrotask(run);
+    } else {
+      Promise.resolve().then(run);
+    }
   }
 
   // Queue Opus packet to native decoder for async decoding (non-blocking)
@@ -1193,6 +1217,7 @@ export class AudioProcessor {
       clearTimeout(this.scheduleTimeout);
       this.scheduleTimeout = null;
     }
+    this.queueProcessScheduled = false;
 
     // Reset stream anchors
     this.stateManager.resetStreamAnchors();
