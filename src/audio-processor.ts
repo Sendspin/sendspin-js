@@ -702,7 +702,21 @@ export class AudioProcessor {
       generation: this.stateManager.streamGeneration,
     });
 
-    this.processAudioQueue();
+    this.scheduleQueueProcessing();
+  }
+
+  private scheduleTimeout: number | null = null;
+
+  // Schedule queue processing with debouncing.
+  // Uses a short timeout to allow out-of-order async decodes (FLAC) to batch.
+  private scheduleQueueProcessing(): void {
+    if (this.scheduleTimeout !== null) {
+      clearTimeout(this.scheduleTimeout);
+    }
+    this.scheduleTimeout = window.setTimeout(() => {
+      this.scheduleTimeout = null;
+      this.processAudioQueue();
+    }, 15);
   }
 
   // Queue Opus packet to native decoder for async decoding (non-blocking)
@@ -897,7 +911,7 @@ export class AudioProcessor {
           generation: generation,
         });
 
-        this.processAudioQueue();
+        this.scheduleQueueProcessing();
       } else {
         console.error("Sendspin: Failed to decode audio buffer");
       }
@@ -1173,8 +1187,12 @@ export class AudioProcessor {
     });
     this.scheduledSources = [];
 
-    // Clear buffers
+    // Clear buffers and reset scheduling state
     this.audioBufferQueue = [];
+    if (this.scheduleTimeout !== null) {
+      clearTimeout(this.scheduleTimeout);
+      this.scheduleTimeout = null;
+    }
 
     // Reset stream anchors
     this.stateManager.resetStreamAnchors();
