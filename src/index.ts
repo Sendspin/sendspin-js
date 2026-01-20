@@ -106,6 +106,7 @@ export class SendspinPlayer {
       config.useHardwareVolume ?? false,
       config.correctionMode ?? "sync",
       storage,
+      config.useOutputLatencyCompensation ?? true,
     );
 
     // Initialize WebSocket manager
