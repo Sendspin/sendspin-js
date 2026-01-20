@@ -187,13 +187,9 @@ export class ProtocolHandler {
     // NTP offset calculation: measurement = ((T2 - T1) + (T3 - T4)) / 2
     const clockOffset = (T2 - T1 + (T3 - T4)) / 2;
 
-    // Optionally add output latency to offset measurement so Kalman filter smooths it together
-    // This compensates for hardware delay (e.g., Bluetooth) by scheduling audio earlier
-    // Use EMA-smoothed latency to filter Chrome's jittery outputLatency readings
-    const outputLatencyUs = this.useOutputLatencyCompensation
-      ? this.audioProcessor.getSmoothedOutputLatencyUs()
-      : 0;
-    const measurement = clockOffset + outputLatencyUs;
+    // Keep Kalman filter for pure clock sync; output-latency compensation is applied
+    // at audio scheduling time to avoid biasing the clock estimate across restarts.
+    const measurement = clockOffset;
 
     // Max error (half of round-trip time): max_error = ((T4 - T1) - (T3 - T2)) / 2
     const max_error = (T4 - T1 - (T3 - T2)) / 2;

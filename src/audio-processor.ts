@@ -132,6 +132,9 @@ export class AudioProcessor {
   private opusDecoderModule: any = null;
   private opusDecoderReady: Promise<void> | null = null;
 
+  private useOutputLatencyCompensation: boolean = true;
+  private nativeDecoderGenerationByTimestamp = new Map<number, number>();
+
   constructor(
     private stateManager: StateManager,
     private timeFilter: SendspinTimeFilter,
@@ -143,8 +146,10 @@ export class AudioProcessor {
     private useHardwareVolume: boolean = false,
     correctionMode: CorrectionMode = "sync",
     private storage: SendspinStorage | null = null,
+    useOutputLatencyCompensation: boolean = true,
   ) {
     this._correctionMode = correctionMode;
+    this.useOutputLatencyCompensation = useOutputLatencyCompensation;
 
     // Load persisted output latency from storage
     this.loadPersistedLatency();
@@ -260,6 +265,12 @@ export class AudioProcessor {
   // Get smoothed output latency in microseconds (filters Chrome jitter)
   getSmoothedOutputLatencyUs(): number {
     const rawLatencyUs = this.getRawOutputLatencyUs();
+
+    // Some browsers report 0 until playback is active; treat 0 as "unknown"
+    // and keep the last good estimate to avoid poisoning sync.
+    if (rawLatencyUs <= 0 && this.smoothedOutputLatencyUs !== null) {
+      return this.smoothedOutputLatencyUs;
+    }
 
     if (this.smoothedOutputLatencyUs === null) {
       this.smoothedOutputLatencyUs = rawLatencyUs;
@@ -431,8 +442,17 @@ export class AudioProcessor {
   // Resume AudioContext if suspended (required for browser autoplay policies)
   async resumeAudioContext(): Promise<void> {
     if (this.audioContext && this.audioContext.state === "suspended") {
-      await this.audioContext.resume();
-      console.log("Sendspin: AudioContext resumed");
+      try {
+        await this.audioContext.resume();
+        console.log("Sendspin: AudioContext resumed");
+      } catch (e) {
+        console.warn("Sendspin: Failed to resume AudioContext:", e);
+        return;
+      }
+
+      if (this.audioBufferQueue.length > 0) {
+        this.scheduleQueueProcessing();
+      }
     }
   }
 
@@ -570,6 +590,31 @@ export class AudioProcessor {
   // Handle decoded audio data from native Opus decoder
   private handleAudioData(audioData: AudioData): void {
     try {
+      const serverTimeUs = Number(audioData.timestamp);
+      const generation =
+        this.nativeDecoderGenerationByTimestamp.get(serverTimeUs);
+      this.nativeDecoderGenerationByTimestamp.delete(serverTimeUs);
+
+      if (generation === undefined) {
+        if (this._debugLogging) {
+          console.debug(
+            `[NativeOpus] Dropping frame with unknown generation (ts=${serverTimeUs})`,
+          );
+        }
+        audioData.close();
+        return;
+      }
+
+      if (generation !== this.stateManager.streamGeneration) {
+        if (this._debugLogging) {
+          console.debug(
+            `[NativeOpus] Dropping old-stream frame (ts=${serverTimeUs}, gen=${generation} != current=${this.stateManager.streamGeneration})`,
+          );
+        }
+        audioData.close();
+        return;
+      }
+
       const channels = audioData.numberOfChannels;
       const frames = audioData.numberOfFrames;
       const fmt = audioData.format;
@@ -610,7 +655,6 @@ export class AudioProcessor {
         return;
       }
 
-      const serverTimeUs = Number(audioData.timestamp);
       this.handleNativeOpusOutput(interleaved, serverTimeUs, channels);
       audioData.close();
     } catch (e) {
@@ -753,6 +797,7 @@ export class AudioProcessor {
   private queueToNativeOpusDecoder(
     audioData: ArrayBuffer,
     serverTimeUs: number,
+    generation: number,
   ): boolean {
     if (
       !this.webCodecsDecoder ||
@@ -762,6 +807,8 @@ export class AudioProcessor {
     }
 
     try {
+      this.nativeDecoderGenerationByTimestamp.set(serverTimeUs, generation);
+
       // Create EncodedAudioChunk - use timestamp to pass server time through
       const chunk = new EncodedAudioChunk({
         type: "key", // Opus packets are self-contained
@@ -773,6 +820,7 @@ export class AudioProcessor {
       this.webCodecsDecoder.decode(chunk);
       return true;
     } catch (error) {
+      this.nativeDecoderGenerationByTimestamp.delete(serverTimeUs);
       console.error("[NativeOpus] WebCodecs queue error:", error);
       return false;
     }
@@ -918,7 +966,9 @@ export class AudioProcessor {
         await this.initWebCodecsDecoder(format);
 
         if (this.useNativeOpus && this.webCodecsDecoder) {
-          if (this.queueToNativeOpusDecoder(audioData, serverTimeUs)) {
+          if (
+            this.queueToNativeOpusDecoder(audioData, serverTimeUs, generation)
+          ) {
             return; // Async path - callback handles queue
           }
           // Fall through to fallback on error
@@ -951,6 +1001,7 @@ export class AudioProcessor {
   // Process the audio queue and schedule chunks in order
   processAudioQueue(): void {
     if (!this.audioContext || !this.gainNode) return;
+    if (this.audioContext.state !== "running") return;
 
     // Filter out any chunks from old streams (safety check)
     const currentGeneration = this.stateManager.streamGeneration;
@@ -975,6 +1026,10 @@ export class AudioProcessor {
     // Convert sync delay from ms to seconds (positive = delay, negative = advance)
     const syncDelaySec = this.syncDelayMs / 1000;
 
+    const outputLatencySec = this.useOutputLatencyCompensation
+      ? this.getSmoothedOutputLatencyUs() / 1_000_000
+      : 0;
+
     // Schedule all chunks in the queue
     while (this.audioBufferQueue.length > 0) {
       const chunk = this.audioBufferQueue.shift()!;
@@ -990,7 +1045,11 @@ export class AudioProcessor {
       const deltaUs = chunkClientTimeUs - nowUs;
       const deltaSec = deltaUs / 1_000_000;
       const targetPlaybackTime =
-        audioContextTime + deltaSec + bufferSec + syncDelaySec;
+        audioContextTime +
+        deltaSec +
+        bufferSec +
+        syncDelaySec -
+        outputLatencySec;
 
       // First chunk or after a gap: calculate from server timestamp
       if (this.nextPlaybackTime === 0 || this.lastScheduledServerTime === 0) {
@@ -1225,6 +1284,16 @@ export class AudioProcessor {
     }
     this.queueProcessScheduled = false;
 
+    // Drop any pending native Opus decode outputs from the previous stream.
+    // WebCodecs output callbacks can still fire after stop/start; without this,
+    // decoded frames from the old stream can be enqueued into the new stream.
+    this.nativeDecoderGenerationByTimestamp.clear();
+    try {
+      (this.webCodecsDecoder as unknown as { reset?: () => void })?.reset?.();
+    } catch {
+      // Ignore reset errors
+    }
+
     // Reset stream anchors
     this.stateManager.resetStreamAnchors();
 
@@ -1241,7 +1310,6 @@ export class AudioProcessor {
     this.currentClockPrecision = "imprecise";
     this.playbackStartedAt = null;
     this.lastSamplesAdjusted = 0;
-    this.resetLatencySmoother();
   }
 
   // Cleanup and close AudioContext
