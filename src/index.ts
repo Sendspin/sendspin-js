@@ -321,6 +321,13 @@ export class SendspinPlayer {
     };
   }
 
+  /** Get current server time in microseconds using synchronized clock */
+  getCurrentServerTimeUs(): number {
+    return this.timeFilter.computeServerTime(
+      Math.floor(performance.now() * 1000),
+    );
+  }
+
   // Sync info for debugging/display
   get syncInfo(): {
     clockDriftPercent: number;
