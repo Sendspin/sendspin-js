@@ -500,6 +500,34 @@ body.connected #connection-section {
   margin-top: 0.25rem;
 }
 
+/* Progress bar */
+.progress-container {
+  margin-top: 1rem;
+}
+
+.progress-bar {
+  height: 4px;
+  background-color: var(--border-color);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  background-color: var(--primary-color);
+  width: 0%;
+  transition: width 0.1s linear;
+}
+
+.progress-times {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 0.5rem;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
 footer {
   text-align: center;
   margin-top: 2rem;

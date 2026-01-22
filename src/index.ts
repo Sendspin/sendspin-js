@@ -328,6 +328,33 @@ export class SendspinPlayer {
     );
   }
 
+  /** Get current track progress with real-time position calculation */
+  get trackProgress(): {
+    positionMs: number;
+    durationMs: number;
+    playbackSpeed: number;
+  } | null {
+    const metadata = this.stateManager.serverState.metadata;
+    if (!metadata?.progress || metadata.timestamp === undefined) {
+      return null;
+    }
+
+    const serverTimeUs = this.getCurrentServerTimeUs();
+    const elapsedUs = serverTimeUs - metadata.timestamp;
+    const positionMs =
+      metadata.progress.track_progress +
+      (elapsedUs / 1000) * metadata.progress.playback_speed;
+
+    return {
+      positionMs: Math.max(
+        0,
+        Math.min(positionMs, metadata.progress.track_duration),
+      ),
+      durationMs: metadata.progress.track_duration,
+      playbackSpeed: metadata.progress.playback_speed,
+    };
+  }
+
   // Sync info for debugging/display
   get syncInfo(): {
     clockDriftPercent: number;
