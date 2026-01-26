@@ -516,7 +516,7 @@ body.connected #connection-section {
   height: 100%;
   background-color: var(--primary-color);
   width: 0%;
-  transition: width 0.1s linear;
+  transition: width 50ms linear;
 }
 
 .progress-times {

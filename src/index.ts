@@ -341,9 +341,10 @@ export class SendspinPlayer {
 
     const serverTimeUs = this.getCurrentServerTimeUs();
     const elapsedUs = serverTimeUs - metadata.timestamp;
+    // playback_speed is multiplied by 1000 in protocol (1000 = normal speed)
     const positionMs =
       metadata.progress.track_progress +
-      (elapsedUs / 1000) * metadata.progress.playback_speed;
+      (elapsedUs * metadata.progress.playback_speed) / 1_000_000;
 
     return {
       positionMs: Math.max(
@@ -351,7 +352,8 @@ export class SendspinPlayer {
         Math.min(positionMs, metadata.progress.track_duration),
       ),
       durationMs: metadata.progress.track_duration,
-      playbackSpeed: metadata.progress.playback_speed,
+      // Normalize to float (1.0 = normal speed)
+      playbackSpeed: metadata.progress.playback_speed / 1000,
     };
   }
 
