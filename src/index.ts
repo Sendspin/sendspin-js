@@ -321,6 +321,42 @@ export class SendspinPlayer {
     };
   }
 
+  /** Get current server time in microseconds using synchronized clock */
+  getCurrentServerTimeUs(): number {
+    return this.timeFilter.computeServerTime(
+      Math.floor(performance.now() * 1000),
+    );
+  }
+
+  /** Get current track progress with real-time position calculation */
+  get trackProgress(): {
+    positionMs: number;
+    durationMs: number;
+    playbackSpeed: number;
+  } | null {
+    const metadata = this.stateManager.serverState.metadata;
+    if (!metadata?.progress || metadata.timestamp === undefined) {
+      return null;
+    }
+
+    const serverTimeUs = this.getCurrentServerTimeUs();
+    const elapsedUs = serverTimeUs - metadata.timestamp;
+    // playback_speed is multiplied by 1000 in protocol (1000 = normal speed)
+    const positionMs =
+      metadata.progress.track_progress +
+      (elapsedUs * metadata.progress.playback_speed) / 1_000_000;
+
+    return {
+      positionMs: Math.max(
+        0,
+        Math.min(positionMs, metadata.progress.track_duration),
+      ),
+      durationMs: metadata.progress.track_duration,
+      // Normalize to float (1.0 = normal speed)
+      playbackSpeed: metadata.progress.playback_speed / 1000,
+    };
+  }
+
   // Sync info for debugging/display
   get syncInfo(): {
     clockDriftPercent: number;

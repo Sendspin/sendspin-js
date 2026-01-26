@@ -128,6 +128,7 @@ export interface ServerTime {
 }
 
 export interface ServerStateMetadata {
+  timestamp?: number;
   title?: string | null;
   artist?: string | null;
   album?: string | null;
@@ -135,8 +136,9 @@ export interface ServerStateMetadata {
   year?: number | null;
   track_number?: number | null;
   progress?: {
-    position_ms: number;
-    duration_ms: number;
+    track_progress: number;
+    track_duration: number;
+    playback_speed: number;
   } | null;
   repeat?: "off" | "one" | "all" | null;
   shuffle?: boolean | null;

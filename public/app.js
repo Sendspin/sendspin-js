@@ -71,6 +71,9 @@ const trackAlbum = document.getElementById("track-album");
 const groupName = document.getElementById("group-name");
 const artwork = document.getElementById("artwork");
 const artworkPlaceholder = document.getElementById("artwork-placeholder");
+const progressFill = document.getElementById("progress-fill");
+const progressCurrent = document.getElementById("progress-current");
+const progressDuration = document.getElementById("progress-duration");
 
 // Player instance
 let player = null;
@@ -209,6 +212,41 @@ function resetStatusDisplay() {
   timeSyncError.textContent = "-";
   groupVolumeValue.textContent = "-";
   groupMuteIcon.textContent = "🔊";
+  progressFill.style.width = "0%";
+  progressCurrent.textContent = "--:--";
+  progressDuration.textContent = "--:--";
+}
+
+/**
+ * Format milliseconds as mm:ss
+ */
+function formatTime(ms) {
+  if (ms < 0 || !Number.isFinite(ms)) return "--:--";
+  const totalSeconds = Math.floor(ms / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${seconds.toString().padStart(2, "0")}`;
+}
+
+/**
+ * Update progress bar display
+ */
+function updateProgressDisplay() {
+  const progress = player.trackProgress;
+  if (!progress) {
+    progressFill.style.width = "0%";
+    progressCurrent.textContent = "--:--";
+    progressDuration.textContent = "--:--";
+    return;
+  }
+
+  const percent =
+    progress.durationMs > 0
+      ? (progress.positionMs / progress.durationMs) * 100
+      : 0;
+  progressFill.style.width = `${percent}%`;
+  progressCurrent.textContent = formatTime(progress.positionMs);
+  progressDuration.textContent = formatTime(progress.durationMs);
 }
 
 /**
@@ -303,6 +341,9 @@ function updateStatusDisplay() {
     timeSyncOffset.textContent = `${timeSync.offset.toFixed(0)}ms`;
     timeSyncError.textContent = `${timeSync.error.toFixed(0)}ms`;
   }
+
+  // Update track progress
+  updateProgressDisplay();
 }
 
 /**
