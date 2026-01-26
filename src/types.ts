@@ -64,7 +64,7 @@ export interface ClientHello {
       manufacturer?: string;
       software_version?: string;
     };
-    player_support?: {
+    "player@v1_support"?: {
       supported_formats: Array<{
         codec: string;
         channels: number;

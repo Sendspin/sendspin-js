@@ -331,7 +331,7 @@ export class ProtocolHandler {
             (typeof navigator !== "undefined" && navigator.userAgent) ||
             "Unknown",
         },
-        player_support: {
+        "player@v1_support": {
           supported_formats: this.getSupportedFormats(),
           buffer_capacity: this.bufferCapacity,
           supported_commands: ["volume", "mute"],
