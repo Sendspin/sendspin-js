@@ -77,7 +77,7 @@ const CORRECTION_THRESHOLDS: Record<
     resyncAboveMs: 600, // Last resort only (prefer keeping uninterrupted playback even if out of sync)
     rate2AboveMs: Infinity, // Disabled - never use rate correction
     rate1AboveMs: Infinity, // Disabled - never use rate correction
-    samplesBelowMs: 600, // Use samples for any error < resyncAboveMs
+    samplesBelowMs: 0, // Disabled - never use sample corrections (prioritize smooth local playback)
     deadbandBelowMs: 5, // Larger deadband to avoid frequent small adjustments
     timeFilterMaxErrorMs: 10, // Moderate threshold; only start correcting once we are reasonably sure of the time
     clockPrecisionTimeoutMs: Infinity, // Never force corrections with imprecise clock
