@@ -11,6 +11,8 @@ import type { SendspinTimeFilter } from "./time-filter";
 
 // Sync correction constants
 const ZERO_CROSS_WINDOW = 32; // samples to scan for a low-energy correction point
+const SAMPLE_CORRECTION_FADE_LEN = 4; // samples to blend around correction points
+const SAMPLE_CORRECTION_FADE_STRENGTH = 0.35; // blend intensity
 const OUTPUT_LATENCY_ALPHA = 0.01; // EMA smoothing factor for outputLatency
 const SYNC_ERROR_ALPHA = 0.1; // EMA smoothing factor for sync error (filters jitter)
 const OUTPUT_LATENCY_STORAGE_KEY = "sendspin-output-latency-us"; // LocalStorage key
@@ -375,8 +377,20 @@ export class AudioProcessor {
           const newData = newBuffer.getChannelData(ch);
 
           newData.set(oldData.subarray(0, g + 1), 0);
-          newData[g + 1] = (oldData[g] + oldData[g + 1]) / 2;
+          const insertedSample = (oldData[g] + oldData[g + 1]) / 2;
+          newData[g + 1] = insertedSample;
           newData.set(oldData.subarray(g + 1), g + 2);
+
+          // Fade-out after insertion to reduce correction audibility.
+          for (let f = 0; f < SAMPLE_CORRECTION_FADE_LEN; f++) {
+            const pos = g + 2 + f;
+            if (pos >= newData.length) break;
+            const alpha =
+              ((SAMPLE_CORRECTION_FADE_LEN - f) /
+                (SAMPLE_CORRECTION_FADE_LEN + 1)) *
+              SAMPLE_CORRECTION_FADE_STRENGTH;
+            newData[pos] = newData[pos] * (1 - alpha) + insertedSample * alpha;
+          }
         }
 
         return newBuffer;
@@ -393,9 +407,22 @@ export class AudioProcessor {
           const oldData = buffer.getChannelData(ch);
           const newData = newBuffer.getChannelData(ch);
 
+          const replacementSample = (oldData[g] + oldData[g + 1]) / 2;
           newData.set(oldData.subarray(0, g), 0);
-          newData[g] = (oldData[g] + oldData[g + 1]) / 2;
+          newData[g] = replacementSample;
           newData.set(oldData.subarray(g + 2), g + 1);
+
+          // Fade-in before deletion to soften the transition into the collapsed gap.
+          for (let f = 0; f < SAMPLE_CORRECTION_FADE_LEN; f++) {
+            const pos = g - 1 - f;
+            if (pos < 0) break;
+            const alpha =
+              ((SAMPLE_CORRECTION_FADE_LEN - f) /
+                (SAMPLE_CORRECTION_FADE_LEN + 1)) *
+              SAMPLE_CORRECTION_FADE_STRENGTH;
+            newData[pos] =
+              newData[pos] * (1 - alpha) + replacementSample * alpha;
+          }
         }
 
         return newBuffer;
