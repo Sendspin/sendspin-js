@@ -10,7 +10,7 @@ import type { StateManager } from "./state-manager";
 import type { SendspinTimeFilter } from "./time-filter";
 
 // Sync correction constants
-const ZERO_CROSS_WINDOW = 16; // samples to scan for a low-artifact correction point
+const CORRECTION_SEARCH_WINDOW = 16; // samples to scan for the least-audible correction point
 const SAMPLE_CORRECTION_FADE_LEN = 8; // samples to blend around correction points
 // Blend budget across the whole fade window.
 // We derive per-sample strength from fade length so longer fades become gentler.
@@ -20,6 +20,8 @@ const SAMPLE_CORRECTION_FADE_STRENGTH = Math.min(
   1,
   (2 * SAMPLE_CORRECTION_TARGET_BLEND_SUM) / SAMPLE_CORRECTION_FADE_LEN,
 );
+const SAMPLE_CORRECTION_FADE_SKIP_BELOW_MISMATCH = 0.002; // below this, boundary is already effectively smooth
+const SAMPLE_CORRECTION_FADE_FULL_AT_MISMATCH = 0.125; // mismatch that enables full fade strength
 const OUTPUT_LATENCY_ALPHA = 0.01; // EMA smoothing factor for outputLatency
 const SYNC_ERROR_ALPHA = 0.1; // EMA smoothing factor for sync error (filters jitter)
 const OUTPUT_LATENCY_STORAGE_KEY = "sendspin-output-latency-us"; // LocalStorage key
@@ -368,6 +370,11 @@ export class AudioProcessor {
         score += amplitudeEnergy + discontinuityCost;
       }
 
+      if (score === 0) {
+        // Perfect silent/continuous splice candidate in this search window.
+        return g;
+      }
+
       if (score < bestScore) {
         bestScore = score;
         bestGap = g;
@@ -394,7 +401,7 @@ export class AudioProcessor {
 
     try {
       if (samplesToAdjust > 0) {
-        const gMax = Math.min(ZERO_CROSS_WINDOW - 1, len - 2);
+        const gMax = Math.min(CORRECTION_SEARCH_WINDOW - 1, len - 2);
         const g = this.findBestCorrectionGap(buffer, 0, gMax, "insert");
         const newBuffer = this.audioContext.createBuffer(
           channels,
@@ -413,20 +420,33 @@ export class AudioProcessor {
 
           // After inserting one synthetic sample, gently pull the next few real samples toward it.
           // This smooths the splice and avoids a hard step immediately after the insertion point.
-          for (let f = 0; f < SAMPLE_CORRECTION_FADE_LEN; f++) {
-            const pos = g + 2 + f;
-            if (pos >= newData.length) break;
-            const alpha =
-              ((SAMPLE_CORRECTION_FADE_LEN - f) /
-                (SAMPLE_CORRECTION_FADE_LEN + 1)) *
-              SAMPLE_CORRECTION_FADE_STRENGTH;
-            newData[pos] = newData[pos] * (1 - alpha) + insertedSample * alpha;
+          const insertMismatch = Math.max(
+            Math.abs(oldData[g] - insertedSample),
+            Math.abs(insertedSample - oldData[g + 1]),
+          );
+          if (insertMismatch > SAMPLE_CORRECTION_FADE_SKIP_BELOW_MISMATCH) {
+            const adaptiveStrength =
+              SAMPLE_CORRECTION_FADE_STRENGTH *
+              Math.min(
+                1,
+                insertMismatch / SAMPLE_CORRECTION_FADE_FULL_AT_MISMATCH,
+              );
+            for (let f = 0; f < SAMPLE_CORRECTION_FADE_LEN; f++) {
+              const pos = g + 2 + f;
+              if (pos >= newData.length) break;
+              const alpha =
+                ((SAMPLE_CORRECTION_FADE_LEN - f) /
+                  (SAMPLE_CORRECTION_FADE_LEN + 1)) *
+                adaptiveStrength;
+              newData[pos] =
+                newData[pos] * (1 - alpha) + insertedSample * alpha;
+            }
           }
         }
 
         return newBuffer;
       } else {
-        const gMin = Math.max(0, len - 1 - ZERO_CROSS_WINDOW);
+        const gMin = Math.max(0, len - 1 - CORRECTION_SEARCH_WINDOW);
         const g = this.findBestCorrectionGap(buffer, gMin, len - 2, "delete");
         const newBuffer = this.audioContext.createBuffer(
           channels,
@@ -445,15 +465,29 @@ export class AudioProcessor {
 
           // Before a deletion collapse, gently pull the preceding samples toward the replacement.
           // This smooths entry into the new boundary formed by skipping one sample.
-          for (let f = 0; f < SAMPLE_CORRECTION_FADE_LEN; f++) {
-            const pos = g - 1 - f;
-            if (pos < 0) break;
-            const alpha =
-              ((SAMPLE_CORRECTION_FADE_LEN - f) /
-                (SAMPLE_CORRECTION_FADE_LEN + 1)) *
-              SAMPLE_CORRECTION_FADE_STRENGTH;
-            newData[pos] =
-              newData[pos] * (1 - alpha) + replacementSample * alpha;
+          const prev = g > 0 ? oldData[g - 1] : oldData[g];
+          const next = g + 2 < oldData.length ? oldData[g + 2] : oldData[g + 1];
+          const deleteMismatch = Math.max(
+            Math.abs(prev - replacementSample),
+            Math.abs(replacementSample - next),
+          );
+          if (deleteMismatch > SAMPLE_CORRECTION_FADE_SKIP_BELOW_MISMATCH) {
+            const adaptiveStrength =
+              SAMPLE_CORRECTION_FADE_STRENGTH *
+              Math.min(
+                1,
+                deleteMismatch / SAMPLE_CORRECTION_FADE_FULL_AT_MISMATCH,
+              );
+            for (let f = 0; f < SAMPLE_CORRECTION_FADE_LEN; f++) {
+              const pos = g - 1 - f;
+              if (pos < 0) break;
+              const alpha =
+                ((SAMPLE_CORRECTION_FADE_LEN - f) /
+                  (SAMPLE_CORRECTION_FADE_LEN + 1)) *
+                adaptiveStrength;
+              newData[pos] =
+                newData[pos] * (1 - alpha) + replacementSample * alpha;
+            }
           }
         }
 
