@@ -19,6 +19,14 @@ const SAMPLE_CORRECTION_FADE_STRENGTH = Math.min(
   1,
   (2 * SAMPLE_CORRECTION_TARGET_BLEND_SUM) / SAMPLE_CORRECTION_FADE_LEN,
 );
+const SAMPLE_CORRECTION_FADE_ALPHAS = new Float32Array(
+  SAMPLE_CORRECTION_FADE_LEN,
+);
+for (let f = 0; f < SAMPLE_CORRECTION_FADE_LEN; f++) {
+  SAMPLE_CORRECTION_FADE_ALPHAS[f] =
+    ((SAMPLE_CORRECTION_FADE_LEN - f) / (SAMPLE_CORRECTION_FADE_LEN + 1)) *
+    SAMPLE_CORRECTION_FADE_STRENGTH;
+}
 const OUTPUT_LATENCY_ALPHA = 0.01; // EMA smoothing factor for outputLatency
 const SYNC_ERROR_ALPHA = 0.1; // EMA smoothing factor for sync error (filters jitter)
 const OUTPUT_LATENCY_STORAGE_KEY = "sendspin-output-latency-us"; // LocalStorage key
@@ -368,10 +376,7 @@ export class AudioProcessor {
           for (let f = 0; f < SAMPLE_CORRECTION_FADE_LEN; f++) {
             const pos = 2 + f;
             if (pos >= newData.length) break;
-            const alpha =
-              ((SAMPLE_CORRECTION_FADE_LEN - f) /
-                (SAMPLE_CORRECTION_FADE_LEN + 1)) *
-              SAMPLE_CORRECTION_FADE_STRENGTH;
+            const alpha = SAMPLE_CORRECTION_FADE_ALPHAS[f];
             newData[pos] = newData[pos] * (1 - alpha) + insertedSample * alpha;
           }
         }
@@ -398,10 +403,7 @@ export class AudioProcessor {
           for (let f = 0; f < SAMPLE_CORRECTION_FADE_LEN; f++) {
             const pos = len - 3 - f;
             if (pos < 0) break;
-            const alpha =
-              ((SAMPLE_CORRECTION_FADE_LEN - f) /
-                (SAMPLE_CORRECTION_FADE_LEN + 1)) *
-              SAMPLE_CORRECTION_FADE_STRENGTH;
+            const alpha = SAMPLE_CORRECTION_FADE_ALPHAS[f];
             newData[pos] =
               newData[pos] * (1 - alpha) + replacementSample * alpha;
           }
