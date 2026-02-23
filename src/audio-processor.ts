@@ -13,8 +13,8 @@ import type { SendspinTimeFilter } from "./time-filter";
 const SAMPLE_CORRECTION_FADE_LEN = 8; // samples to blend around correction points
 // Blend budget across the whole fade window.
 // We derive per-sample strength from fade length so longer fades become gentler.
-// 0.7 means the whole fade applies roughly 70% of a full-strength blend in total.
-const SAMPLE_CORRECTION_TARGET_BLEND_SUM = 0.7;
+// 1.0 means the whole fade applies roughly a full-strength blend in total.
+const SAMPLE_CORRECTION_TARGET_BLEND_SUM = 1.0;
 const SAMPLE_CORRECTION_FADE_STRENGTH = Math.min(
   1,
   (2 * SAMPLE_CORRECTION_TARGET_BLEND_SUM) / SAMPLE_CORRECTION_FADE_LEN,
