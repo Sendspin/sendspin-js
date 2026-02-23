@@ -10,6 +10,17 @@ import type { StateManager } from "./state-manager";
 import type { SendspinTimeFilter } from "./time-filter";
 
 // Sync correction constants
+const SAMPLE_CORRECTION_FADE_LEN = 8; // samples to blend around correction points
+// Blend budget across the whole fade window.
+// We derive per-sample strength from fade length so longer fades become gentler.
+// 0.7 means the whole fade applies roughly 70% of a full-strength blend in total.
+const SAMPLE_CORRECTION_TARGET_BLEND_SUM = 0.7;
+const SAMPLE_CORRECTION_FADE_STRENGTH = Math.min(
+  1,
+  (2 * SAMPLE_CORRECTION_TARGET_BLEND_SUM) / SAMPLE_CORRECTION_FADE_LEN,
+);
+const SAMPLE_CORRECTION_FADE_SKIP_BELOW_MISMATCH = 0.002; // below this, boundary is already effectively smooth
+const SAMPLE_CORRECTION_FADE_FULL_AT_MISMATCH = 0.125; // mismatch that enables full fade strength
 const OUTPUT_LATENCY_ALPHA = 0.01; // EMA smoothing factor for outputLatency
 const SYNC_ERROR_ALPHA = 0.1; // EMA smoothing factor for sync error (filters jitter)
 const OUTPUT_LATENCY_STORAGE_KEY = "sendspin-output-latency-us"; // LocalStorage key
@@ -350,8 +361,34 @@ export class AudioProcessor {
           const newData = newBuffer.getChannelData(ch);
 
           newData[0] = oldData[0];
-          newData[1] = (oldData[0] + oldData[1]) / 2;
+          const insertedSample = (oldData[0] + oldData[1]) / 2;
+          newData[1] = insertedSample;
           newData.set(oldData.subarray(1), 2);
+
+          // After inserting one synthetic sample, gently pull the next few real samples toward it.
+          // This smooths the splice and avoids a hard step immediately after the insertion point.
+          const insertMismatch = Math.max(
+            Math.abs(oldData[0] - insertedSample),
+            Math.abs(insertedSample - oldData[1]),
+          );
+          if (insertMismatch > SAMPLE_CORRECTION_FADE_SKIP_BELOW_MISMATCH) {
+            const adaptiveStrength =
+              SAMPLE_CORRECTION_FADE_STRENGTH *
+              Math.min(
+                1,
+                insertMismatch / SAMPLE_CORRECTION_FADE_FULL_AT_MISMATCH,
+              );
+            for (let f = 0; f < SAMPLE_CORRECTION_FADE_LEN; f++) {
+              const pos = 2 + f;
+              if (pos >= newData.length) break;
+              const alpha =
+                ((SAMPLE_CORRECTION_FADE_LEN - f) /
+                  (SAMPLE_CORRECTION_FADE_LEN + 1)) *
+                adaptiveStrength;
+              newData[pos] =
+                newData[pos] * (1 - alpha) + insertedSample * alpha;
+            }
+          }
         }
 
         return newBuffer;
@@ -368,7 +405,35 @@ export class AudioProcessor {
           const newData = newBuffer.getChannelData(ch);
 
           newData.set(oldData.subarray(0, len - 2));
-          newData[len - 2] = (oldData[len - 2] + oldData[len - 1]) / 2;
+          const replacementSample = (oldData[len - 2] + oldData[len - 1]) / 2;
+          newData[len - 2] = replacementSample;
+
+          // Before a deletion collapse, gently pull the preceding samples toward the replacement.
+          // This smooths entry into the new boundary formed by skipping one sample.
+          const prev = len > 2 ? oldData[len - 3] : oldData[len - 2];
+          const next = oldData[len - 1];
+          const deleteMismatch = Math.max(
+            Math.abs(prev - replacementSample),
+            Math.abs(replacementSample - next),
+          );
+          if (deleteMismatch > SAMPLE_CORRECTION_FADE_SKIP_BELOW_MISMATCH) {
+            const adaptiveStrength =
+              SAMPLE_CORRECTION_FADE_STRENGTH *
+              Math.min(
+                1,
+                deleteMismatch / SAMPLE_CORRECTION_FADE_FULL_AT_MISMATCH,
+              );
+            for (let f = 0; f < SAMPLE_CORRECTION_FADE_LEN; f++) {
+              const pos = len - 3 - f;
+              if (pos < 0) break;
+              const alpha =
+                ((SAMPLE_CORRECTION_FADE_LEN - f) /
+                  (SAMPLE_CORRECTION_FADE_LEN + 1)) *
+                adaptiveStrength;
+              newData[pos] =
+                newData[pos] * (1 - alpha) + replacementSample * alpha;
+            }
+          }
         }
 
         return newBuffer;
