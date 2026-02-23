@@ -19,8 +19,6 @@ const SAMPLE_CORRECTION_FADE_STRENGTH = Math.min(
   1,
   (2 * SAMPLE_CORRECTION_TARGET_BLEND_SUM) / SAMPLE_CORRECTION_FADE_LEN,
 );
-const SAMPLE_CORRECTION_FADE_SKIP_BELOW_MISMATCH = 0.002; // below this, boundary is already effectively smooth
-const SAMPLE_CORRECTION_FADE_FULL_AT_MISMATCH = 0.125; // mismatch that enables full fade strength
 const OUTPUT_LATENCY_ALPHA = 0.01; // EMA smoothing factor for outputLatency
 const SYNC_ERROR_ALPHA = 0.1; // EMA smoothing factor for sync error (filters jitter)
 const OUTPUT_LATENCY_STORAGE_KEY = "sendspin-output-latency-us"; // LocalStorage key
@@ -367,27 +365,14 @@ export class AudioProcessor {
 
           // After inserting one synthetic sample, gently pull the next few real samples toward it.
           // This smooths the splice and avoids a hard step immediately after the insertion point.
-          const insertMismatch = Math.max(
-            Math.abs(oldData[0] - insertedSample),
-            Math.abs(insertedSample - oldData[1]),
-          );
-          if (insertMismatch > SAMPLE_CORRECTION_FADE_SKIP_BELOW_MISMATCH) {
-            const adaptiveStrength =
-              SAMPLE_CORRECTION_FADE_STRENGTH *
-              Math.min(
-                1,
-                insertMismatch / SAMPLE_CORRECTION_FADE_FULL_AT_MISMATCH,
-              );
-            for (let f = 0; f < SAMPLE_CORRECTION_FADE_LEN; f++) {
-              const pos = 2 + f;
-              if (pos >= newData.length) break;
-              const alpha =
-                ((SAMPLE_CORRECTION_FADE_LEN - f) /
-                  (SAMPLE_CORRECTION_FADE_LEN + 1)) *
-                adaptiveStrength;
-              newData[pos] =
-                newData[pos] * (1 - alpha) + insertedSample * alpha;
-            }
+          for (let f = 0; f < SAMPLE_CORRECTION_FADE_LEN; f++) {
+            const pos = 2 + f;
+            if (pos >= newData.length) break;
+            const alpha =
+              ((SAMPLE_CORRECTION_FADE_LEN - f) /
+                (SAMPLE_CORRECTION_FADE_LEN + 1)) *
+              SAMPLE_CORRECTION_FADE_STRENGTH;
+            newData[pos] = newData[pos] * (1 - alpha) + insertedSample * alpha;
           }
         }
 
@@ -410,29 +395,15 @@ export class AudioProcessor {
 
           // Before a deletion collapse, gently pull the preceding samples toward the replacement.
           // This smooths entry into the new boundary formed by skipping one sample.
-          const prev = len > 2 ? oldData[len - 3] : oldData[len - 2];
-          const next = oldData[len - 1];
-          const deleteMismatch = Math.max(
-            Math.abs(prev - replacementSample),
-            Math.abs(replacementSample - next),
-          );
-          if (deleteMismatch > SAMPLE_CORRECTION_FADE_SKIP_BELOW_MISMATCH) {
-            const adaptiveStrength =
-              SAMPLE_CORRECTION_FADE_STRENGTH *
-              Math.min(
-                1,
-                deleteMismatch / SAMPLE_CORRECTION_FADE_FULL_AT_MISMATCH,
-              );
-            for (let f = 0; f < SAMPLE_CORRECTION_FADE_LEN; f++) {
-              const pos = len - 3 - f;
-              if (pos < 0) break;
-              const alpha =
-                ((SAMPLE_CORRECTION_FADE_LEN - f) /
-                  (SAMPLE_CORRECTION_FADE_LEN + 1)) *
-                adaptiveStrength;
-              newData[pos] =
-                newData[pos] * (1 - alpha) + replacementSample * alpha;
-            }
+          for (let f = 0; f < SAMPLE_CORRECTION_FADE_LEN; f++) {
+            const pos = len - 3 - f;
+            if (pos < 0) break;
+            const alpha =
+              ((SAMPLE_CORRECTION_FADE_LEN - f) /
+                (SAMPLE_CORRECTION_FADE_LEN + 1)) *
+              SAMPLE_CORRECTION_FADE_STRENGTH;
+            newData[pos] =
+              newData[pos] * (1 - alpha) + replacementSample * alpha;
           }
         }
 
