@@ -10,6 +10,7 @@ import type { StateManager } from "./state-manager";
 import type { SendspinTimeFilter } from "./time-filter";
 
 // Sync correction constants
+const ZERO_CROSS_WINDOW = 32; // samples to scan for a low-energy correction point
 const OUTPUT_LATENCY_ALPHA = 0.01; // EMA smoothing factor for outputLatency
 const SYNC_ERROR_ALPHA = 0.1; // EMA smoothing factor for sync error (filters jitter)
 const OUTPUT_LATENCY_STORAGE_KEY = "sendspin-output-latency-us"; // LocalStorage key
@@ -321,9 +322,32 @@ export class AudioProcessor {
     return newBuffer;
   }
 
+  // Find the gap index g in [startGap, endGap] with the lowest summed amplitude across channels.
+  // "Gap g" means between samples g and g+1.
+  private findLowestEnergyGap(
+    buffer: AudioBuffer,
+    startGap: number,
+    endGap: number,
+  ): number {
+    let bestGap = startGap;
+    let bestEnergy = Infinity;
+    for (let g = startGap; g <= endGap; g++) {
+      let energy = 0;
+      for (let ch = 0; ch < buffer.numberOfChannels; ch++) {
+        const data = buffer.getChannelData(ch);
+        energy += Math.abs(data[g]) + Math.abs(data[g + 1]);
+      }
+      if (energy < bestEnergy) {
+        bestEnergy = energy;
+        bestGap = g;
+      }
+    }
+    return bestGap;
+  }
+
   // Adjust buffer by inserting or deleting 1 sample using interpolation
-  // Insert: [A, B, ...] → [A, (A+B)/2, B, ...] (at start)
-  // Delete: [..., Y, Z] → [..., (Y+Z)/2] (at end)
+  // Insert: choose a low-energy gap near the start and insert one interpolated sample there.
+  // Delete: choose a low-energy gap near the end and collapse it to one sample.
   private adjustBufferSamples(
     buffer: AudioBuffer,
     samplesToAdjust: number,
@@ -338,7 +362,8 @@ export class AudioProcessor {
 
     try {
       if (samplesToAdjust > 0) {
-        // Insert 1 sample at START: [A, B, ...] → [A, (A+B)/2, B, ...]
+        const gMax = Math.min(ZERO_CROSS_WINDOW - 1, len - 2);
+        const g = this.findLowestEnergyGap(buffer, 0, gMax);
         const newBuffer = this.audioContext.createBuffer(
           channels,
           len + 1,
@@ -349,14 +374,15 @@ export class AudioProcessor {
           const oldData = buffer.getChannelData(ch);
           const newData = newBuffer.getChannelData(ch);
 
-          newData[0] = oldData[0];
-          newData[1] = (oldData[0] + oldData[1]) / 2;
-          newData.set(oldData.subarray(1), 2);
+          newData.set(oldData.subarray(0, g + 1), 0);
+          newData[g + 1] = (oldData[g] + oldData[g + 1]) / 2;
+          newData.set(oldData.subarray(g + 1), g + 2);
         }
 
         return newBuffer;
       } else {
-        // Delete 1 sample at END: [..., Y, Z] → [..., (Y+Z)/2]
+        const gMin = Math.max(0, len - 1 - ZERO_CROSS_WINDOW);
+        const g = this.findLowestEnergyGap(buffer, gMin, len - 2);
         const newBuffer = this.audioContext.createBuffer(
           channels,
           len - 1,
@@ -367,8 +393,9 @@ export class AudioProcessor {
           const oldData = buffer.getChannelData(ch);
           const newData = newBuffer.getChannelData(ch);
 
-          newData.set(oldData.subarray(0, len - 2));
-          newData[len - 2] = (oldData[len - 2] + oldData[len - 1]) / 2;
+          newData.set(oldData.subarray(0, g), 0);
+          newData[g] = (oldData[g] + oldData[g + 1]) / 2;
+          newData.set(oldData.subarray(g + 2), g + 1);
         }
 
         return newBuffer;
