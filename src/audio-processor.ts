@@ -10,6 +10,23 @@ import type { StateManager } from "./state-manager";
 import type { SendspinTimeFilter } from "./time-filter";
 
 // Sync correction constants
+const SAMPLE_CORRECTION_FADE_LEN = 8; // samples to blend around correction points
+// Blend budget across the whole fade window.
+// We derive per-sample strength from fade length so longer fades become gentler.
+// 1.0 means the whole fade applies roughly a full-strength blend in total.
+const SAMPLE_CORRECTION_TARGET_BLEND_SUM = 1.0;
+const SAMPLE_CORRECTION_FADE_STRENGTH = Math.min(
+  1,
+  (2 * SAMPLE_CORRECTION_TARGET_BLEND_SUM) / SAMPLE_CORRECTION_FADE_LEN,
+);
+const SAMPLE_CORRECTION_FADE_ALPHAS = new Float32Array(
+  SAMPLE_CORRECTION_FADE_LEN,
+);
+for (let f = 0; f < SAMPLE_CORRECTION_FADE_LEN; f++) {
+  SAMPLE_CORRECTION_FADE_ALPHAS[f] =
+    ((SAMPLE_CORRECTION_FADE_LEN - f) / (SAMPLE_CORRECTION_FADE_LEN + 1)) *
+    SAMPLE_CORRECTION_FADE_STRENGTH;
+}
 const OUTPUT_LATENCY_ALPHA = 0.01; // EMA smoothing factor for outputLatency
 const SYNC_ERROR_ALPHA = 0.1; // EMA smoothing factor for sync error (filters jitter)
 const OUTPUT_LATENCY_STORAGE_KEY = "sendspin-output-latency-us"; // LocalStorage key
@@ -350,8 +367,18 @@ export class AudioProcessor {
           const newData = newBuffer.getChannelData(ch);
 
           newData[0] = oldData[0];
-          newData[1] = (oldData[0] + oldData[1]) / 2;
+          const insertedSample = (oldData[0] + oldData[1]) / 2;
+          newData[1] = insertedSample;
           newData.set(oldData.subarray(1), 2);
+
+          // After inserting one synthetic sample, gently pull the next few real samples toward it.
+          // This smooths the splice and avoids a hard step immediately after the insertion point.
+          for (let f = 0; f < SAMPLE_CORRECTION_FADE_LEN; f++) {
+            const pos = 2 + f;
+            if (pos >= newData.length) break;
+            const alpha = SAMPLE_CORRECTION_FADE_ALPHAS[f];
+            newData[pos] = newData[pos] * (1 - alpha) + insertedSample * alpha;
+          }
         }
 
         return newBuffer;
@@ -368,7 +395,18 @@ export class AudioProcessor {
           const newData = newBuffer.getChannelData(ch);
 
           newData.set(oldData.subarray(0, len - 2));
-          newData[len - 2] = (oldData[len - 2] + oldData[len - 1]) / 2;
+          const replacementSample = (oldData[len - 2] + oldData[len - 1]) / 2;
+          newData[len - 2] = replacementSample;
+
+          // Before a deletion collapse, gently pull the preceding samples toward the replacement.
+          // This smooths entry into the new boundary formed by skipping one sample.
+          for (let f = 0; f < SAMPLE_CORRECTION_FADE_LEN; f++) {
+            const pos = len - 3 - f;
+            if (pos < 0) break;
+            const alpha = SAMPLE_CORRECTION_FADE_ALPHAS[f];
+            newData[pos] =
+              newData[pos] * (1 - alpha) + replacementSample * alpha;
+          }
         }
 
         return newBuffer;
