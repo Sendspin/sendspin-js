@@ -10,9 +10,16 @@ import type { StateManager } from "./state-manager";
 import type { SendspinTimeFilter } from "./time-filter";
 
 // Sync correction constants
-const ZERO_CROSS_WINDOW = 32; // samples to scan for a low-energy correction point
-const SAMPLE_CORRECTION_FADE_LEN = 4; // samples to blend around correction points
-const SAMPLE_CORRECTION_FADE_STRENGTH = 0.35; // blend intensity
+const ZERO_CROSS_WINDOW = 16; // samples to scan for a low-artifact correction point
+const SAMPLE_CORRECTION_FADE_LEN = 8; // samples to blend around correction points
+// Blend budget across the whole fade window.
+// We derive per-sample strength from fade length so longer fades become gentler.
+// 0.7 means the whole fade applies roughly 70% of a full-strength blend in total.
+const SAMPLE_CORRECTION_TARGET_BLEND_SUM = 0.7;
+const SAMPLE_CORRECTION_FADE_STRENGTH = Math.min(
+  1,
+  (2 * SAMPLE_CORRECTION_TARGET_BLEND_SUM) / SAMPLE_CORRECTION_FADE_LEN,
+);
 const OUTPUT_LATENCY_ALPHA = 0.01; // EMA smoothing factor for outputLatency
 const SYNC_ERROR_ALPHA = 0.1; // EMA smoothing factor for sync error (filters jitter)
 const OUTPUT_LATENCY_STORAGE_KEY = "sendspin-output-latency-us"; // LocalStorage key
@@ -324,26 +331,49 @@ export class AudioProcessor {
     return newBuffer;
   }
 
-  // Find the gap index g in [startGap, endGap] with the lowest summed amplitude across channels.
-  // "Gap g" means between samples g and g+1.
-  private findLowestEnergyGap(
+  // Pick the least audible correction gap in [startGap, endGap] (gap g is between g and g+1).
+  // We minimize a combined score:
+  // - low local amplitude (prefer quieter/near-zero area)
+  // - low predicted boundary jump after the edit
+  // This reduces click risk for both insert and delete operations.
+  private findBestCorrectionGap(
     buffer: AudioBuffer,
     startGap: number,
     endGap: number,
+    kind: "insert" | "delete",
   ): number {
     let bestGap = startGap;
-    let bestEnergy = Infinity;
+    let bestScore = Infinity;
+
     for (let g = startGap; g <= endGap; g++) {
-      let energy = 0;
+      let score = 0;
       for (let ch = 0; ch < buffer.numberOfChannels; ch++) {
         const data = buffer.getChannelData(ch);
-        energy += Math.abs(data[g]) + Math.abs(data[g + 1]);
+        const left = data[g];
+        const right = data[g + 1];
+        const replacement = (left + right) / 2;
+        const amplitudeEnergy = Math.abs(left) + Math.abs(right);
+
+        let discontinuityCost: number;
+        if (kind === "insert") {
+          discontinuityCost =
+            Math.abs(left - replacement) + Math.abs(replacement - right);
+        } else {
+          const prev = g > 0 ? data[g - 1] : left;
+          const next = g + 2 < data.length ? data[g + 2] : right;
+          discontinuityCost =
+            Math.abs(prev - replacement) + Math.abs(replacement - next);
+        }
+
+        score += amplitudeEnergy + discontinuityCost;
       }
-      if (energy < bestEnergy) {
-        bestEnergy = energy;
+
+      if (score < bestScore) {
+        bestScore = score;
         bestGap = g;
       }
     }
+
     return bestGap;
   }
 
@@ -365,7 +395,7 @@ export class AudioProcessor {
     try {
       if (samplesToAdjust > 0) {
         const gMax = Math.min(ZERO_CROSS_WINDOW - 1, len - 2);
-        const g = this.findLowestEnergyGap(buffer, 0, gMax);
+        const g = this.findBestCorrectionGap(buffer, 0, gMax, "insert");
         const newBuffer = this.audioContext.createBuffer(
           channels,
           len + 1,
@@ -381,7 +411,8 @@ export class AudioProcessor {
           newData[g + 1] = insertedSample;
           newData.set(oldData.subarray(g + 1), g + 2);
 
-          // Fade-out after insertion to reduce correction audibility.
+          // After inserting one synthetic sample, gently pull the next few real samples toward it.
+          // This smooths the splice and avoids a hard step immediately after the insertion point.
           for (let f = 0; f < SAMPLE_CORRECTION_FADE_LEN; f++) {
             const pos = g + 2 + f;
             if (pos >= newData.length) break;
@@ -396,7 +427,7 @@ export class AudioProcessor {
         return newBuffer;
       } else {
         const gMin = Math.max(0, len - 1 - ZERO_CROSS_WINDOW);
-        const g = this.findLowestEnergyGap(buffer, gMin, len - 2);
+        const g = this.findBestCorrectionGap(buffer, gMin, len - 2, "delete");
         const newBuffer = this.audioContext.createBuffer(
           channels,
           len - 1,
@@ -412,7 +443,8 @@ export class AudioProcessor {
           newData[g] = replacementSample;
           newData.set(oldData.subarray(g + 2), g + 1);
 
-          // Fade-in before deletion to soften the transition into the collapsed gap.
+          // Before a deletion collapse, gently pull the preceding samples toward the replacement.
+          // This smooths entry into the new boundary formed by skipping one sample.
           for (let f = 0; f < SAMPLE_CORRECTION_FADE_LEN; f++) {
             const pos = g - 1 - f;
             if (pos < 0) break;
