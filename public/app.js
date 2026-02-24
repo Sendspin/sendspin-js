@@ -13,7 +13,7 @@ const isLocalhost =
 // Import the SDK from local build (development) or unpkg CDN (production)
 const sdkPath = isLocalhost
   ? "./dev/index.js"
-  : "https://unpkg.com/@music-assistant/sendspin-js@latest/dist/index.js";
+  : "https://unpkg.com/@sendspin/sendspin-js@latest/dist/index.js";
 const { SendspinPlayer } = await import(sdkPath);
 
 console.log(`Loading SDK from: ${sdkPath}`);

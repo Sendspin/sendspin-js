@@ -1,6 +1,6 @@
 # sendspin-js
 
-[![npm](https://img.shields.io/npm/v/@music-assistant/sendspin-js.svg)](https://www.npmjs.com/package/@music-assistant/sendspin-js)
+[![npm](https://img.shields.io/npm/v/@sendspin/sendspin-js.svg)](https://www.npmjs.com/package/@sendspin/sendspin-js)
 
 TypeScript client library implementing the [Sendspin Protocol](https://www.sendspin-audio.com) for clock-synchronized audio streaming.
 
@@ -11,7 +11,7 @@ See the SDK website to see Sendspin JS in action: https://sendspin.github.io/sen
 ## Example
 
 ```typescript
-import { SendspinPlayer } from '@music-assistant/sendspin-js';
+import { SendspinPlayer } from '@sendspin/sendspin-js';
 
 const player = new SendspinPlayer({
   playerId: 'my-player-id',
