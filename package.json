@@ -1,5 +1,5 @@
 {
-  "name": "@music-assistant/sendspin-js",
+  "name": "@sendspin/sendspin-js",
   "version": "0.1.0",
   "type": "module",
   "description": "TypeScript client library for the Sendspin synchronized audio protocol",
@@ -55,6 +55,9 @@
     "rollup": "^4.54.0",
     "serve": "^14.2.5",
     "typescript": "^5.9.3"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "dependencies": {
     "opus-encdec": "^0.1.1"
