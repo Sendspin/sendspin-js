@@ -382,7 +382,8 @@ export class AudioProcessor {
       return;
     }
 
-    const cutoffTime = this.audioContext.currentTime + RECORRECTION_CUTOVER_GUARD_SEC;
+    const cutoffTime =
+      this.audioContext.currentTime + RECORRECTION_CUTOVER_GUARD_SEC;
     this.resyncCount++;
     this.smoothedSyncErrorMs = 0;
     this.currentCorrectionMethod = "resync";
@@ -397,7 +398,9 @@ export class AudioProcessor {
       console.log(
         `Sendspin: [sync] Recorrection cutover at t+${(
           RECORRECTION_CUTOVER_GUARD_SEC * 1000
-        ).toFixed(0)}ms | queue=${this.audioBufferQueue.length} scheduled=${this.scheduledSources.length}`,
+        ).toFixed(
+          0,
+        )}ms | queue=${this.audioBufferQueue.length} scheduled=${this.scheduledSources.length}`,
       );
     }
 
@@ -1260,7 +1263,10 @@ export class AudioProcessor {
       ? this.getSmoothedOutputLatencyUs() / 1_000_000
       : 0;
     const targetScheduledHorizonSec = this.getTargetScheduledHorizonSec();
-    if (this._debugLogging && this.lastLoggedHorizonSec !== targetScheduledHorizonSec) {
+    if (
+      this._debugLogging &&
+      this.lastLoggedHorizonSec !== targetScheduledHorizonSec
+    ) {
       console.log(
         `Sendspin: Scheduling horizon -> ${targetScheduledHorizonSec.toFixed(0)}s (timeFilterError=${(this.timeFilter.error / 1000).toFixed(2)}ms)`,
       );
@@ -1274,7 +1280,10 @@ export class AudioProcessor {
     // Schedule chunks until we have enough future audio to survive short JS throttling.
     while (this.audioBufferQueue.length > 0) {
       const scheduledAheadSec = this.getScheduledAheadSec(audioContextTime);
-      if (this.nextPlaybackTime > 0 && scheduledAheadSec >= targetScheduledHorizonSec) {
+      if (
+        this.nextPlaybackTime > 0 &&
+        scheduledAheadSec >= targetScheduledHorizonSec
+      ) {
         break;
       }
 

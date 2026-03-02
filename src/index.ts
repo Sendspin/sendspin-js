@@ -156,6 +156,7 @@ export class SendspinPlayer {
       },
       // onClose
       () => {
+        this.protocolHandler.stopTimeSync();
         console.log("Sendspin: Connection closed");
       },
     );
@@ -174,6 +175,9 @@ export class SendspinPlayer {
     if (this.wsManager.isConnected()) {
       this.protocolHandler.sendGoodbye(reason);
     }
+
+    // Stop time sync burst scheduler and in-flight timeout state
+    this.protocolHandler.stopTimeSync();
 
     // Clear intervals
     this.stateManager.clearAllIntervals();
