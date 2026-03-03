@@ -36,6 +36,7 @@ const RECORRECTION_TRIGGER_MS = 30;
 const RECORRECTION_SUSTAIN_MS = 400;
 const RECORRECTION_COOLDOWN_MS = 1_500;
 const RECORRECTION_CUTOVER_GUARD_SEC = 0.3;
+const SCHEDULE_HEADROOM_SEC = 0.2;
 const SCHEDULE_HORIZON_PRECISE_SEC = 20;
 const SCHEDULE_HORIZON_GOOD_SEC = 8;
 const SCHEDULE_HORIZON_POOR_SEC = 4;
@@ -120,6 +121,9 @@ export class AudioProcessor {
     source: AudioBufferSourceNode;
     startTime: number;
     endTime: number;
+    buffer: AudioBuffer;
+    serverTime: number;
+    generation: number;
   }[] = [];
 
   // Seamless playback tracking
@@ -165,6 +169,7 @@ export class AudioProcessor {
   private recorrectionBreachStartedAtMs: number | null = null;
   private lastRecorrectionAtMs: number = -Infinity;
   private recorrectionMinStartTimeSec: number | null = null;
+  private lastLoggedHorizonSec: number | null = null;
 
   constructor(
     private stateManager: StateManager,
@@ -282,6 +287,9 @@ export class AudioProcessor {
     if (this.recorrectionInterval !== null) {
       return;
     }
+    if (this._debugLogging) {
+      console.log("Sendspin: [sync] Recorrection monitor started (250ms)");
+    }
     this.recorrectionInterval = globalThis.setInterval(
       () => this.checkRecorrection(),
       RECORRECTION_CHECK_INTERVAL_MS,
@@ -292,6 +300,9 @@ export class AudioProcessor {
     if (this.recorrectionInterval !== null) {
       clearInterval(this.recorrectionInterval);
       this.recorrectionInterval = null;
+      if (this._debugLogging) {
+        console.log("Sendspin: [sync] Recorrection monitor stopped");
+      }
     }
     this.recorrectionBreachStartedAtMs = null;
     this.lastRecorrectionAtMs = -Infinity;
@@ -309,13 +320,32 @@ export class AudioProcessor {
     if (
       !this.stateManager.isPlaying ||
       this.scheduledSources.length === 0 ||
-      this.nextPlaybackTime === 0
+      this.nextPlaybackTime === 0 ||
+      this.lastScheduledServerTime === 0
     ) {
       this.recorrectionBreachStartedAtMs = null;
       return;
     }
 
     const nowMs = performance.now();
+    const audioContextTime = this.audioContext.currentTime;
+    const nowUs = nowMs * 1000;
+    const syncDelaySec = this.syncDelayMs / 1000;
+    const outputLatencySec = this.useOutputLatencyCompensation
+      ? this.getSmoothedOutputLatencyUs() / 1_000_000
+      : 0;
+    const targetPlaybackTime = this.computeTargetPlaybackTime(
+      this.lastScheduledServerTime,
+      audioContextTime,
+      nowUs,
+      syncDelaySec,
+      outputLatencySec,
+    );
+    const syncErrorMs = (this.nextPlaybackTime - targetPlaybackTime) * 1000;
+    this.currentSyncErrorMs = syncErrorMs;
+    this.smoothedSyncErrorMs =
+      SYNC_ERROR_ALPHA * syncErrorMs +
+      (1 - SYNC_ERROR_ALPHA) * this.smoothedSyncErrorMs;
     const absErrorMs = Math.abs(this.smoothedSyncErrorMs);
     if (absErrorMs < RECORRECTION_TRIGGER_MS) {
       this.recorrectionBreachStartedAtMs = null;
@@ -323,6 +353,11 @@ export class AudioProcessor {
     }
     if (this.recorrectionBreachStartedAtMs === null) {
       this.recorrectionBreachStartedAtMs = nowMs;
+      if (this._debugLogging) {
+        console.log(
+          `Sendspin: [sync] Recorrection breach started: error=${absErrorMs.toFixed(1)}ms`,
+        );
+      }
       return;
     }
     if (nowMs - this.recorrectionBreachStartedAtMs < RECORRECTION_SUSTAIN_MS) {
@@ -332,6 +367,11 @@ export class AudioProcessor {
       return;
     }
 
+    if (this._debugLogging) {
+      console.log(
+        `Sendspin: [sync] Recorrection trigger: error=${absErrorMs.toFixed(1)}ms sustained=${(nowMs - this.recorrectionBreachStartedAtMs).toFixed(0)}ms scheduledAhead=${this.getScheduledAheadSec(this.audioContext.currentTime).toFixed(3)}s`,
+      );
+    }
     this.applyRecorrectionCutover();
     this.lastRecorrectionAtMs = nowMs;
     this.recorrectionBreachStartedAtMs = null;
@@ -357,7 +397,7 @@ export class AudioProcessor {
       console.log(
         `Sendspin: [sync] Recorrection cutover at t+${(
           RECORRECTION_CUTOVER_GUARD_SEC * 1000
-        ).toFixed(0)}ms`,
+        ).toFixed(0)}ms | queue=${this.audioBufferQueue.length} scheduled=${this.scheduledSources.length}`,
       );
     }
 
@@ -366,12 +406,19 @@ export class AudioProcessor {
 
   // Update sync delay at runtime
   setSyncDelay(delayMs: number): void {
-    const deltaMs = delayMs - this.syncDelayMs;
+    const oldDelayMs = this.syncDelayMs;
+    const deltaMs = delayMs - oldDelayMs;
     this.syncDelayMs = delayMs;
 
-    // Shift schedule by the delay change to maintain sync with grouped players
-    if (this.nextPlaybackTime > 0) {
-      this.nextPlaybackTime += deltaMs / 1000;
+    if (this._debugLogging) {
+      const scheduledAheadSec =
+        this.audioContext && this.audioContext.state === "running"
+          ? this.getScheduledAheadSec(this.audioContext.currentTime)
+          : 0;
+      console.log(
+        `Sendspin: Sync delay changed ${oldDelayMs}ms -> ${delayMs}ms (delta=${deltaMs}ms) ` +
+          `| scheduledAhead=${scheduledAheadSec.toFixed(3)}s queue=${this.audioBufferQueue.length} scheduled=${this.scheduledSources.length}`,
+      );
     }
   }
 
@@ -632,16 +679,29 @@ export class AudioProcessor {
   private cutScheduledSources(cutoffTime: number): void {
     if (!this.audioContext) return;
     const stopTime = Math.max(cutoffTime, this.audioContext.currentTime);
+    let requeued = 0;
     this.scheduledSources = this.scheduledSources.filter((entry) => {
-      if (entry.endTime <= stopTime) return true;
+      // Keep already-started sources to avoid cutting mid-buffer artifacts.
+      if (entry.startTime < stopTime) return true;
       try {
         entry.source.onended = null;
         entry.source.stop(stopTime);
       } catch (e) {
         // Ignore errors if source already stopped
       }
+      this.audioBufferQueue.push({
+        buffer: entry.buffer,
+        serverTime: entry.serverTime,
+        generation: entry.generation,
+      });
+      requeued++;
       return false;
     });
+    if (this._debugLogging && requeued > 0) {
+      console.log(
+        `Sendspin: Requeued ${requeued} future chunk(s) after cutover`,
+      );
+    }
   }
 
   // Update volume based on current state
@@ -1193,9 +1253,6 @@ export class AudioProcessor {
     const audioContextTime = this.audioContext.currentTime;
     const nowUs = performance.now() * 1000;
 
-    // Buffer to add for scheduling headroom (200ms)
-    const bufferSec = 0.2;
-
     // Convert sync delay from ms to seconds (positive = delay, negative = advance)
     const syncDelaySec = this.syncDelayMs / 1000;
 
@@ -1203,6 +1260,12 @@ export class AudioProcessor {
       ? this.getSmoothedOutputLatencyUs() / 1_000_000
       : 0;
     const targetScheduledHorizonSec = this.getTargetScheduledHorizonSec();
+    if (this._debugLogging && this.lastLoggedHorizonSec !== targetScheduledHorizonSec) {
+      console.log(
+        `Sendspin: Scheduling horizon -> ${targetScheduledHorizonSec.toFixed(0)}s (timeFilterError=${(this.timeFilter.error / 1000).toFixed(2)}ms)`,
+      );
+      this.lastLoggedHorizonSec = targetScheduledHorizonSec;
+    }
 
     if (this._correctionMode === "sync") {
       this.startRecorrectionMonitor();
@@ -1221,17 +1284,13 @@ export class AudioProcessor {
       let playbackRate: number;
 
       // Always compute the drift-corrected target time
-      const chunkClientTimeUs = this.timeFilter.computeClientTime(
+      const targetPlaybackTime = this.computeTargetPlaybackTime(
         chunk.serverTime,
+        audioContextTime,
+        nowUs,
+        syncDelaySec,
+        outputLatencySec,
       );
-      const deltaUs = chunkClientTimeUs - nowUs;
-      const deltaSec = deltaUs / 1_000_000;
-      const targetPlaybackTime =
-        audioContextTime +
-        deltaSec +
-        bufferSec +
-        syncDelaySec -
-        outputLatencySec;
 
       // First chunk or after a gap: calculate from server timestamp
       if (this.nextPlaybackTime === 0 || this.lastScheduledServerTime === 0) {
@@ -1415,6 +1474,9 @@ export class AudioProcessor {
         source,
         startTime: playbackTime,
         endTime: playbackTime + actualDuration,
+        buffer: chunk.buffer,
+        serverTime: chunk.serverTime,
+        generation: chunk.generation,
       };
       this.scheduledSources.push(scheduledEntry);
       source.onended = () => {
@@ -1422,6 +1484,25 @@ export class AudioProcessor {
         if (idx > -1) this.scheduledSources.splice(idx, 1);
       };
     }
+  }
+
+  private computeTargetPlaybackTime(
+    serverTimeUs: number,
+    audioContextTime: number,
+    nowUs: number,
+    syncDelaySec: number,
+    outputLatencySec: number,
+  ): number {
+    const chunkClientTimeUs = this.timeFilter.computeClientTime(serverTimeUs);
+    const deltaUs = chunkClientTimeUs - nowUs;
+    const deltaSec = deltaUs / 1_000_000;
+    return (
+      audioContextTime +
+      deltaSec +
+      SCHEDULE_HEADROOM_SEC +
+      syncDelaySec -
+      outputLatencySec
+    );
   }
 
   // Start audio element playback (for MediaSession)
