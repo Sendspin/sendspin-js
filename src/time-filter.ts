@@ -35,7 +35,8 @@ export class SendspinTimeFilter {
   private _offset_drift_covariance: number = 0.0;
   private _drift_covariance: number = 0.0;
 
-  private _process_variance: number;
+  private _offset_process_variance: number;
+  private _drift_process_variance: number;
   private _forget_variance_factor: number;
   private _drift_significance_threshold_squared: number;
   private _use_drift: boolean = false;
@@ -43,11 +44,15 @@ export class SendspinTimeFilter {
   private _current_time_element: TimeElement;
 
   constructor(
-    process_std_dev: number = 0.01,
+    offset_process_std_dev: number = 0.01,
     forget_factor: number = 1.001,
     drift_significance_threshold: number = 2.0,
+    drift_process_std_dev: number = 0.0,
   ) {
-    this._process_variance = process_std_dev * process_std_dev;
+    this._offset_process_variance =
+      offset_process_std_dev * offset_process_std_dev;
+    this._drift_process_variance =
+      drift_process_std_dev * drift_process_std_dev;
     this._forget_variance_factor = forget_factor * forget_factor;
     this._drift_significance_threshold_squared =
       drift_significance_threshold * drift_significance_threshold;
@@ -138,8 +143,8 @@ export class SendspinTimeFilter {
     // State transition matrix F = [1, dt; 0, 1]
     const dt_squared = dt * dt;
 
-    // Process noise only applied to offset (modeling clock jitter/wander)
-    const drift_process_variance = 0.0; // Drift assumed stable
+    // Process noise models uncertainty growth in both offset and drift random walks.
+    const drift_process_variance = dt * this._drift_process_variance;
     let new_drift_covariance = this._drift_covariance + drift_process_variance;
 
     const offset_drift_process_variance = 0.0;
@@ -148,7 +153,7 @@ export class SendspinTimeFilter {
       this._drift_covariance * dt +
       offset_drift_process_variance;
 
-    const offset_process_variance = dt * this._process_variance;
+    const offset_process_variance = dt * this._offset_process_variance;
     let new_offset_covariance =
       this._offset_covariance +
       2 * this._offset_drift_covariance * dt +
