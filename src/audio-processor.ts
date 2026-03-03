@@ -31,6 +31,16 @@ const OUTPUT_LATENCY_ALPHA = 0.01; // EMA smoothing factor for outputLatency
 const SYNC_ERROR_ALPHA = 0.1; // EMA smoothing factor for sync error (filters jitter)
 const OUTPUT_LATENCY_STORAGE_KEY = "sendspin-output-latency-us"; // LocalStorage key
 const OUTPUT_LATENCY_PERSIST_INTERVAL_MS = 10_000;
+const RECORRECTION_CHECK_INTERVAL_MS = 250;
+const RECORRECTION_TRIGGER_MS = 30;
+const RECORRECTION_SUSTAIN_MS = 400;
+const RECORRECTION_COOLDOWN_MS = 1_500;
+const RECORRECTION_CUTOVER_GUARD_SEC = 0.3;
+const SCHEDULE_HORIZON_PRECISE_SEC = 20;
+const SCHEDULE_HORIZON_GOOD_SEC = 8;
+const SCHEDULE_HORIZON_POOR_SEC = 4;
+const SCHEDULE_HORIZON_PRECISE_ERROR_MS = 2;
+const SCHEDULE_HORIZON_GOOD_ERROR_MS = 8;
 
 // Mode-specific sync correction thresholds
 const CORRECTION_THRESHOLDS: Record<
@@ -151,6 +161,10 @@ export class AudioProcessor {
 
   private useOutputLatencyCompensation: boolean = true;
   private nativeDecoderGenerationByTimestamp = new Map<number, number>();
+  private recorrectionInterval: ReturnType<typeof setInterval> | null = null;
+  private recorrectionBreachStartedAtMs: number | null = null;
+  private lastRecorrectionAtMs: number = -Infinity;
+  private recorrectionMinStartTimeSec: number | null = null;
 
   constructor(
     private stateManager: StateManager,
@@ -216,6 +230,11 @@ export class AudioProcessor {
     const oldMode = this._correctionMode;
     this._correctionMode = mode;
     const thresholds = CORRECTION_THRESHOLDS[mode];
+    if (mode !== "sync") {
+      this.stopRecorrectionMonitor();
+    } else {
+      this.startRecorrectionMonitor();
+    }
     if (this._debugLogging) {
       console.log(
         `Sendspin: Correction mode changed: '${oldMode}' -> '${mode}' ` +
@@ -233,6 +252,116 @@ export class AudioProcessor {
   // Get debug logging state
   get debugLogging(): boolean {
     return this._debugLogging;
+  }
+
+  private getTargetScheduledHorizonSec(): number {
+    const errorMs = this.timeFilter.error / 1000;
+    if (errorMs < SCHEDULE_HORIZON_PRECISE_ERROR_MS) {
+      return SCHEDULE_HORIZON_PRECISE_SEC;
+    }
+    if (errorMs <= SCHEDULE_HORIZON_GOOD_ERROR_MS) {
+      return SCHEDULE_HORIZON_GOOD_SEC;
+    }
+    return SCHEDULE_HORIZON_POOR_SEC;
+  }
+
+  private getScheduledAheadSec(currentTimeSec: number): number {
+    let farthestScheduledSec = this.nextPlaybackTime;
+    for (const entry of this.scheduledSources) {
+      if (entry.endTime > farthestScheduledSec) {
+        farthestScheduledSec = entry.endTime;
+      }
+    }
+    if (farthestScheduledSec <= 0) {
+      return 0;
+    }
+    return Math.max(0, farthestScheduledSec - currentTimeSec);
+  }
+
+  private startRecorrectionMonitor(): void {
+    if (this.recorrectionInterval !== null) {
+      return;
+    }
+    this.recorrectionInterval = globalThis.setInterval(
+      () => this.checkRecorrection(),
+      RECORRECTION_CHECK_INTERVAL_MS,
+    );
+  }
+
+  private stopRecorrectionMonitor(): void {
+    if (this.recorrectionInterval !== null) {
+      clearInterval(this.recorrectionInterval);
+      this.recorrectionInterval = null;
+    }
+    this.recorrectionBreachStartedAtMs = null;
+    this.lastRecorrectionAtMs = -Infinity;
+  }
+
+  private checkRecorrection(): void {
+    if (this._correctionMode !== "sync") {
+      this.recorrectionBreachStartedAtMs = null;
+      return;
+    }
+    if (!this.audioContext || this.audioContext.state !== "running") {
+      this.recorrectionBreachStartedAtMs = null;
+      return;
+    }
+    if (
+      !this.stateManager.isPlaying ||
+      this.scheduledSources.length === 0 ||
+      this.nextPlaybackTime === 0
+    ) {
+      this.recorrectionBreachStartedAtMs = null;
+      return;
+    }
+
+    const nowMs = performance.now();
+    const absErrorMs = Math.abs(this.smoothedSyncErrorMs);
+    if (absErrorMs < RECORRECTION_TRIGGER_MS) {
+      this.recorrectionBreachStartedAtMs = null;
+      return;
+    }
+    if (this.recorrectionBreachStartedAtMs === null) {
+      this.recorrectionBreachStartedAtMs = nowMs;
+      return;
+    }
+    if (nowMs - this.recorrectionBreachStartedAtMs < RECORRECTION_SUSTAIN_MS) {
+      return;
+    }
+    if (nowMs - this.lastRecorrectionAtMs < RECORRECTION_COOLDOWN_MS) {
+      return;
+    }
+
+    this.applyRecorrectionCutover();
+    this.lastRecorrectionAtMs = nowMs;
+    this.recorrectionBreachStartedAtMs = null;
+  }
+
+  private applyRecorrectionCutover(): void {
+    if (!this.audioContext) {
+      return;
+    }
+
+    const cutoffTime = this.audioContext.currentTime + RECORRECTION_CUTOVER_GUARD_SEC;
+    this.resyncCount++;
+    this.smoothedSyncErrorMs = 0;
+    this.currentCorrectionMethod = "resync";
+    this.lastSamplesAdjusted = 0;
+    this.currentPlaybackRate = 1.0;
+    this.cutScheduledSources(cutoffTime);
+    this.recorrectionMinStartTimeSec = cutoffTime;
+    this.nextPlaybackTime = 0;
+    this.lastScheduledServerTime = 0;
+
+    if (this._debugLogging) {
+      console.log(
+        `Sendspin: [sync] Recorrection cutover at t+${(
+          RECORRECTION_CUTOVER_GUARD_SEC * 1000
+        ).toFixed(0)}ms`,
+      );
+    }
+
+    this.processAudioQueue();
   }
 
   // Update sync delay at runtime
@@ -475,6 +604,9 @@ export class AudioProcessor {
     }
 
     this.updateVolume();
+    if (this._correctionMode === "sync") {
+      this.startRecorrectionMonitor();
+    }
   }
 
   // Resume AudioContext if suspended (required for browser autoplay policies)
@@ -490,6 +622,9 @@ export class AudioProcessor {
 
       if (this.audioBufferQueue.length > 0) {
         this.scheduleQueueProcessing();
+      }
+      if (this._correctionMode === "sync") {
+        this.startRecorrectionMonitor();
       }
     }
   }
@@ -1067,11 +1202,20 @@ export class AudioProcessor {
     const outputLatencySec = this.useOutputLatencyCompensation
       ? this.getSmoothedOutputLatencyUs() / 1_000_000
       : 0;
+    const targetScheduledHorizonSec = this.getTargetScheduledHorizonSec();
 
-    // Schedule all chunks in the queue
+    if (this._correctionMode === "sync") {
+      this.startRecorrectionMonitor();
+    }
+
+    // Schedule chunks until we have enough future audio to survive short JS throttling.
     while (this.audioBufferQueue.length > 0) {
+      const scheduledAheadSec = this.getScheduledAheadSec(audioContextTime);
+      if (this.nextPlaybackTime > 0 && scheduledAheadSec >= targetScheduledHorizonSec) {
+        break;
+      }
+
       const chunk = this.audioBufferQueue.shift()!;
-      const chunkDuration = chunk.buffer.duration;
 
       let playbackTime: number;
       let playbackRate: number;
@@ -1095,7 +1239,11 @@ export class AudioProcessor {
         if (this.playbackStartedAt === null) {
           this.playbackStartedAt = performance.now();
         }
-        playbackTime = targetPlaybackTime;
+        playbackTime =
+          this.recorrectionMinStartTimeSec !== null
+            ? Math.max(targetPlaybackTime, this.recorrectionMinStartTimeSec)
+            : targetPlaybackTime;
+        this.recorrectionMinStartTimeSec = null;
         playbackRate = 1.0;
         chunk.buffer = this.copyBuffer(chunk.buffer);
       } else {
@@ -1304,6 +1452,8 @@ export class AudioProcessor {
 
   // Clear all audio buffers and scheduled sources
   clearBuffers(): void {
+    this.stopRecorrectionMonitor();
+
     // Stop all scheduled audio sources
     this.scheduledSources.forEach((entry) => {
       try {
@@ -1348,6 +1498,7 @@ export class AudioProcessor {
     this.currentClockPrecision = "imprecise";
     this.playbackStartedAt = null;
     this.lastSamplesAdjusted = 0;
+    this.recorrectionMinStartTimeSec = null;
   }
 
   // Cleanup and close AudioContext
