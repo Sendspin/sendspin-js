@@ -36,6 +36,9 @@ const RECORRECTION_TRIGGER_MS = 30;
 const RECORRECTION_SUSTAIN_MS = 400;
 const RECORRECTION_COOLDOWN_MS = 1_500;
 const RECORRECTION_CUTOVER_GUARD_SEC = 0.3;
+const RECORRECTION_TRANSIENT_JUMP_MS = 25;
+const RECORRECTION_TRANSIENT_CONFIRM_WINDOW_MS =
+  RECORRECTION_CHECK_INTERVAL_MS * 2;
 const SCHEDULE_HEADROOM_SEC = 0.2;
 const SCHEDULE_HORIZON_PRECISE_SEC = 20;
 const SCHEDULE_HORIZON_GOOD_SEC = 8;
@@ -54,6 +57,8 @@ const CORRECTION_THRESHOLDS: Record<
     deadbandBelowMs: number; // ms - don't correct if error < this
     timeFilterMaxErrorMs: number; // Only correct if the error is below this
     clockPrecisionTimeoutMs: number; // ms - max time to wait for clock precision after playback starts
+    enableRecorrectionMonitor: boolean; // Whether recorrection monitor should run in this mode
+    immediateDelayCutover: boolean; // Whether runtime static delay should trigger immediate cutover
   }
 > = {
   sync: {
@@ -73,6 +78,8 @@ const CORRECTION_THRESHOLDS: Record<
     deadbandBelowMs: 1, // Ignore corrections below this
     timeFilterMaxErrorMs: 15, // Higher threshold; starts correcting earlier
     clockPrecisionTimeoutMs: 20_000, // 20s - then correct with imprecise clock
+    enableRecorrectionMonitor: true,
+    immediateDelayCutover: true,
   },
   quality: {
     // Simulated results for how long it takes from playback start to correct to +/-5ms error:
@@ -91,6 +98,8 @@ const CORRECTION_THRESHOLDS: Record<
     deadbandBelowMs: 1, // Keep deadband tight for accurate sync
     timeFilterMaxErrorMs: 8, // Lower threshold; wait for a more stable filter to reduce number of resyncs
     clockPrecisionTimeoutMs: Infinity, // Never force corrections with imprecise clock
+    enableRecorrectionMonitor: false,
+    immediateDelayCutover: false,
   },
   "quality-local": {
     // Simulated results for how long it takes from playback start to correct to +/-5ms error:
@@ -109,6 +118,8 @@ const CORRECTION_THRESHOLDS: Record<
     deadbandBelowMs: 5, // Larger deadband to avoid frequent small adjustments
     timeFilterMaxErrorMs: 10, // Moderate threshold; only start correcting once we are reasonably sure of the time
     clockPrecisionTimeoutMs: Infinity, // Never force corrections with imprecise clock
+    enableRecorrectionMonitor: false,
+    immediateDelayCutover: false,
   },
 };
 
@@ -173,6 +184,9 @@ export class AudioProcessor {
   private recorrectionBreachStartedAtMs: number | null = null;
   private lastRecorrectionAtMs: number = -Infinity;
   private recorrectionMinStartTimeSec: number | null = null;
+  private recorrectionPrevRawSyncErrorMs: number | null = null;
+  private recorrectionPendingJumpSign: number | null = null;
+  private recorrectionPendingJumpAtMs: number | null = null;
   private lastLoggedHorizonSec: number | null = null;
 
   constructor(
@@ -239,7 +253,7 @@ export class AudioProcessor {
     const oldMode = this._correctionMode;
     this._correctionMode = mode;
     const thresholds = CORRECTION_THRESHOLDS[mode];
-    if (mode !== "sync") {
+    if (!this.modeUsesRecorrectionMonitor(mode)) {
       this.stopRecorrectionMonitor();
     } else {
       this.startRecorrectionMonitor();
@@ -261,6 +275,18 @@ export class AudioProcessor {
   // Get debug logging state
   get debugLogging(): boolean {
     return this._debugLogging;
+  }
+
+  private modeUsesRecorrectionMonitor(mode: CorrectionMode): boolean {
+    return CORRECTION_THRESHOLDS[mode].enableRecorrectionMonitor;
+  }
+
+  private get usesRecorrectionMonitor(): boolean {
+    return this.modeUsesRecorrectionMonitor(this._correctionMode);
+  }
+
+  private get usesImmediateDelayCutover(): boolean {
+    return CORRECTION_THRESHOLDS[this._correctionMode].immediateDelayCutover;
   }
 
   private getTargetScheduledHorizonSec(): number {
@@ -402,17 +428,119 @@ export class AudioProcessor {
         console.log("Sendspin: [sync] Recorrection monitor stopped");
       }
     }
-    this.recorrectionBreachStartedAtMs = null;
+    this.resetRecorrectionCheckState();
     this.lastRecorrectionAtMs = -Infinity;
   }
 
+  private clearRecorrectionBreachState(): void {
+    this.recorrectionBreachStartedAtMs = null;
+    this.recorrectionPendingJumpSign = null;
+    this.recorrectionPendingJumpAtMs = null;
+  }
+
+  private resetRecorrectionCheckState(): void {
+    this.clearRecorrectionBreachState();
+    this.recorrectionPrevRawSyncErrorMs = null;
+  }
+
+  private shouldIgnoreTransientRecorrectionJump(
+    rawSyncErrorMs: number,
+    nowMs: number,
+  ): boolean {
+    const prevRawSyncErrorMs = this.recorrectionPrevRawSyncErrorMs;
+    this.recorrectionPrevRawSyncErrorMs = rawSyncErrorMs;
+
+    if (prevRawSyncErrorMs === null) {
+      this.recorrectionPendingJumpSign = null;
+      this.recorrectionPendingJumpAtMs = null;
+      return false;
+    }
+
+    const jumpDeltaMs = rawSyncErrorMs - prevRawSyncErrorMs;
+    const jumpSign = Math.sign(rawSyncErrorMs);
+    const isJumpDetected =
+      Math.abs(jumpDeltaMs) >= RECORRECTION_TRANSIENT_JUMP_MS && jumpSign !== 0;
+    if (!isJumpDetected) {
+      this.recorrectionPendingJumpSign = null;
+      this.recorrectionPendingJumpAtMs = null;
+      return false;
+    }
+
+    const isConfirmed =
+      this.recorrectionPendingJumpSign === jumpSign &&
+      this.recorrectionPendingJumpAtMs !== null &&
+      nowMs - this.recorrectionPendingJumpAtMs <=
+        RECORRECTION_TRANSIENT_CONFIRM_WINDOW_MS;
+    this.recorrectionPendingJumpSign = jumpSign;
+    this.recorrectionPendingJumpAtMs = nowMs;
+    if (isConfirmed) {
+      this.recorrectionPendingJumpSign = null;
+      this.recorrectionPendingJumpAtMs = null;
+      return false;
+    }
+
+    return true;
+  }
+
+  private performGuardedCutover(
+    reason: "recorrection" | "delay-change",
+    options: {
+      incrementResyncCount?: boolean;
+      markCooldown?: boolean;
+    } = {},
+  ): void {
+    if (!this.audioContext) {
+      return;
+    }
+
+    const incrementResyncCount = options.incrementResyncCount ?? false;
+    const markCooldown = options.markCooldown ?? true;
+    const nowMs = performance.now();
+    const cutoffTime =
+      this.audioContext.currentTime + RECORRECTION_CUTOVER_GUARD_SEC;
+    if (incrementResyncCount) {
+      this.resyncCount++;
+    }
+    this.resetSyncErrorEma();
+    this.currentCorrectionMethod = "resync";
+    this.lastSamplesAdjusted = 0;
+    this.currentPlaybackRate = 1.0;
+    const cutResult = this.cutScheduledSources(cutoffTime);
+    this.recorrectionMinStartTimeSec = Math.max(
+      cutoffTime,
+      cutResult.keptTailEndTimeSec,
+    );
+    this.nextPlaybackTime = 0;
+    this.lastScheduledServerTime = 0;
+    this.resetRecorrectionCheckState();
+    if (markCooldown) {
+      this.lastRecorrectionAtMs = nowMs;
+    }
+
+    if (this._debugLogging) {
+      const label =
+        reason === "recorrection"
+          ? "Recorrection cutover"
+          : "Delay-change cutover";
+      console.log(
+        `Sendspin: [sync] ${label} at t+${(
+          RECORRECTION_CUTOVER_GUARD_SEC * 1000
+        ).toFixed(0)}ms ` +
+          `| minStart=${(this.recorrectionMinStartTimeSec - this.audioContext.currentTime).toFixed(3)}s ` +
+          `| requeued=${cutResult.requeuedCount} cut=${cutResult.cutCount} queue=${this.audioBufferQueue.length} scheduled=${this.scheduledSources.length}`,
+      );
+    }
+
+    this.processAudioQueue();
+  }
+
   private checkRecorrection(): void {
-    if (this._correctionMode !== "sync") {
-      this.recorrectionBreachStartedAtMs = null;
+    if (!this.usesRecorrectionMonitor) {
+      this.resetRecorrectionCheckState();
       return;
     }
     if (!this.audioContext || this.audioContext.state !== "running") {
-      this.recorrectionBreachStartedAtMs = null;
+      this.resetRecorrectionCheckState();
       return;
     }
     if (
@@ -421,7 +549,7 @@ export class AudioProcessor {
       this.nextPlaybackTime === 0 ||
       this.lastScheduledServerTime === 0
     ) {
-      this.recorrectionBreachStartedAtMs = null;
+      this.resetRecorrectionCheckState();
       return;
     }
 
@@ -445,8 +573,21 @@ export class AudioProcessor {
     const syncErrorMs = (this.nextPlaybackTime - targetPlaybackTime) * 1000;
     const smoothedSyncErrorMs = this.applySyncErrorEma(syncErrorMs);
     const absErrorMs = Math.abs(smoothedSyncErrorMs);
+    const isTransientJump = this.shouldIgnoreTransientRecorrectionJump(
+      syncErrorMs,
+      nowMs,
+    );
     if (absErrorMs < RECORRECTION_TRIGGER_MS) {
-      this.recorrectionBreachStartedAtMs = null;
+      this.clearRecorrectionBreachState();
+      return;
+    }
+    if (isTransientJump) {
+      this.clearRecorrectionBreachState();
+      if (this._debugLogging) {
+        console.log(
+          `Sendspin: [sync] Recorrection transient jump ignored: rawError=${syncErrorMs.toFixed(1)}ms`,
+        );
+      }
       return;
     }
     if (this.recorrectionBreachStartedAtMs === null) {
@@ -471,38 +612,13 @@ export class AudioProcessor {
       );
     }
     this.applyRecorrectionCutover();
-    this.lastRecorrectionAtMs = nowMs;
-    this.recorrectionBreachStartedAtMs = null;
   }
 
   private applyRecorrectionCutover(): void {
-    if (!this.audioContext) {
-      return;
-    }
-
-    const cutoffTime =
-      this.audioContext.currentTime + RECORRECTION_CUTOVER_GUARD_SEC;
-    this.resyncCount++;
-    this.resetSyncErrorEma();
-    this.currentCorrectionMethod = "resync";
-    this.lastSamplesAdjusted = 0;
-    this.currentPlaybackRate = 1.0;
-    this.cutScheduledSources(cutoffTime);
-    this.recorrectionMinStartTimeSec = cutoffTime;
-    this.nextPlaybackTime = 0;
-    this.lastScheduledServerTime = 0;
-
-    if (this._debugLogging) {
-      console.log(
-        `Sendspin: [sync] Recorrection cutover at t+${(
-          RECORRECTION_CUTOVER_GUARD_SEC * 1000
-        ).toFixed(
-          0,
-        )}ms | queue=${this.audioBufferQueue.length} scheduled=${this.scheduledSources.length}`,
-      );
-    }
-
-    this.processAudioQueue();
+    this.performGuardedCutover("recorrection", {
+      incrementResyncCount: true,
+      markCooldown: true,
+    });
   }
 
   // Update sync delay at runtime
@@ -521,6 +637,28 @@ export class AudioProcessor {
           `| scheduledAhead=${scheduledAheadSec.toFixed(3)}s queue=${this.audioBufferQueue.length} scheduled=${this.scheduledSources.length}`,
       );
     }
+
+    if (deltaMs === 0 || !this.usesImmediateDelayCutover) {
+      return;
+    }
+    if (!this.audioContext || this.audioContext.state !== "running") {
+      return;
+    }
+    if (!this.stateManager.isPlaying) {
+      return;
+    }
+    if (
+      this.scheduledSources.length === 0 &&
+      this.audioBufferQueue.length === 0 &&
+      this.nextPlaybackTime === 0
+    ) {
+      return;
+    }
+
+    this.performGuardedCutover("delay-change", {
+      incrementResyncCount: false,
+      markCooldown: true,
+    });
   }
 
   // Get current sync info for debugging/display
@@ -766,7 +904,7 @@ export class AudioProcessor {
     }
 
     this.updateVolume();
-    if (this._correctionMode === "sync") {
+    if (this.usesRecorrectionMonitor) {
       this.startRecorrectionMonitor();
     }
   }
@@ -785,19 +923,34 @@ export class AudioProcessor {
       if (this.audioBufferQueue.length > 0) {
         this.scheduleQueueProcessing();
       }
-      if (this._correctionMode === "sync") {
+      if (this.usesRecorrectionMonitor) {
         this.startRecorrectionMonitor();
       }
     }
   }
 
-  private cutScheduledSources(cutoffTime: number): void {
-    if (!this.audioContext) return;
+  private cutScheduledSources(cutoffTime: number): {
+    requeuedCount: number;
+    cutCount: number;
+    keptTailEndTimeSec: number;
+  } {
+    if (!this.audioContext) {
+      return {
+        requeuedCount: 0,
+        cutCount: 0,
+        keptTailEndTimeSec: 0,
+      };
+    }
     const stopTime = Math.max(cutoffTime, this.audioContext.currentTime);
     let requeued = 0;
+    let cutCount = 0;
+    let keptTailEndTimeSec = 0;
     this.scheduledSources = this.scheduledSources.filter((entry) => {
       // Keep already-started sources to avoid cutting mid-buffer artifacts.
-      if (entry.startTime < stopTime) return true;
+      if (entry.startTime < stopTime) {
+        keptTailEndTimeSec = Math.max(keptTailEndTimeSec, entry.endTime);
+        return true;
+      }
       try {
         entry.source.onended = null;
         entry.source.stop(stopTime);
@@ -810,6 +963,7 @@ export class AudioProcessor {
         generation: entry.generation,
       });
       requeued++;
+      cutCount++;
       return false;
     });
     if (this._debugLogging && requeued > 0) {
@@ -817,6 +971,11 @@ export class AudioProcessor {
         `Sendspin: Requeued ${requeued} future chunk(s) after cutover`,
       );
     }
+    return {
+      requeuedCount: requeued,
+      cutCount,
+      keptTailEndTimeSec,
+    };
   }
 
   // Update volume based on current state
@@ -1388,7 +1547,7 @@ export class AudioProcessor {
       this.lastLoggedHorizonSec = targetScheduledHorizonSec;
     }
 
-    if (this._correctionMode === "sync") {
+    if (this.usesRecorrectionMonitor) {
       this.startRecorrectionMonitor();
     }
 
