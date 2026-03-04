@@ -288,7 +288,7 @@ export class ProtocolHandler {
 
     // Max error (half of round-trip time): max_error = ((T4 - T1) - (T3 - T2)) / 2
     const rttTerm = Math.max(0, T4 - T1 - (T3 - T2));
-    const max_error = rttTerm / 2;
+    const max_error = Math.max(1000, rttTerm / 2);
 
     if (!this.timeSyncBestSample || rttTerm < this.timeSyncBestSample.rttTerm) {
       this.timeSyncBestSample = {
