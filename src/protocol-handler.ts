@@ -29,10 +29,11 @@ const STATE_UPDATE_INTERVAL = 5000; // 5 seconds
 const TIME_SYNC_BURST_SIZE = 8;
 const TIME_SYNC_BURST_INTERVAL_MS = 10000;
 const TIME_SYNC_REQUEST_TIMEOUT_MS = 2000;
+const TIME_SYNC_ROBUST_SELECTION_COUNT = 3;
 
-interface TimeSyncBestSample {
+interface TimeSyncSample {
   measurement: number;
-  max_error: number;
+  maxError: number;
   t4: number;
   rttTerm: number;
 }
@@ -59,7 +60,7 @@ export class ProtocolHandler {
   private timeSyncBurstSentCount: number = 0;
   private timeSyncInFlightClientTransmitted: number | null = null;
   private timeSyncInFlightTimeout: number | null = null;
-  private timeSyncBestSample: TimeSyncBestSample | null = null;
+  private timeSyncBurstSamples: TimeSyncSample[] = [];
 
   constructor(
     private playerId: string,
@@ -178,7 +179,7 @@ export class ProtocolHandler {
 
     this.timeSyncBurstActive = true;
     this.timeSyncBurstSentCount = 0;
-    this.timeSyncBestSample = null;
+    this.timeSyncBurstSamples = [];
     this.timeSyncInFlightClientTransmitted = null;
     this.sendNextTimeSyncBurstProbe();
   }
@@ -232,18 +233,39 @@ export class ProtocolHandler {
   private finalizeTimeSyncBurst(): void {
     this.clearTimeSyncProbeTimeout();
 
-    if (this.timeSyncBestSample) {
+    const candidate = this.selectTimeSyncBurstCandidate();
+    if (candidate) {
       this.timeFilter.update(
-        this.timeSyncBestSample.measurement,
-        this.timeSyncBestSample.max_error,
-        this.timeSyncBestSample.t4,
+        candidate.measurement,
+        candidate.maxError,
+        candidate.t4,
       );
     }
 
     this.timeSyncBurstActive = false;
     this.timeSyncBurstSentCount = 0;
     this.timeSyncInFlightClientTransmitted = null;
-    this.timeSyncBestSample = null;
+    this.timeSyncBurstSamples = [];
+  }
+
+  private selectTimeSyncBurstCandidate(): TimeSyncSample | null {
+    if (this.timeSyncBurstSamples.length === 0) {
+      return null;
+    }
+
+    const topRttSamples = [...this.timeSyncBurstSamples]
+      .sort((a, b) => a.rttTerm - b.rttTerm)
+      .slice(
+        0,
+        Math.min(
+          TIME_SYNC_ROBUST_SELECTION_COUNT,
+          this.timeSyncBurstSamples.length,
+        ),
+      );
+    const sortedByMeasurement = [...topRttSamples].sort(
+      (a, b) => a.measurement - b.measurement,
+    );
+    return sortedByMeasurement[Math.floor(sortedByMeasurement.length / 2)];
   }
 
   private abortTimeSyncBurst(): void {
@@ -251,7 +273,7 @@ export class ProtocolHandler {
     this.timeSyncBurstActive = false;
     this.timeSyncBurstSentCount = 0;
     this.timeSyncInFlightClientTransmitted = null;
-    this.timeSyncBestSample = null;
+    this.timeSyncBurstSamples = [];
   }
 
   stopTimeSync(): void {
@@ -288,16 +310,13 @@ export class ProtocolHandler {
 
     // Max error (half of round-trip time): max_error = ((T4 - T1) - (T3 - T2)) / 2
     const rttTerm = Math.max(0, T4 - T1 - (T3 - T2));
-    const max_error = Math.max(1000, rttTerm / 2);
-
-    if (!this.timeSyncBestSample || rttTerm < this.timeSyncBestSample.rttTerm) {
-      this.timeSyncBestSample = {
-        measurement,
-        max_error,
-        t4: T4,
-        rttTerm,
-      };
-    }
+    const maxError = Math.max(1000, rttTerm / 2);
+    this.timeSyncBurstSamples.push({
+      measurement,
+      maxError,
+      t4: T4,
+      rttTerm,
+    });
 
     this.clearTimeSyncProbeTimeout();
     this.timeSyncInFlightClientTransmitted = null;
