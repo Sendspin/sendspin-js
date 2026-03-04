@@ -16,7 +16,7 @@
 
 // Residual threshold as fraction of max_error for triggering adaptive forgetting.
 // When residual > CUTOFF * max_error, the filter applies forgetting to recover from outliers.
-const ADAPTIVE_FORGETTING_CUTOFF = 0.75;
+const ADAPTIVE_FORGETTING_CUTOFF = 2.0;
 
 export interface TimeElement {
   last_update: number;
@@ -45,7 +45,7 @@ export class SendspinTimeFilter {
 
   constructor(
     offset_process_std_dev: number = 0.01,
-    forget_factor: number = 1.001,
+    forget_factor: number = 1.1,
     drift_significance_threshold: number = 2.0,
     drift_process_std_dev: number = 0.0,
   ) {
