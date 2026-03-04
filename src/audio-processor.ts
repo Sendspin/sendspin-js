@@ -142,8 +142,12 @@ export class AudioProcessor {
   private lastSamplesAdjusted: number = 0;
 
   // Output latency smoothing (EMA to filter Chrome jitter)
+  private lastRawOutputLatencyUs: number = 0;
   private smoothedOutputLatencyUs: number | null = null;
   private lastLatencyPersistAtMs: number | null = null;
+
+  private timingEstimateAudioContextTimeSec: number | null = null;
+  private timingEstimateAtMs: number | null = null;
 
   // Correction mode
   private _correctionMode: CorrectionMode = "sync";
@@ -283,6 +287,100 @@ export class AudioProcessor {
     return Math.max(0, farthestScheduledSec - currentTimeSec);
   }
 
+  private getTimingSnapshot(): {
+    audioContextTimeSec: number; // derived; use for target-time math
+    audioContextRawTimeSec: number; // raw; use for comparisons (late drops/headroom)
+    nowMs: number;
+    nowUs: number;
+  } {
+    const nowMs = performance.now();
+    const nowUs = nowMs * 1000;
+    if (!this.audioContext) {
+      return {
+        audioContextTimeSec: 0,
+        audioContextRawTimeSec: 0,
+        nowMs,
+        nowUs,
+      };
+    }
+
+    const rawTimeSec = this.audioContext.currentTime;
+
+    // `AudioContext.currentTime` can advance in coarse quanta (observed ~10.667ms steps
+    // on some Linux audio stacks). Mixing that directly with `performance.now()` can make
+    // the computed `targetPlaybackTime` jump by ~10/20ms and create the "quantized" spikes.
+    // `getOutputTimestamp()` provides a stable mapping between performance time and audio time.
+    const getOutputTimestamp = (
+      this.audioContext as unknown as {
+        getOutputTimestamp?: () => {
+          contextTime: number;
+          performanceTime: number;
+        };
+      }
+    ).getOutputTimestamp;
+
+    if (typeof getOutputTimestamp === "function") {
+      try {
+        const ts = getOutputTimestamp.call(this.audioContext);
+        const perfDeltaSec = (nowMs - ts.performanceTime) / 1000;
+        return {
+          audioContextTimeSec: ts.contextTime + perfDeltaSec,
+          audioContextRawTimeSec: rawTimeSec,
+          nowMs,
+          nowUs,
+        };
+      } catch {
+        // Fallback below
+      }
+    }
+
+    // Fallback: de-quantize `currentTime` using wall clock and slew toward the raw value.
+    // Key goal: avoid discrete ~10/20ms jumps in derived audio time.
+    const TIMING_MAX_SLEW_SEC = 0.002; // max correction per snapshot (2ms)
+    const TIMING_RESET_THRESHOLD_SEC = 0.5; // snap if mapping is clearly invalid
+    const TIMING_MAX_LEAD_SEC = 0.1; // don't run far ahead of raw time
+
+    if (this.timingEstimateAudioContextTimeSec === null) {
+      this.timingEstimateAudioContextTimeSec = rawTimeSec;
+      this.timingEstimateAtMs = nowMs;
+    } else if (this.timingEstimateAtMs !== null) {
+      const wallDeltaSec = Math.max(
+        0,
+        (nowMs - this.timingEstimateAtMs) / 1000,
+      );
+      const predicted = this.timingEstimateAudioContextTimeSec + wallDeltaSec;
+      this.timingEstimateAtMs = nowMs;
+
+      const errorSec = rawTimeSec - predicted;
+      if (Math.abs(errorSec) > TIMING_RESET_THRESHOLD_SEC) {
+        this.timingEstimateAudioContextTimeSec = rawTimeSec;
+      } else {
+        const slew = Math.max(
+          -TIMING_MAX_SLEW_SEC,
+          Math.min(TIMING_MAX_SLEW_SEC, errorSec),
+        );
+        // Keep monotonic and bounded vs raw time.
+        const next = Math.max(
+          this.timingEstimateAudioContextTimeSec,
+          predicted + slew,
+        );
+        this.timingEstimateAudioContextTimeSec = Math.min(
+          next,
+          rawTimeSec + TIMING_MAX_LEAD_SEC,
+        );
+      }
+    }
+
+    const derivedTimeSec =
+      this.timingEstimateAudioContextTimeSec ?? this.audioContext.currentTime;
+    return {
+      audioContextTimeSec: derivedTimeSec,
+      audioContextRawTimeSec: rawTimeSec,
+      nowMs,
+      nowUs,
+    };
+  }
+
   private startRecorrectionMonitor(): void {
     if (this.recorrectionInterval !== null) {
       return;
@@ -327,9 +425,12 @@ export class AudioProcessor {
       return;
     }
 
-    const nowMs = performance.now();
-    const audioContextTime = this.audioContext.currentTime;
-    const nowUs = nowMs * 1000;
+    const {
+      audioContextTimeSec: audioContextTime,
+      audioContextRawTimeSec: audioContextRawTime,
+      nowMs,
+      nowUs,
+    } = this.getTimingSnapshot();
     const syncDelaySec = this.syncDelayMs / 1000;
     const outputLatencySec = this.useOutputLatencyCompensation
       ? this.getSmoothedOutputLatencyUs() / 1_000_000
@@ -342,11 +443,8 @@ export class AudioProcessor {
       outputLatencySec,
     );
     const syncErrorMs = (this.nextPlaybackTime - targetPlaybackTime) * 1000;
-    this.currentSyncErrorMs = syncErrorMs;
-    this.smoothedSyncErrorMs =
-      SYNC_ERROR_ALPHA * syncErrorMs +
-      (1 - SYNC_ERROR_ALPHA) * this.smoothedSyncErrorMs;
-    const absErrorMs = Math.abs(this.smoothedSyncErrorMs);
+    const smoothedSyncErrorMs = this.applySyncErrorEma(syncErrorMs);
+    const absErrorMs = Math.abs(smoothedSyncErrorMs);
     if (absErrorMs < RECORRECTION_TRIGGER_MS) {
       this.recorrectionBreachStartedAtMs = null;
       return;
@@ -369,7 +467,7 @@ export class AudioProcessor {
 
     if (this._debugLogging) {
       console.log(
-        `Sendspin: [sync] Recorrection trigger: error=${absErrorMs.toFixed(1)}ms sustained=${(nowMs - this.recorrectionBreachStartedAtMs).toFixed(0)}ms scheduledAhead=${this.getScheduledAheadSec(this.audioContext.currentTime).toFixed(3)}s`,
+        `Sendspin: [sync] Recorrection trigger: error=${absErrorMs.toFixed(1)}ms sustained=${(nowMs - this.recorrectionBreachStartedAtMs).toFixed(0)}ms scheduledAhead=${this.getScheduledAheadSec(audioContextRawTime).toFixed(3)}s`,
       );
     }
     this.applyRecorrectionCutover();
@@ -385,7 +483,7 @@ export class AudioProcessor {
     const cutoffTime =
       this.audioContext.currentTime + RECORRECTION_CUTOVER_GUARD_SEC;
     this.resyncCount++;
-    this.smoothedSyncErrorMs = 0;
+    this.resetSyncErrorEma();
     this.currentCorrectionMethod = "resync";
     this.lastSamplesAdjusted = 0;
     this.currentPlaybackRate = 1.0;
@@ -450,12 +548,26 @@ export class AudioProcessor {
     };
   }
 
+  private applySyncErrorEma(inputMs: number): number {
+    this.currentSyncErrorMs = inputMs;
+    this.smoothedSyncErrorMs =
+      SYNC_ERROR_ALPHA * inputMs +
+      (1 - SYNC_ERROR_ALPHA) * this.smoothedSyncErrorMs;
+    return this.smoothedSyncErrorMs;
+  }
+
+  private resetSyncErrorEma(): void {
+    this.smoothedSyncErrorMs = 0;
+  }
+
   // Get raw output latency in microseconds (for Kalman filter input)
   getRawOutputLatencyUs(): number {
     if (!this.audioContext) return 0;
     const baseLatency = this.audioContext.baseLatency ?? 0;
     const outputLatency = this.audioContext.outputLatency ?? 0;
-    return (baseLatency + outputLatency) * 1_000_000; // Convert seconds to microseconds
+    const rawUs = (baseLatency + outputLatency) * 1_000_000; // Convert seconds to microseconds
+    this.lastRawOutputLatencyUs = rawUs;
+    return rawUs;
   }
 
   // Get smoothed output latency in microseconds (filters Chrome jitter)
@@ -1253,8 +1365,11 @@ export class AudioProcessor {
       return;
     }
 
-    const audioContextTime = this.audioContext.currentTime;
-    const nowUs = performance.now() * 1000;
+    const {
+      audioContextTimeSec: audioContextTime,
+      audioContextRawTimeSec,
+      nowUs,
+    } = this.getTimingSnapshot();
 
     // Convert sync delay from ms to seconds (positive = delay, negative = advance)
     const syncDelaySec = this.syncDelayMs / 1000;
@@ -1279,7 +1394,9 @@ export class AudioProcessor {
 
     // Schedule chunks until we have enough future audio to survive short JS throttling.
     while (this.audioBufferQueue.length > 0) {
-      const scheduledAheadSec = this.getScheduledAheadSec(audioContextTime);
+      const scheduledAheadSec = this.getScheduledAheadSec(
+        audioContextRawTimeSec,
+      );
       if (
         this.nextPlaybackTime > 0 &&
         scheduledAheadSec >= targetScheduledHorizonSec
@@ -1327,14 +1444,8 @@ export class AudioProcessor {
           const syncErrorSec = this.nextPlaybackTime - targetPlaybackTime;
           const syncErrorMs = syncErrorSec * 1000;
 
-          // Store raw for display
-          this.currentSyncErrorMs = syncErrorMs;
-
           // Apply EMA smoothing to filter jitter - use smoothed value for corrections
-          this.smoothedSyncErrorMs =
-            SYNC_ERROR_ALPHA * syncErrorMs +
-            (1 - SYNC_ERROR_ALPHA) * this.smoothedSyncErrorMs;
-          const correctionErrorMs = this.smoothedSyncErrorMs;
+          const correctionErrorMs = this.applySyncErrorEma(syncErrorMs);
 
           // Get thresholds for current correction mode
           const thresholds = CORRECTION_THRESHOLDS[this._correctionMode];
@@ -1347,7 +1458,6 @@ export class AudioProcessor {
             : 0;
           const timeoutElapsed =
             playbackDurationMs > thresholds.clockPrecisionTimeoutMs;
-
           if (isClockImprecise && !timeoutElapsed) {
             // Don't trust time filter yet, continue playing without corrections
             // until the filter stabilizes (or timeout elapses)
@@ -1366,7 +1476,7 @@ export class AudioProcessor {
             if (Math.abs(correctionErrorMs) > thresholds.resyncAboveMs) {
               // Tier 4: Hard resync if sync error exceeds threshold
               this.resyncCount++;
-              this.smoothedSyncErrorMs = 0;
+              this.resetSyncErrorEma();
               this.cutScheduledSources(targetPlaybackTime);
               playbackTime = targetPlaybackTime;
               playbackRate = 1.0;
@@ -1459,7 +1569,7 @@ export class AudioProcessor {
       this.currentPlaybackRate = playbackRate;
 
       // Drop chunks that arrived too late
-      if (playbackTime < audioContextTime) {
+      if (playbackTime < audioContextRawTimeSec) {
         // Reset seamless tracking since we dropped a chunk
         this.nextPlaybackTime = 0;
         this.lastScheduledServerTime = 0;
@@ -1589,6 +1699,10 @@ export class AudioProcessor {
     this.playbackStartedAt = null;
     this.lastSamplesAdjusted = 0;
     this.recorrectionMinStartTimeSec = null;
+    this.lastRawOutputLatencyUs = 0;
+    this.resetLatencySmoother();
+    this.timingEstimateAudioContextTimeSec = null;
+    this.timingEstimateAtMs = null;
   }
 
   // Cleanup and close AudioContext
