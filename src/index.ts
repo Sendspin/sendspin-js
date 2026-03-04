@@ -83,7 +83,7 @@ export class SendspinPlayer {
     };
 
     // Initialize time filter (shared between audio processor and protocol handler)
-    this.timeFilter = new SendspinTimeFilter();
+    this.timeFilter = new SendspinTimeFilter(0, 1.001, 2.0, 1e-12);
 
     // Initialize state manager with callback
     this.stateManager = new StateManager(config.onStateChange);
