@@ -44,7 +44,7 @@ jobs:
       - name: Build package
         run: yarn build
 
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         with:
           name: dist
           path: ./dist
