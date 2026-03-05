@@ -14,6 +14,7 @@ import type {
   ServerCommand,
   ServerMessage,
   ServerState,
+  ServerTime,
   StreamClear,
   StreamEnd,
   StreamStart,
@@ -25,6 +26,17 @@ import type { WebSocketManager } from "./websocket-manager";
 
 // Constants
 const STATE_UPDATE_INTERVAL = 5000; // 5 seconds
+const TIME_SYNC_BURST_SIZE = 8;
+const TIME_SYNC_BURST_INTERVAL_MS = 10000;
+const TIME_SYNC_REQUEST_TIMEOUT_MS = 2000;
+const TIME_SYNC_ROBUST_SELECTION_COUNT = 3;
+
+interface TimeSyncSample {
+  measurement: number;
+  maxError: number;
+  t4: number;
+  rttTerm: number;
+}
 
 export interface ProtocolHandlerConfig {
   clientName?: string;
@@ -44,6 +56,11 @@ export class ProtocolHandler {
   private useOutputLatencyCompensation: boolean;
   private onVolumeCommand?: (volume: number, muted: boolean) => void;
   private getExternalVolume?: () => { volume: number; muted: boolean };
+  private timeSyncBurstActive: boolean = false;
+  private timeSyncBurstSentCount: number = 0;
+  private timeSyncInFlightClientTransmitted: number | null = null;
+  private timeSyncInFlightTimeout: number | null = null;
+  private timeSyncBurstSamples: TimeSyncSample[] = [];
 
   constructor(
     private playerId: string,
@@ -122,9 +139,10 @@ export class ProtocolHandler {
     console.log("Sendspin: Connected to server");
     // Per spec: Send initial client/state immediately after server/hello
     this.sendStateUpdate();
-    // Start time synchronization with adaptive intervals
-    this.sendTimeSync();
-    this.scheduleNextTimeSync();
+    // Start time synchronization with fixed bursts.
+    this.stopTimeSync();
+    this.startTimeSyncBurstIfIdle();
+    this.scheduleNextTimeSyncBurstTick();
 
     // Start periodic state updates
     const stateInterval = window.setInterval(
@@ -145,57 +163,170 @@ export class ProtocolHandler {
     this.stateManager.setStateUpdateInterval(newInterval);
   }
 
-  // Schedule next time sync with adaptive interval based on sync quality
-  private scheduleNextTimeSync(): void {
-    const interval = this.computeTimeSyncInterval();
+  // Schedule the next fixed 10s burst tick.
+  private scheduleNextTimeSyncBurstTick(): void {
     const timeSyncTimeout = window.setTimeout(() => {
-      this.sendTimeSync();
-      this.scheduleNextTimeSync();
-    }, interval);
+      this.startTimeSyncBurstIfIdle();
+      this.scheduleNextTimeSyncBurstTick();
+    }, TIME_SYNC_BURST_INTERVAL_MS);
     this.stateManager.setTimeSyncInterval(timeSyncTimeout);
   }
 
-  // Compute adaptive time sync interval based on synchronization state
-  // Matches Python client behavior: fast sync when unsynchronized or high error,
-  // slower when well-synchronized to reduce network overhead
-  private computeTimeSyncInterval(): number {
-    if (!this.timeFilter.is_synchronized) {
-      return 200; // 200ms - fast sync when not yet synchronized
+  private startTimeSyncBurstIfIdle(): void {
+    if (this.timeSyncBurstActive || !this.wsManager.isConnected()) {
+      return;
     }
-    const error = this.timeFilter.error;
-    if (error < 1000) {
-      return 5000; // 5s - well synchronized (< 1ms error)
+
+    this.timeSyncBurstActive = true;
+    this.timeSyncBurstSentCount = 0;
+    this.timeSyncBurstSamples = [];
+    this.timeSyncInFlightClientTransmitted = null;
+    this.sendNextTimeSyncBurstProbe();
+  }
+
+  private sendNextTimeSyncBurstProbe(): void {
+    if (
+      !this.timeSyncBurstActive ||
+      this.timeSyncInFlightClientTransmitted !== null ||
+      !this.wsManager.isConnected()
+    ) {
+      return;
     }
-    if (error < 2000) {
-      return 1000; // 1s - good sync (< 2ms error)
+
+    if (this.timeSyncBurstSentCount >= TIME_SYNC_BURST_SIZE) {
+      this.finalizeTimeSyncBurst();
+      return;
     }
-    if (error < 5000) {
-      return 500; // 500ms - moderate sync (< 5ms error)
+
+    const clientTransmitted = this.sendTimeSync();
+    this.timeSyncBurstSentCount += 1;
+    this.timeSyncInFlightClientTransmitted = clientTransmitted;
+    this.armTimeSyncProbeTimeout(clientTransmitted);
+  }
+
+  private armTimeSyncProbeTimeout(expectedClientTransmitted: number): void {
+    this.clearTimeSyncProbeTimeout();
+    this.timeSyncInFlightTimeout = window.setTimeout(() => {
+      this.handleTimeSyncProbeTimeout(expectedClientTransmitted);
+    }, TIME_SYNC_REQUEST_TIMEOUT_MS);
+  }
+
+  private clearTimeSyncProbeTimeout(): void {
+    if (this.timeSyncInFlightTimeout !== null) {
+      clearTimeout(this.timeSyncInFlightTimeout);
+      this.timeSyncInFlightTimeout = null;
     }
-    return 200; // 200ms - poor sync, need fast updates
+  }
+
+  private handleTimeSyncProbeTimeout(expectedClientTransmitted: number): void {
+    if (
+      !this.timeSyncBurstActive ||
+      this.timeSyncInFlightClientTransmitted !== expectedClientTransmitted
+    ) {
+      return;
+    }
+
+    console.warn("Sendspin: Time sync probe timed out, aborting current burst");
+    this.abortTimeSyncBurst();
+  }
+
+  private finalizeTimeSyncBurst(): void {
+    this.clearTimeSyncProbeTimeout();
+
+    const candidate = this.selectTimeSyncBurstCandidate();
+    if (candidate) {
+      this.timeFilter.update(
+        candidate.measurement,
+        candidate.maxError,
+        candidate.t4,
+      );
+    }
+
+    this.timeSyncBurstActive = false;
+    this.timeSyncBurstSentCount = 0;
+    this.timeSyncInFlightClientTransmitted = null;
+    this.timeSyncBurstSamples = [];
+  }
+
+  private selectTimeSyncBurstCandidate(): TimeSyncSample | null {
+    if (this.timeSyncBurstSamples.length === 0) {
+      return null;
+    }
+
+    const topRttSamples = [...this.timeSyncBurstSamples]
+      .sort((a, b) => a.rttTerm - b.rttTerm)
+      .slice(
+        0,
+        Math.min(
+          TIME_SYNC_ROBUST_SELECTION_COUNT,
+          this.timeSyncBurstSamples.length,
+        ),
+      );
+    const sortedByMeasurement = [...topRttSamples].sort(
+      (a, b) => a.measurement - b.measurement,
+    );
+    return sortedByMeasurement[Math.floor(sortedByMeasurement.length / 2)];
+  }
+
+  private abortTimeSyncBurst(): void {
+    this.clearTimeSyncProbeTimeout();
+    this.timeSyncBurstActive = false;
+    this.timeSyncBurstSentCount = 0;
+    this.timeSyncInFlightClientTransmitted = null;
+    this.timeSyncBurstSamples = [];
+  }
+
+  stopTimeSync(): void {
+    this.stateManager.clearTimeSyncInterval();
+    this.abortTimeSyncBurst();
   }
 
   // Handle server time synchronization
-  private handleServerTime(message: any): void {
-    // Update Kalman filter with NTP-style measurement
+  private handleServerTime(message: ServerTime): void {
+    if (
+      !this.timeSyncBurstActive ||
+      this.timeSyncInFlightClientTransmitted === null
+    ) {
+      return;
+    }
+
     // Per spec: client_transmitted (T1), server_received (T2), server_transmitted (T3)
-    const T4 = Math.floor(performance.now() * 1000); // client received time
     const T1 = message.payload.client_transmitted;
+    if (T1 !== this.timeSyncInFlightClientTransmitted) {
+      console.warn(
+        "Sendspin: Ignoring out-of-order time response",
+        T1,
+        this.timeSyncInFlightClientTransmitted,
+      );
+      return;
+    }
+
+    const T4 = Math.floor(performance.now() * 1000); // client received time
     const T2 = message.payload.server_received;
     const T3 = message.payload.server_transmitted;
 
     // NTP offset calculation: measurement = ((T2 - T1) + (T3 - T4)) / 2
-    const clockOffset = (T2 - T1 + (T3 - T4)) / 2;
-
-    // Keep Kalman filter for pure clock sync; output-latency compensation is applied
-    // at audio scheduling time to avoid biasing the clock estimate across restarts.
-    const measurement = clockOffset;
+    const measurement = (T2 - T1 + (T3 - T4)) / 2;
 
     // Max error (half of round-trip time): max_error = ((T4 - T1) - (T3 - T2)) / 2
-    const max_error = (T4 - T1 - (T3 - T2)) / 2;
+    const rttTerm = Math.max(0, T4 - T1 - (T3 - T2));
+    const maxError = Math.max(1000, rttTerm / 2);
+    this.timeSyncBurstSamples.push({
+      measurement,
+      maxError,
+      t4: T4,
+      rttTerm,
+    });
 
-    // Update Kalman filter
-    this.timeFilter.update(measurement, max_error, T4);
+    this.clearTimeSyncProbeTimeout();
+    this.timeSyncInFlightClientTransmitted = null;
+
+    if (this.timeSyncBurstSentCount >= TIME_SYNC_BURST_SIZE) {
+      this.finalizeTimeSyncBurst();
+      return;
+    }
+
+    this.sendNextTimeSyncBurstProbe();
   }
 
   // Handle stream start (also used for format updates per new spec)
@@ -412,8 +543,7 @@ export class ProtocolHandler {
   }
 
   // Send time synchronization message
-  sendTimeSync(): void {
-    const clientTimeUs = Math.floor(performance.now() * 1000);
+  sendTimeSync(clientTimeUs = Math.floor(performance.now() * 1000)): number {
     const message: ClientTime = {
       type: "client/time" as MessageType.CLIENT_TIME,
       payload: {
@@ -421,6 +551,7 @@ export class ProtocolHandler {
       },
     };
     this.wsManager.send(message);
+    return clientTimeUs;
   }
 
   // Send state update

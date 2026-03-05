@@ -83,7 +83,7 @@ export class SendspinPlayer {
     };
 
     // Initialize time filter (shared between audio processor and protocol handler)
-    this.timeFilter = new SendspinTimeFilter();
+    this.timeFilter = new SendspinTimeFilter(0, 1.1, 2.0, 1e-12);
 
     // Initialize state manager with callback
     this.stateManager = new StateManager(config.onStateChange);
@@ -156,6 +156,7 @@ export class SendspinPlayer {
       },
       // onClose
       () => {
+        this.protocolHandler.stopTimeSync();
         console.log("Sendspin: Connection closed");
       },
     );
@@ -174,6 +175,9 @@ export class SendspinPlayer {
     if (this.wsManager.isConnected()) {
       this.protocolHandler.sendGoodbye(reason);
     }
+
+    // Stop time sync burst scheduler and in-flight timeout state
+    this.protocolHandler.stopTimeSync();
 
     // Clear intervals
     this.stateManager.clearAllIntervals();
@@ -210,7 +214,7 @@ export class SendspinPlayer {
     this.protocolHandler.sendStateUpdate();
   }
 
-  // Set sync delay (in milliseconds)
+  // Set sync delay (in milliseconds). Runtime behavior depends on correction mode settings.
   setSyncDelay(delayMs: number): void {
     this.audioProcessor.setSyncDelay(delayMs);
   }

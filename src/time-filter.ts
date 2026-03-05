@@ -16,7 +16,7 @@
 
 // Residual threshold as fraction of max_error for triggering adaptive forgetting.
 // When residual > CUTOFF * max_error, the filter applies forgetting to recover from outliers.
-const ADAPTIVE_FORGETTING_CUTOFF = 0.75;
+const ADAPTIVE_FORGETTING_CUTOFF = 2.0;
 
 export interface TimeElement {
   last_update: number;
@@ -35,14 +35,27 @@ export class SendspinTimeFilter {
   private _offset_drift_covariance: number = 0.0;
   private _drift_covariance: number = 0.0;
 
-  private _process_variance: number;
+  private _offset_process_variance: number;
+  private _drift_process_variance: number;
   private _forget_variance_factor: number;
+  private _drift_significance_threshold_squared: number;
+  private _use_drift: boolean = false;
 
   private _current_time_element: TimeElement;
 
-  constructor(process_std_dev: number = 0.01, forget_factor: number = 1.001) {
-    this._process_variance = process_std_dev * process_std_dev;
+  constructor(
+    offset_process_std_dev: number = 0.01,
+    forget_factor: number = 1.1,
+    drift_significance_threshold: number = 2.0,
+    drift_process_std_dev: number = 0.0,
+  ) {
+    this._offset_process_variance =
+      offset_process_std_dev * offset_process_std_dev;
+    this._drift_process_variance =
+      drift_process_std_dev * drift_process_std_dev;
     this._forget_variance_factor = forget_factor * forget_factor;
+    this._drift_significance_threshold_squared =
+      drift_significance_threshold * drift_significance_threshold;
     this._current_time_element = this._createDefaultTimeElement();
   }
 
@@ -95,6 +108,7 @@ export class SendspinTimeFilter {
         offset: this._offset,
         drift: this._drift,
       };
+      this._use_drift = false;
 
       return;
     }
@@ -116,6 +130,7 @@ export class SendspinTimeFilter {
         offset: this._offset,
         drift: this._drift,
       };
+      this._use_drift = false;
 
       return;
     }
@@ -128,8 +143,8 @@ export class SendspinTimeFilter {
     // State transition matrix F = [1, dt; 0, 1]
     const dt_squared = dt * dt;
 
-    // Process noise only applied to offset (modeling clock jitter/wander)
-    const drift_process_variance = 0.0; // Drift assumed stable
+    // Process noise models uncertainty growth in both offset and drift random walks.
+    const drift_process_variance = dt * this._drift_process_variance;
     let new_drift_covariance = this._drift_covariance + drift_process_variance;
 
     const offset_drift_process_variance = 0.0;
@@ -138,7 +153,7 @@ export class SendspinTimeFilter {
       this._drift_covariance * dt +
       offset_drift_process_variance;
 
-    const offset_process_variance = dt * this._process_variance;
+    const offset_process_variance = dt * this._offset_process_variance;
     let new_offset_covariance =
       this._offset_covariance +
       2 * this._offset_drift_covariance * dt +
@@ -181,6 +196,12 @@ export class SendspinTimeFilter {
     this._offset_covariance =
       new_offset_covariance - offset_gain * new_offset_covariance;
 
+    // Drift compensation is enabled only when the estimate is statistically significant.
+    const drift_squared = this._drift * this._drift;
+    this._use_drift =
+      drift_squared >
+      this._drift_significance_threshold_squared * this._drift_covariance;
+
     this._current_time_element = {
       last_update: this._last_update,
       offset: this._offset,
@@ -204,8 +225,11 @@ export class SendspinTimeFilter {
     // offset(t) = offset_base + drift * (t - t_last_update)
 
     const dt = client_time - this._current_time_element.last_update;
+    const effective_drift = this._use_drift
+      ? this._current_time_element.drift
+      : 0.0;
     const offset = Math.round(
-      this._current_time_element.offset + this._current_time_element.drift * dt,
+      this._current_time_element.offset + effective_drift * dt,
     );
     return client_time + offset;
   }
@@ -226,12 +250,15 @@ export class SendspinTimeFilter {
     // T_server = (1 + drift) * T_client + offset - drift * T_last_update
     // T_client = (T_server - offset + drift * T_last_update) / (1 + drift)
 
+    const effective_drift = this._use_drift
+      ? this._current_time_element.drift
+      : 0.0;
+
     return Math.round(
       (server_time -
         this._current_time_element.offset +
-        this._current_time_element.drift *
-          this._current_time_element.last_update) /
-        (1.0 + this._current_time_element.drift),
+        effective_drift * this._current_time_element.last_update) /
+        (1.0 + effective_drift),
     );
   }
 
@@ -245,6 +272,7 @@ export class SendspinTimeFilter {
     this._offset_covariance = Infinity;
     this._offset_drift_covariance = 0.0;
     this._drift_covariance = 0.0;
+    this._use_drift = false;
 
     this._current_time_element = this._createDefaultTimeElement();
   }
@@ -259,11 +287,11 @@ export class SendspinTimeFilter {
   /**
    * Check if time synchronization is ready for use.
    *
-   * Time sync is considered ready when at least 2 measurements have been
+   * Time sync is considered ready when at least 1 measurement has been
    * collected and the offset covariance is finite (not infinite).
    */
   get is_synchronized(): boolean {
-    return this._count >= 2 && isFinite(this._offset_covariance);
+    return this._count >= 1 && isFinite(this._offset_covariance);
   }
 
   /**
