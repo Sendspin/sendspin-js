@@ -509,7 +509,7 @@ export class ProtocolHandler {
       return new Set(["pcm", "opus", "flac"] as Codec[]);
     }
 
-    // No native Opus (insecure context)
+    // No WebCodecs AudioDecoder (insecure context or unsupported browser)
     return new Set(["pcm", "flac"] as Codec[]);
   }
 

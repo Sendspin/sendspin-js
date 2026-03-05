@@ -290,7 +290,7 @@ export interface SendspinPlayerConfig {
    * - Safari: No FLAC support
    * - Firefox: No Opus (audio glitches with both native and opus-encdec decoders)
    * - Browsers with WebCodecs (Chrome, Edge): All codecs
-   * - Browsers without WebCodecs (insecure context): No Opus
+   * - Browsers without WebCodecs (e.g., insecure context or older browsers): No Opus
    *
    * Default: ["opus", "flac", "pcm"]
    */
