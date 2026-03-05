@@ -288,8 +288,9 @@ export interface SendspinPlayerConfig {
    * Codecs to use for audio streaming, in priority order.
    * Unsupported codecs for the current browser are automatically filtered out:
    * - Safari: No FLAC support
-   * - Browsers without WebCodecs (Firefox Android, insecure context): No Opus
-   * - Browsers with WebCodecs (Chrome, Edge, Firefox desktop): All codecs
+   * - Firefox: No Opus (audio glitches with both native and opus-encdec decoders)
+   * - Browsers with WebCodecs (Chrome, Edge): All codecs
+   * - Browsers without WebCodecs (insecure context): No Opus
    *
    * Default: ["opus", "flac", "pcm"]
    */

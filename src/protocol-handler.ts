@@ -477,6 +477,7 @@ export class ProtocolHandler {
     const userAgent =
       typeof navigator !== "undefined" ? navigator.userAgent : "";
     const isSafari = /^((?!chrome|android).)*safari/i.test(userAgent);
+    const isFirefox = /firefox/i.test(userAgent);
 
     // Check if native Opus decoder is available (requires secure context)
     const hasNativeOpus = typeof AudioDecoder !== "undefined";
@@ -498,12 +499,17 @@ export class ProtocolHandler {
       return new Set(["pcm", "opus"] as Codec[]);
     }
 
+    if (isFirefox) {
+      // Firefox: Opus has audio glitches with both native and opus-encdec decoders
+      return new Set(["pcm", "flac"] as Codec[]);
+    }
+
     if (hasNativeOpus) {
-      // Native Opus available (Chrome, Edge, Firefox desktop)
+      // Native Opus available (Chrome, Edge)
       return new Set(["pcm", "opus", "flac"] as Codec[]);
     }
 
-    // No native Opus (Firefox Android, insecure context)
+    // No native Opus (insecure context)
     return new Set(["pcm", "flac"] as Codec[]);
   }
 
