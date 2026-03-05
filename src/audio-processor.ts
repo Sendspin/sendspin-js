@@ -1042,6 +1042,55 @@ export class AudioProcessor {
 
   // Initialize native Opus decoder
   private async initWebCodecsDecoder(format: StreamFormat): Promise<void> {
+    const tryConfigureExistingDecoder = (): boolean => {
+      if (!this.webCodecsDecoder) return false;
+
+      const matchesFormat =
+        !!this.webCodecsFormat &&
+        this.webCodecsFormat.sample_rate === format.sample_rate &&
+        this.webCodecsFormat.channels === format.channels;
+
+      if (this.webCodecsDecoder.state === "configured" && matchesFormat) {
+        return true;
+      }
+
+      if (this.webCodecsDecoder.state === "closed") {
+        return false;
+      }
+
+      try {
+        this.webCodecsDecoder.configure({
+          codec: "opus",
+          sampleRate: format.sample_rate,
+          numberOfChannels: format.channels,
+        });
+        this.webCodecsFormat = format;
+        return true;
+      } catch {
+        return false;
+      }
+    };
+
+    if (tryConfigureExistingDecoder()) {
+      return;
+    }
+
+    if (this.webCodecsDecoderReady) {
+      await this.webCodecsDecoderReady;
+      if (tryConfigureExistingDecoder()) {
+        return;
+      }
+
+      try {
+        this.webCodecsDecoder?.close();
+      } catch {
+        // Ignore close errors; we'll recreate below.
+      }
+      this.webCodecsDecoder = null;
+      this.webCodecsDecoderReady = null;
+      this.webCodecsFormat = null;
+    }
+
     if (this.webCodecsDecoderReady) {
       await this.webCodecsDecoderReady;
       return;
@@ -1103,8 +1152,29 @@ export class AudioProcessor {
   private handleAudioData(audioData: AudioData): void {
     try {
       const chunkId = Number(audioData.timestamp);
-      const metadata = this.nativeDecoderMetadataByChunkId.get(chunkId);
+      let metadata = this.nativeDecoderMetadataByChunkId.get(chunkId);
       this.nativeDecoderMetadataByChunkId.delete(chunkId);
+
+      if (!metadata) {
+        // Some browsers do not round-trip EncodedAudioChunk.timestamp exactly
+        // for Opus. Fall back to decode order to avoid dropping all native output.
+        if (
+          chunkId > this.maxInvalidatedNativeDecoderChunkId &&
+          this.nativeDecoderMetadataByChunkId.size > 0
+        ) {
+          const nextEntry = this.nativeDecoderMetadataByChunkId.entries().next();
+          if (!nextEntry.done) {
+            const [fallbackChunkId, fallbackMetadata] = nextEntry.value;
+            this.nativeDecoderMetadataByChunkId.delete(fallbackChunkId);
+            metadata = fallbackMetadata;
+            if (this._debugLogging) {
+              console.debug(
+                `[NativeOpus] Falling back to decode-order metadata (out ts=${chunkId}, fallback chunkId=${fallbackChunkId})`,
+              );
+            }
+          }
+        }
+      }
 
       if (!metadata) {
         if (this._debugLogging) {
