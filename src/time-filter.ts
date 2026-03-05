@@ -287,11 +287,11 @@ export class SendspinTimeFilter {
   /**
    * Check if time synchronization is ready for use.
    *
-   * Time sync is considered ready when at least 2 measurements have been
+   * Time sync is considered ready when at least 1 measurement has been
    * collected and the offset covariance is finite (not infinite).
    */
   get is_synchronized(): boolean {
-    return this._count >= 2 && isFinite(this._offset_covariance);
+    return this._count >= 1 && isFinite(this._offset_covariance);
   }
 
   /**
