@@ -1,3 +1,4 @@
+import commonjs from "@rollup/plugin-commonjs";
 import resolve from "@rollup/plugin-node-resolve";
 
 export default {
@@ -8,5 +9,11 @@ export default {
     preserveModules: true,
     preserveModulesRoot: "dist",
   },
-  plugins: [resolve()],
+  plugins: [
+    resolve({
+      browser: true,
+      preferBuiltins: false,
+    }),
+    commonjs(),
+  ],
 };

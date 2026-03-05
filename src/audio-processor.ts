@@ -179,7 +179,10 @@ export class AudioProcessor {
   private opusDecoderReady: Promise<void> | null = null;
 
   private useOutputLatencyCompensation: boolean = true;
-  private nativeDecoderGenerationByTimestamp = new Map<number, number>();
+  private nativeDecoderQueue: Array<{
+    serverTimeUs: number;
+    generation: number;
+  }> = [];
   private recorrectionInterval: ReturnType<typeof setInterval> | null = null;
   private recorrectionBreachStartedAtMs: number | null = null;
   private lastRecorrectionAtMs: number = -Infinity;
@@ -1037,6 +1040,55 @@ export class AudioProcessor {
 
   // Initialize native Opus decoder
   private async initWebCodecsDecoder(format: StreamFormat): Promise<void> {
+    const tryConfigureExistingDecoder = (): boolean => {
+      if (!this.webCodecsDecoder) return false;
+
+      const matchesFormat =
+        !!this.webCodecsFormat &&
+        this.webCodecsFormat.sample_rate === format.sample_rate &&
+        this.webCodecsFormat.channels === format.channels;
+
+      if (this.webCodecsDecoder.state === "configured" && matchesFormat) {
+        return true;
+      }
+
+      if (this.webCodecsDecoder.state === "closed") {
+        return false;
+      }
+
+      try {
+        this.webCodecsDecoder.configure({
+          codec: "opus",
+          sampleRate: format.sample_rate,
+          numberOfChannels: format.channels,
+        });
+        this.webCodecsFormat = format;
+        return true;
+      } catch {
+        return false;
+      }
+    };
+
+    if (tryConfigureExistingDecoder()) {
+      return;
+    }
+
+    if (this.webCodecsDecoderReady) {
+      await this.webCodecsDecoderReady;
+      if (tryConfigureExistingDecoder()) {
+        return;
+      }
+
+      try {
+        this.webCodecsDecoder?.close();
+      } catch {
+        // Ignore close errors; we'll recreate below.
+      }
+      this.webCodecsDecoder = null;
+      this.webCodecsDecoderReady = null;
+      this.webCodecsFormat = null;
+    }
+
     if (this.webCodecsDecoderReady) {
       await this.webCodecsDecoderReady;
       return;
@@ -1097,21 +1149,20 @@ export class AudioProcessor {
   // Handle decoded audio data from native Opus decoder
   private handleAudioData(audioData: AudioData): void {
     try {
-      const serverTimeUs = Number(audioData.timestamp);
-      const generation =
-        this.nativeDecoderGenerationByTimestamp.get(serverTimeUs);
-      this.nativeDecoderGenerationByTimestamp.delete(serverTimeUs);
+      const outputTimestampUs = Number(audioData.timestamp);
+      const metadata = this.nativeDecoderQueue.shift();
 
-      if (generation === undefined) {
+      if (!metadata) {
         if (this._debugLogging) {
           console.debug(
-            `[NativeOpus] Dropping frame with unknown generation (ts=${serverTimeUs})`,
+            `[NativeOpus] Dropping frame with empty decode queue (out ts=${outputTimestampUs})`,
           );
         }
         audioData.close();
         return;
       }
 
+      const { serverTimeUs, generation } = metadata;
       if (generation !== this.stateManager.streamGeneration) {
         if (this._debugLogging) {
           console.debug(
@@ -1170,6 +1221,47 @@ export class AudioProcessor {
     }
   }
 
+  private resolveOpusDecoderModule(moduleExport: any): any {
+    const maybeDefault = moduleExport?.default;
+    const maybeCommonJs = moduleExport?.["module.exports"];
+    const resolved = maybeDefault ?? maybeCommonJs ?? moduleExport;
+
+    if (!resolved || typeof resolved !== "object") {
+      throw new Error("[Opus] Invalid libopus decoder module export");
+    }
+    return resolved;
+  }
+
+  private resolveOggOpusDecoderClass(wrapperExport: any): any {
+    const maybeDefault = wrapperExport?.default;
+    const maybeCommonJs = wrapperExport?.["module.exports"];
+    const wrapper = maybeDefault ?? maybeCommonJs ?? wrapperExport;
+    const resolved = wrapper?.OggOpusDecoder ?? wrapper;
+
+    if (typeof resolved !== "function") {
+      throw new Error("[Opus] OggOpusDecoder class export not found");
+    }
+    return resolved;
+  }
+
+  private async waitForOpusReady(target: {
+    isReady: boolean;
+    onready?: () => void;
+  }): Promise<void> {
+    if (target.isReady) return;
+
+    if (Object.isExtensible(target)) {
+      await new Promise<void>((resolve) => {
+        target.onready = () => resolve();
+      });
+      return;
+    }
+
+    while (!target.isReady) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 20));
+    }
+  }
+
   // Initialize opus-encdec decoder (fallback when WebCodecs unavailable)
   private async initOpusEncdecDecoder(format: StreamFormat): Promise<void> {
     if (this.opusDecoderReady) {
@@ -1186,22 +1278,14 @@ export class AudioProcessor {
         import("opus-encdec/src/oggOpusDecoder.js"),
       ]);
 
-      // The UMD module exports the Module object directly (as default in ES6 modules)
       this.opusDecoderModule =
-        DecoderModuleExport.default || DecoderModuleExport;
+        this.resolveOpusDecoderModule(DecoderModuleExport);
 
-      // The OggOpusDecoder is exported as default.OggOpusDecoder
-      const decoderWrapper =
-        (DecoderWrapperExport as any).default || DecoderWrapperExport;
       const OggOpusDecoderClass =
-        decoderWrapper.OggOpusDecoder || decoderWrapper;
+        this.resolveOggOpusDecoderClass(DecoderWrapperExport);
 
       // Wait for Module to be ready (async asm.js initialization)
-      if (!this.opusDecoderModule.isReady) {
-        await new Promise<void>((resolve) => {
-          this.opusDecoderModule.onready = () => resolve();
-        });
-      }
+      await this.waitForOpusReady(this.opusDecoderModule);
 
       // Create decoder instance
       this.opusDecoder = new OggOpusDecoderClass(
@@ -1215,11 +1299,7 @@ export class AudioProcessor {
       );
 
       // Wait for decoder to be ready if needed
-      if (!this.opusDecoder.isReady) {
-        await new Promise<void>((resolve) => {
-          this.opusDecoder.onready = () => resolve();
-        });
-      }
+      await this.waitForOpusReady(this.opusDecoder);
 
       console.log("[Opus] Decoder ready");
     })();
@@ -1314,12 +1394,15 @@ export class AudioProcessor {
     }
 
     try {
-      this.nativeDecoderGenerationByTimestamp.set(serverTimeUs, generation);
+      this.nativeDecoderQueue.push({
+        serverTimeUs,
+        generation,
+      });
 
-      // Create EncodedAudioChunk - use timestamp to pass server time through
       const chunk = new EncodedAudioChunk({
         type: "key", // Opus packets are self-contained
-        timestamp: serverTimeUs, // Pass server timestamp through to output callback
+        // Keep server time as timestamp for easier debugging/inspection.
+        timestamp: serverTimeUs,
         data: audioData,
       });
 
@@ -1327,7 +1410,9 @@ export class AudioProcessor {
       this.webCodecsDecoder.decode(chunk);
       return true;
     } catch (error) {
-      this.nativeDecoderGenerationByTimestamp.delete(serverTimeUs);
+      if (this.nativeDecoderQueue.length > 0) {
+        this.nativeDecoderQueue.pop();
+      }
       console.error("[NativeOpus] WebCodecs queue error:", error);
       return false;
     }
@@ -1832,14 +1917,17 @@ export class AudioProcessor {
     this.queueProcessScheduled = false;
 
     // Drop any pending native Opus decode outputs from the previous stream.
-    // WebCodecs output callbacks can still fire after stop/start; without this,
-    // decoded frames from the old stream can be enqueued into the new stream.
-    this.nativeDecoderGenerationByTimestamp.clear();
+    // We close and recreate the decoder on next use to ensure stale callbacks
+    // cannot be correlated with new-stream metadata.
+    this.nativeDecoderQueue = [];
     try {
-      (this.webCodecsDecoder as unknown as { reset?: () => void })?.reset?.();
+      this.webCodecsDecoder?.close();
     } catch {
-      // Ignore reset errors
+      // Ignore close errors
     }
+    this.webCodecsDecoder = null;
+    this.webCodecsDecoderReady = null;
+    this.webCodecsFormat = null;
 
     // Reset stream anchors
     this.stateManager.resetStreamAnchors();
