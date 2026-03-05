@@ -1181,6 +1181,47 @@ export class AudioProcessor {
     }
   }
 
+  private resolveOpusDecoderModule(moduleExport: any): any {
+    const maybeDefault = moduleExport?.default;
+    const maybeCommonJs = moduleExport?.["module.exports"];
+    const resolved = maybeDefault ?? maybeCommonJs ?? moduleExport;
+
+    if (!resolved || typeof resolved !== "object") {
+      throw new Error("[Opus] Invalid libopus decoder module export");
+    }
+    return resolved;
+  }
+
+  private resolveOggOpusDecoderClass(wrapperExport: any): any {
+    const maybeDefault = wrapperExport?.default;
+    const maybeCommonJs = wrapperExport?.["module.exports"];
+    const wrapper = maybeDefault ?? maybeCommonJs ?? wrapperExport;
+    const resolved = wrapper?.OggOpusDecoder ?? wrapper;
+
+    if (typeof resolved !== "function") {
+      throw new Error("[Opus] OggOpusDecoder class export not found");
+    }
+    return resolved;
+  }
+
+  private async waitForOpusReady(target: {
+    isReady: boolean;
+    onready?: () => void;
+  }): Promise<void> {
+    if (target.isReady) return;
+
+    if (Object.isExtensible(target)) {
+      await new Promise<void>((resolve) => {
+        target.onready = () => resolve();
+      });
+      return;
+    }
+
+    while (!target.isReady) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 20));
+    }
+  }
+
   // Initialize opus-encdec decoder (fallback when WebCodecs unavailable)
   private async initOpusEncdecDecoder(format: StreamFormat): Promise<void> {
     if (this.opusDecoderReady) {
@@ -1197,22 +1238,14 @@ export class AudioProcessor {
         import("opus-encdec/src/oggOpusDecoder.js"),
       ]);
 
-      // The UMD module exports the Module object directly (as default in ES6 modules)
       this.opusDecoderModule =
-        DecoderModuleExport.default || DecoderModuleExport;
+        this.resolveOpusDecoderModule(DecoderModuleExport);
 
-      // The OggOpusDecoder is exported as default.OggOpusDecoder
-      const decoderWrapper =
-        (DecoderWrapperExport as any).default || DecoderWrapperExport;
       const OggOpusDecoderClass =
-        decoderWrapper.OggOpusDecoder || decoderWrapper;
+        this.resolveOggOpusDecoderClass(DecoderWrapperExport);
 
       // Wait for Module to be ready (async asm.js initialization)
-      if (!this.opusDecoderModule.isReady) {
-        await new Promise<void>((resolve) => {
-          this.opusDecoderModule.onready = () => resolve();
-        });
-      }
+      await this.waitForOpusReady(this.opusDecoderModule);
 
       // Create decoder instance
       this.opusDecoder = new OggOpusDecoderClass(
@@ -1226,11 +1259,7 @@ export class AudioProcessor {
       );
 
       // Wait for decoder to be ready if needed
-      if (!this.opusDecoder.isReady) {
-        await new Promise<void>((resolve) => {
-          this.opusDecoder.onready = () => resolve();
-        });
-      }
+      await this.waitForOpusReady(this.opusDecoder);
 
       console.log("[Opus] Decoder ready");
     })();
