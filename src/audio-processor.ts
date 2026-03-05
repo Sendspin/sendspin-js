@@ -179,12 +179,10 @@ export class AudioProcessor {
   private opusDecoderReady: Promise<void> | null = null;
 
   private useOutputLatencyCompensation: boolean = true;
-  private nativeDecoderMetadataByChunkId = new Map<
-    number,
-    { serverTimeUs: number; generation: number }
-  >();
-  private nextNativeDecoderChunkId: number = 1;
-  private maxInvalidatedNativeDecoderChunkId: number = 0;
+  private nativeDecoderQueue: Array<{
+    serverTimeUs: number;
+    generation: number;
+  }> = [];
   private recorrectionInterval: ReturnType<typeof setInterval> | null = null;
   private recorrectionBreachStartedAtMs: number | null = null;
   private lastRecorrectionAtMs: number = -Infinity;
@@ -1151,42 +1149,14 @@ export class AudioProcessor {
   // Handle decoded audio data from native Opus decoder
   private handleAudioData(audioData: AudioData): void {
     try {
-      const chunkId = Number(audioData.timestamp);
-      let metadata = this.nativeDecoderMetadataByChunkId.get(chunkId);
-      this.nativeDecoderMetadataByChunkId.delete(chunkId);
-
-      if (!metadata) {
-        // Some browsers do not round-trip EncodedAudioChunk.timestamp exactly
-        // for Opus. Fall back to decode order to avoid dropping all native output.
-        if (
-          chunkId > this.maxInvalidatedNativeDecoderChunkId &&
-          this.nativeDecoderMetadataByChunkId.size > 0
-        ) {
-          const nextEntry = this.nativeDecoderMetadataByChunkId.entries().next();
-          if (!nextEntry.done) {
-            const [fallbackChunkId, fallbackMetadata] = nextEntry.value;
-            this.nativeDecoderMetadataByChunkId.delete(fallbackChunkId);
-            metadata = fallbackMetadata;
-            if (this._debugLogging) {
-              console.debug(
-                `[NativeOpus] Falling back to decode-order metadata (out ts=${chunkId}, fallback chunkId=${fallbackChunkId})`,
-              );
-            }
-          }
-        }
-      }
+      const outputTimestampUs = Number(audioData.timestamp);
+      const metadata = this.nativeDecoderQueue.shift();
 
       if (!metadata) {
         if (this._debugLogging) {
-          if (chunkId <= this.maxInvalidatedNativeDecoderChunkId) {
-            console.debug(
-              `[NativeOpus] Dropping stale post-reset frame (chunkId=${chunkId})`,
-            );
-          } else {
-            console.debug(
-              `[NativeOpus] Dropping frame with unknown decoder chunk id (chunkId=${chunkId})`,
-            );
-          }
+          console.debug(
+            `[NativeOpus] Dropping frame with empty decode queue (out ts=${outputTimestampUs})`,
+          );
         }
         audioData.close();
         return;
@@ -1423,19 +1393,16 @@ export class AudioProcessor {
       return false;
     }
 
-    let chunkId = 0;
     try {
-      chunkId = this.nextNativeDecoderChunkId++;
-      this.nativeDecoderMetadataByChunkId.set(chunkId, {
+      this.nativeDecoderQueue.push({
         serverTimeUs,
         generation,
       });
 
-      // Use a monotonic chunk id for callback correlation; server timestamp
-      // remains in metadata so duplicate timestamps cannot collide.
       const chunk = new EncodedAudioChunk({
         type: "key", // Opus packets are self-contained
-        timestamp: chunkId,
+        // Keep server time as timestamp for easier debugging/inspection.
+        timestamp: serverTimeUs,
         data: audioData,
       });
 
@@ -1443,8 +1410,8 @@ export class AudioProcessor {
       this.webCodecsDecoder.decode(chunk);
       return true;
     } catch (error) {
-      if (chunkId !== 0) {
-        this.nativeDecoderMetadataByChunkId.delete(chunkId);
+      if (this.nativeDecoderQueue.length > 0) {
+        this.nativeDecoderQueue.pop();
       }
       console.error("[NativeOpus] WebCodecs queue error:", error);
       return false;
@@ -1950,20 +1917,17 @@ export class AudioProcessor {
     this.queueProcessScheduled = false;
 
     // Drop any pending native Opus decode outputs from the previous stream.
-    // WebCodecs output callbacks can still fire after stop/start; without this,
-    // decoded frames from the old stream can be enqueued into the new stream.
-    if (this.nativeDecoderMetadataByChunkId.size > 0) {
-      this.maxInvalidatedNativeDecoderChunkId = Math.max(
-        this.maxInvalidatedNativeDecoderChunkId,
-        this.nextNativeDecoderChunkId - 1,
-      );
-    }
-    this.nativeDecoderMetadataByChunkId.clear();
+    // We close and recreate the decoder on next use to ensure stale callbacks
+    // cannot be correlated with new-stream metadata.
+    this.nativeDecoderQueue = [];
     try {
-      (this.webCodecsDecoder as unknown as { reset?: () => void })?.reset?.();
+      this.webCodecsDecoder?.close();
     } catch {
-      // Ignore reset errors
+      // Ignore close errors
     }
+    this.webCodecsDecoder = null;
+    this.webCodecsDecoderReady = null;
+    this.webCodecsFormat = null;
 
     // Reset stream anchors
     this.stateManager.resetStreamAnchors();
