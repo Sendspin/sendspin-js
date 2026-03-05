@@ -353,7 +353,6 @@ export class ProtocolHandler {
 
     if (!isFormatUpdate) {
       // New stream: reset scheduling state and clear buffers
-      this.stateManager.resetStreamAnchors();
       this.audioProcessor.clearBuffers();
     }
     // Format update: don't clear buffers (per new spec)
@@ -376,7 +375,6 @@ export class ProtocolHandler {
     if (!roles || roles.includes("player")) {
       console.log("Sendspin: Stream clear (seek)");
       this.audioProcessor.clearBuffers();
-      this.stateManager.resetStreamAnchors();
       // Note: Don't stop playing, don't clear format - just clear buffers
     }
   }

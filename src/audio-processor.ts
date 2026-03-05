@@ -179,7 +179,12 @@ export class AudioProcessor {
   private opusDecoderReady: Promise<void> | null = null;
 
   private useOutputLatencyCompensation: boolean = true;
-  private nativeDecoderGenerationByTimestamp = new Map<number, number>();
+  private nativeDecoderMetadataByChunkId = new Map<
+    number,
+    { serverTimeUs: number; generation: number }
+  >();
+  private nextNativeDecoderChunkId: number = 1;
+  private maxInvalidatedNativeDecoderChunkId: number = 0;
   private recorrectionInterval: ReturnType<typeof setInterval> | null = null;
   private recorrectionBreachStartedAtMs: number | null = null;
   private lastRecorrectionAtMs: number = -Infinity;
@@ -1097,21 +1102,27 @@ export class AudioProcessor {
   // Handle decoded audio data from native Opus decoder
   private handleAudioData(audioData: AudioData): void {
     try {
-      const serverTimeUs = Number(audioData.timestamp);
-      const generation =
-        this.nativeDecoderGenerationByTimestamp.get(serverTimeUs);
-      this.nativeDecoderGenerationByTimestamp.delete(serverTimeUs);
+      const chunkId = Number(audioData.timestamp);
+      const metadata = this.nativeDecoderMetadataByChunkId.get(chunkId);
+      this.nativeDecoderMetadataByChunkId.delete(chunkId);
 
-      if (generation === undefined) {
+      if (!metadata) {
         if (this._debugLogging) {
-          console.debug(
-            `[NativeOpus] Dropping frame with unknown generation (ts=${serverTimeUs})`,
-          );
+          if (chunkId <= this.maxInvalidatedNativeDecoderChunkId) {
+            console.debug(
+              `[NativeOpus] Dropping stale post-reset frame (chunkId=${chunkId})`,
+            );
+          } else {
+            console.debug(
+              `[NativeOpus] Dropping frame with unknown decoder chunk id (chunkId=${chunkId})`,
+            );
+          }
         }
         audioData.close();
         return;
       }
 
+      const { serverTimeUs, generation } = metadata;
       if (generation !== this.stateManager.streamGeneration) {
         if (this._debugLogging) {
           console.debug(
@@ -1313,13 +1324,19 @@ export class AudioProcessor {
       return false;
     }
 
+    let chunkId = 0;
     try {
-      this.nativeDecoderGenerationByTimestamp.set(serverTimeUs, generation);
+      chunkId = this.nextNativeDecoderChunkId++;
+      this.nativeDecoderMetadataByChunkId.set(chunkId, {
+        serverTimeUs,
+        generation,
+      });
 
-      // Create EncodedAudioChunk - use timestamp to pass server time through
+      // Use a monotonic chunk id for callback correlation; server timestamp
+      // remains in metadata so duplicate timestamps cannot collide.
       const chunk = new EncodedAudioChunk({
         type: "key", // Opus packets are self-contained
-        timestamp: serverTimeUs, // Pass server timestamp through to output callback
+        timestamp: chunkId,
         data: audioData,
       });
 
@@ -1327,7 +1344,9 @@ export class AudioProcessor {
       this.webCodecsDecoder.decode(chunk);
       return true;
     } catch (error) {
-      this.nativeDecoderGenerationByTimestamp.delete(serverTimeUs);
+      if (chunkId !== 0) {
+        this.nativeDecoderMetadataByChunkId.delete(chunkId);
+      }
       console.error("[NativeOpus] WebCodecs queue error:", error);
       return false;
     }
@@ -1834,7 +1853,13 @@ export class AudioProcessor {
     // Drop any pending native Opus decode outputs from the previous stream.
     // WebCodecs output callbacks can still fire after stop/start; without this,
     // decoded frames from the old stream can be enqueued into the new stream.
-    this.nativeDecoderGenerationByTimestamp.clear();
+    if (this.nativeDecoderMetadataByChunkId.size > 0) {
+      this.maxInvalidatedNativeDecoderChunkId = Math.max(
+        this.maxInvalidatedNativeDecoderChunkId,
+        this.nextNativeDecoderChunkId - 1,
+      );
+    }
+    this.nativeDecoderMetadataByChunkId.clear();
     try {
       (this.webCodecsDecoder as unknown as { reset?: () => void })?.reset?.();
     } catch {
