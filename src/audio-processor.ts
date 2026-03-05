@@ -946,7 +946,7 @@ export class AudioProcessor {
     let cutCount = 0;
     let keptTailEndTimeSec = 0;
     this.scheduledSources = this.scheduledSources.filter((entry) => {
-      // Keep already-started sources to avoid cutting mid-buffer artifacts.
+      // Keep sources scheduled before stopTime to avoid cutting mid-buffer artifacts.
       if (entry.startTime < stopTime) {
         keptTailEndTimeSec = Math.max(keptTailEndTimeSec, entry.endTime);
         return true;
