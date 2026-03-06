@@ -45,6 +45,26 @@ const SCHEDULE_HORIZON_GOOD_SEC = 8;
 const SCHEDULE_HORIZON_POOR_SEC = 4;
 const SCHEDULE_HORIZON_PRECISE_ERROR_MS = 2;
 const SCHEDULE_HORIZON_GOOD_ERROR_MS = 8;
+type AudioClockSource = "estimated" | "timestamp" | "raw";
+
+interface OutputTimestampSample {
+  contextTimeSec: number;
+  performanceTimeMs: number;
+  nowMs: number;
+  predictedAudioTimeSec: number;
+  rawAudioTimeSec: number;
+}
+
+const OUTPUT_TIMESTAMP_MAX_FRESHNESS_MS = 250;
+const OUTPUT_TIMESTAMP_MIN_SAMPLE_INTERVAL_MS = 40;
+const OUTPUT_TIMESTAMP_SLOPE_MIN = 0.95;
+const OUTPUT_TIMESTAMP_SLOPE_MAX = 1.05;
+const OUTPUT_TIMESTAMP_MAX_DIVERGENCE_SEC = 0.25;
+const OUTPUT_TIMESTAMP_MAX_DIVERGENCE_DELTA_SEC = 0.05;
+const OUTPUT_TIMESTAMP_MAX_BACKWARD_SEC = 0.005;
+const OUTPUT_TIMESTAMP_PROMOTION_MIN_GOOD_SAMPLES = 6;
+const OUTPUT_TIMESTAMP_PROMOTION_MIN_SPAN_MS = 750;
+const OUTPUT_TIMESTAMP_MAX_CONSECUTIVE_BAD_SAMPLES = 2;
 
 // Mode-specific sync correction thresholds
 const CORRECTION_THRESHOLDS: Record<
@@ -191,6 +211,11 @@ export class AudioProcessor {
   private recorrectionPendingJumpSign: number | null = null;
   private recorrectionPendingJumpAtMs: number | null = null;
   private lastLoggedHorizonSec: number | null = null;
+  private activeAudioClockSource: AudioClockSource = "estimated";
+  private outputTimestampLastSample: OutputTimestampSample | null = null;
+  private outputTimestampGoodSamples: number = 0;
+  private outputTimestampBadSamples: number = 0;
+  private outputTimestampGoodSinceMs: number | null = null;
 
   constructor(
     private stateManager: StateManager,
@@ -316,53 +341,45 @@ export class AudioProcessor {
     return Math.max(0, farthestScheduledSec - currentTimeSec);
   }
 
-  private getTimingSnapshot(): {
-    audioContextTimeSec: number; // derived; use for target-time math
-    audioContextRawTimeSec: number; // raw; use for comparisons (late drops/headroom)
-    nowMs: number;
-    nowUs: number;
-  } {
-    const nowMs = performance.now();
-    const nowUs = nowMs * 1000;
-    if (!this.audioContext) {
-      return {
-        audioContextTimeSec: 0,
-        audioContextRawTimeSec: 0,
-        nowMs,
-        nowUs,
-      };
+  private setActiveAudioClockSource(
+    source: AudioClockSource,
+    reason: string,
+  ): void {
+    if (this.activeAudioClockSource === source) {
+      return;
     }
 
-    const rawTimeSec = this.audioContext.currentTime;
-
-    // `AudioContext.currentTime` can advance in coarse quanta (observed ~10.667ms steps
-    // on some Linux audio stacks). Mixing that directly with `performance.now()` can make
-    // the computed `targetPlaybackTime` jump by ~10/20ms and create the "quantized" spikes.
-    // `getOutputTimestamp()` provides a stable mapping between performance time and audio time.
-    const getOutputTimestamp = (
-      this.audioContext as unknown as {
-        getOutputTimestamp?: () => {
-          contextTime: number;
-          performanceTime: number;
-        };
-      }
-    ).getOutputTimestamp;
-
-    if (typeof getOutputTimestamp === "function") {
-      try {
-        const ts = getOutputTimestamp.call(this.audioContext);
-        const perfDeltaSec = (nowMs - ts.performanceTime) / 1000;
-        return {
-          audioContextTimeSec: ts.contextTime + perfDeltaSec,
-          audioContextRawTimeSec: rawTimeSec,
-          nowMs,
-          nowUs,
-        };
-      } catch {
-        // Fallback below
-      }
+    const previousSource = this.activeAudioClockSource;
+    this.activeAudioClockSource = source;
+    if (this._debugLogging) {
+      console.log(
+        `Sendspin: Audio clock source ${previousSource} -> ${source} (${reason})`,
+      );
     }
+  }
 
+  private resetOutputTimestampValidation(): void {
+    this.activeAudioClockSource = "estimated";
+    this.outputTimestampLastSample = null;
+    this.outputTimestampGoodSamples = 0;
+    this.outputTimestampBadSamples = 0;
+    this.outputTimestampGoodSinceMs = null;
+  }
+
+  private demoteOutputTimestampValidation(reason: string): void {
+    const previousSource = this.activeAudioClockSource;
+    this.resetOutputTimestampValidation();
+    if (previousSource !== "estimated" && this._debugLogging) {
+      console.log(
+        `Sendspin: Audio clock source ${previousSource} -> estimated (${reason})`,
+      );
+    }
+  }
+
+  private getEstimatedAudioContextTimeSec(
+    rawTimeSec: number,
+    nowMs: number,
+  ): number {
     // Fallback: de-quantize `currentTime` using wall clock and slew toward the raw value.
     // Key goal: avoid discrete ~10/20ms jumps in derived audio time.
     const TIMING_MAX_SLEW_SEC = 0.002; // max correction per snapshot (2ms)
@@ -400,14 +417,273 @@ export class AudioProcessor {
       }
     }
 
-    const derivedTimeSec =
-      this.timingEstimateAudioContextTimeSec ?? this.audioContext.currentTime;
+    return this.timingEstimateAudioContextTimeSec ?? rawTimeSec;
+  }
+
+  private rejectOutputTimestampSample(
+    reason: string,
+    catastrophic: boolean = false,
+  ): void {
+    this.outputTimestampLastSample = null;
+    this.outputTimestampGoodSamples = 0;
+    this.outputTimestampGoodSinceMs = null;
+
+    if (this.activeAudioClockSource !== "timestamp") {
+      this.outputTimestampBadSamples = 0;
+      return;
+    }
+
+    this.outputTimestampBadSamples += 1;
+    if (
+      catastrophic ||
+      this.outputTimestampBadSamples >=
+        OUTPUT_TIMESTAMP_MAX_CONSECUTIVE_BAD_SAMPLES
+    ) {
+      this.demoteOutputTimestampValidation(reason);
+    }
+  }
+
+  private getTimestampDerivedAudioTimeSec(
+    rawTimeSec: number,
+    nowMs: number,
+  ): number | null {
+    if (!this.audioContext) {
+      return null;
+    }
+
+    const getOutputTimestamp = (
+      this.audioContext as unknown as {
+        getOutputTimestamp?: () => {
+          contextTime: number;
+          performanceTime: number;
+        };
+      }
+    ).getOutputTimestamp;
+
+    if (typeof getOutputTimestamp !== "function") {
+      if (this.activeAudioClockSource === "timestamp") {
+        this.demoteOutputTimestampValidation("getOutputTimestamp unavailable");
+      }
+      return null;
+    }
+
+    try {
+      const ts = getOutputTimestamp.call(this.audioContext);
+      const freshnessMs = nowMs - ts.performanceTime;
+      const predictedAudioTimeSec = ts.contextTime + freshnessMs / 1000;
+      const sample: OutputTimestampSample = {
+        contextTimeSec: ts.contextTime,
+        performanceTimeMs: ts.performanceTime,
+        nowMs,
+        predictedAudioTimeSec,
+        rawAudioTimeSec: rawTimeSec,
+      };
+
+      if (freshnessMs < 0) {
+        this.rejectOutputTimestampSample(
+          `performanceTime in future (${freshnessMs.toFixed(1)}ms)`,
+          true,
+        );
+        return null;
+      }
+      if (freshnessMs > OUTPUT_TIMESTAMP_MAX_FRESHNESS_MS) {
+        this.rejectOutputTimestampSample(
+          `stale timestamp (${freshnessMs.toFixed(1)}ms old)`,
+          true,
+        );
+        return null;
+      }
+
+      const divergenceSec = predictedAudioTimeSec - rawTimeSec;
+      if (Math.abs(divergenceSec) > OUTPUT_TIMESTAMP_MAX_DIVERGENCE_SEC) {
+        this.rejectOutputTimestampSample(
+          `timestamp/raw divergence ${Math.abs(divergenceSec * 1000).toFixed(1)}ms`,
+          true,
+        );
+        return null;
+      }
+
+      const lastSample = this.outputTimestampLastSample;
+      if (lastSample) {
+        const perfDeltaMs = ts.performanceTime - lastSample.performanceTimeMs;
+        if (perfDeltaMs < 0) {
+          this.rejectOutputTimestampSample(
+            `performanceTime moved backward (${perfDeltaMs.toFixed(1)}ms)`,
+            true,
+          );
+          return null;
+        }
+
+        if (
+          predictedAudioTimeSec <
+          lastSample.predictedAudioTimeSec - OUTPUT_TIMESTAMP_MAX_BACKWARD_SEC
+        ) {
+          this.rejectOutputTimestampSample(
+            `predicted audio time moved backward ${((lastSample.predictedAudioTimeSec - predictedAudioTimeSec) * 1000).toFixed(1)}ms`,
+            true,
+          );
+          return null;
+        }
+
+        const lastDivergenceSec =
+          lastSample.predictedAudioTimeSec - lastSample.rawAudioTimeSec;
+        if (
+          Math.abs(divergenceSec - lastDivergenceSec) >
+          OUTPUT_TIMESTAMP_MAX_DIVERGENCE_DELTA_SEC
+        ) {
+          this.rejectOutputTimestampSample(
+            `timestamp/raw divergence drift ${Math.abs((divergenceSec - lastDivergenceSec) * 1000).toFixed(1)}ms`,
+          );
+          return null;
+        }
+
+        if (perfDeltaMs >= OUTPUT_TIMESTAMP_MIN_SAMPLE_INTERVAL_MS) {
+          const perfDeltaSec = perfDeltaMs / 1000;
+          const contextSlope =
+            (ts.contextTime - lastSample.contextTimeSec) / perfDeltaSec;
+          const predictedSlope =
+            (predictedAudioTimeSec - lastSample.predictedAudioTimeSec) /
+            perfDeltaSec;
+
+          if (
+            contextSlope < OUTPUT_TIMESTAMP_SLOPE_MIN ||
+            contextSlope > OUTPUT_TIMESTAMP_SLOPE_MAX
+          ) {
+            this.rejectOutputTimestampSample(
+              `context slope ${contextSlope.toFixed(3)} out of range`,
+            );
+            return null;
+          }
+          if (
+            predictedSlope < OUTPUT_TIMESTAMP_SLOPE_MIN ||
+            predictedSlope > OUTPUT_TIMESTAMP_SLOPE_MAX
+          ) {
+            this.rejectOutputTimestampSample(
+              `predicted slope ${predictedSlope.toFixed(3)} out of range`,
+            );
+            return null;
+          }
+        }
+      }
+
+      this.outputTimestampLastSample = sample;
+      this.outputTimestampBadSamples = 0;
+      if (this.outputTimestampGoodSinceMs === null) {
+        this.outputTimestampGoodSinceMs = nowMs;
+      }
+      this.outputTimestampGoodSamples += 1;
+
+      if (
+        this.activeAudioClockSource !== "timestamp" &&
+        this.outputTimestampGoodSamples >=
+          OUTPUT_TIMESTAMP_PROMOTION_MIN_GOOD_SAMPLES &&
+        this.outputTimestampGoodSinceMs !== null &&
+        nowMs - this.outputTimestampGoodSinceMs >=
+          OUTPUT_TIMESTAMP_PROMOTION_MIN_SPAN_MS
+      ) {
+        this.setActiveAudioClockSource(
+          "timestamp",
+          `validated ${this.outputTimestampGoodSamples} samples over ${(nowMs - this.outputTimestampGoodSinceMs).toFixed(0)}ms`,
+        );
+      }
+
+      return predictedAudioTimeSec;
+    } catch (error) {
+      const reason =
+        error instanceof Error
+          ? `getOutputTimestamp failed: ${error.message}`
+          : `getOutputTimestamp failed: ${String(error)}`;
+      this.rejectOutputTimestampSample(reason, true);
+      return null;
+    }
+  }
+
+  private getTimingSnapshot(): {
+    audioContextTimeSec: number; // derived; use for target-time math
+    audioContextRawTimeSec: number; // raw; use for comparisons (late drops/headroom)
+    nowMs: number;
+    nowUs: number;
+  } {
+    const nowMs = performance.now();
+    const nowUs = nowMs * 1000;
+    if (!this.audioContext) {
+      return {
+        audioContextTimeSec: 0,
+        audioContextRawTimeSec: 0,
+        nowMs,
+        nowUs,
+      };
+    }
+
+    const rawTimeSec = this.audioContext.currentTime;
+    const estimatedTimeSec = this.getEstimatedAudioContextTimeSec(
+      rawTimeSec,
+      nowMs,
+    );
+    const timestampTimeSec = this.getTimestampDerivedAudioTimeSec(
+      rawTimeSec,
+      nowMs,
+    );
+
+    let derivedTimeSec =
+      this.activeAudioClockSource === "timestamp" && timestampTimeSec !== null
+        ? timestampTimeSec
+        : estimatedTimeSec;
+    if (!Number.isFinite(derivedTimeSec)) {
+      derivedTimeSec = rawTimeSec;
+    }
+
     return {
       audioContextTimeSec: derivedTimeSec,
       audioContextRawTimeSec: rawTimeSec,
       nowMs,
       nowUs,
     };
+  }
+
+  private resetScheduledPlaybackState(reason?: string): void {
+    const hadScheduledState =
+      this.nextPlaybackTime !== 0 ||
+      this.lastScheduledServerTime !== 0 ||
+      this.currentSyncErrorMs !== 0 ||
+      this.currentCorrectionMethod !== "none" ||
+      this.scheduledSources.length > 0;
+
+    this.nextPlaybackTime = 0;
+    this.lastScheduledServerTime = 0;
+    this.recorrectionMinStartTimeSec = null;
+    this.resetRecorrectionCheckState();
+    this.resetSyncErrorEma();
+    this.currentSyncErrorMs = 0;
+    this.currentPlaybackRate = 1.0;
+    this.currentCorrectionMethod = "none";
+    this.lastSamplesAdjusted = 0;
+    this.playbackStartedAt = null;
+    this.currentClockPrecision = "imprecise";
+
+    if (reason && hadScheduledState && this._debugLogging) {
+      console.log(`Sendspin: Reset scheduled playback state (${reason})`);
+    }
+  }
+
+  private pruneExpiredScheduledSources(currentTimeSec: number): void {
+    const before = this.scheduledSources.length;
+    if (before === 0) {
+      return;
+    }
+
+    this.scheduledSources = this.scheduledSources.filter(
+      (entry) => entry.endTime > currentTimeSec,
+    );
+
+    const pruned = before - this.scheduledSources.length;
+    if (pruned > 0 && this._debugLogging) {
+      console.log(`Sendspin: Pruned ${pruned} expired scheduled chunk(s)`);
+    }
+
+    if (this.scheduledSources.length === 0) {
+      this.resetScheduledPlaybackState("no scheduled audio ahead");
+    }
   }
 
   private startRecorrectionMonitor(): void {
@@ -548,7 +824,6 @@ export class AudioProcessor {
     }
     if (
       !this.stateManager.isPlaying ||
-      this.scheduledSources.length === 0 ||
       this.nextPlaybackTime === 0 ||
       this.lastScheduledServerTime === 0
     ) {
@@ -562,6 +837,16 @@ export class AudioProcessor {
       nowMs,
       nowUs,
     } = this.getTimingSnapshot();
+    this.pruneExpiredScheduledSources(audioContextRawTime);
+    const scheduledAheadSec = this.getScheduledAheadSec(audioContextRawTime);
+    if (scheduledAheadSec <= 0) {
+      this.resetRecorrectionCheckState();
+      if (this.audioBufferQueue.length > 0) {
+        this.processAudioQueue();
+      }
+      return;
+    }
+
     const syncDelaySec = this.syncDelayMs / 1000;
     const outputLatencySec = this.useOutputLatencyCompensation
       ? this.getSmoothedOutputLatencyUs() / 1_000_000
@@ -611,7 +896,7 @@ export class AudioProcessor {
 
     if (this._debugLogging) {
       console.log(
-        `Sendspin: [sync] Recorrection trigger: error=${absErrorMs.toFixed(1)}ms sustained=${(nowMs - this.recorrectionBreachStartedAtMs).toFixed(0)}ms scheduledAhead=${this.getScheduledAheadSec(audioContextRawTime).toFixed(3)}s`,
+        `Sendspin: [sync] Recorrection trigger: error=${absErrorMs.toFixed(1)}ms sustained=${(nowMs - this.recorrectionBreachStartedAtMs).toFixed(0)}ms scheduledAhead=${scheduledAheadSec.toFixed(3)}s`,
       );
     }
     this.applyRecorrectionCutover();
@@ -1614,6 +1899,7 @@ export class AudioProcessor {
       audioContextRawTimeSec,
       nowUs,
     } = this.getTimingSnapshot();
+    this.pruneExpiredScheduledSources(audioContextRawTimeSec);
 
     // Convert sync delay from ms to seconds (positive = delay, negative = advance)
     const syncDelaySec = this.syncDelayMs / 1000;
@@ -1845,6 +2131,12 @@ export class AudioProcessor {
       source.onended = () => {
         const idx = this.scheduledSources.indexOf(scheduledEntry);
         if (idx > -1) this.scheduledSources.splice(idx, 1);
+        if (this.scheduledSources.length === 0) {
+          this.resetScheduledPlaybackState("all scheduled audio ended");
+          if (this.audioBufferQueue.length > 0) {
+            this.processAudioQueue();
+          }
+        }
       };
     }
   }
@@ -1928,24 +2220,14 @@ export class AudioProcessor {
     // Reset stream anchors
     this.stateManager.resetStreamAnchors();
 
-    // Reset seamless playback tracking
-    this.nextPlaybackTime = 0;
-    this.lastScheduledServerTime = 0;
-
-    // Reset sync stats
-    this.currentSyncErrorMs = 0;
-    this.smoothedSyncErrorMs = 0;
+    // Reset sync stats and timing sources
+    this.resetScheduledPlaybackState();
     this.resyncCount = 0;
-    this.currentPlaybackRate = 1.0;
-    this.currentCorrectionMethod = "none";
-    this.currentClockPrecision = "imprecise";
-    this.playbackStartedAt = null;
-    this.lastSamplesAdjusted = 0;
-    this.recorrectionMinStartTimeSec = null;
     this.lastRawOutputLatencyUs = 0;
     this.resetLatencySmoother();
     this.timingEstimateAudioContextTimeSec = null;
     this.timingEstimateAtMs = null;
+    this.resetOutputTimestampValidation();
   }
 
   // Cleanup and close AudioContext
