@@ -1882,16 +1882,12 @@ export class AudioProcessor {
 
   // Stop audio element playback (for MediaSession)
   stopAudioElement(): void {
-    if (
-      this.outputMode === "media-element" &&
-      this.audioElement &&
-      !this.isAndroid
-    ) {
+    if (this.outputMode === "media-element" && this.audioElement) {
       if (!this.audioElement.paused) {
         this.audioElement.pause();
       }
     }
-    // No-op for direct mode or Android
+    // No-op for direct mode
   }
 
   // Clear all audio buffers and scheduled sources
