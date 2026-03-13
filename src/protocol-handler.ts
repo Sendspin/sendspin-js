@@ -435,6 +435,13 @@ export class ProtocolHandler {
           }
         }
         break;
+
+      case "set_static_delay":
+        if (playerCommand.static_delay_ms !== undefined) {
+          // Negate: protocol positive = play earlier, JS positive = play later
+          this.audioProcessor.setSyncDelay(-playerCommand.static_delay_ms);
+        }
+        break;
     }
 
     // Reset periodic timer first, then send state with commanded values.
@@ -570,6 +577,10 @@ export class ProtocolHandler {
       muted = externalVol.muted;
     }
 
+    // Convert internal syncDelay (positive=later) to protocol static_delay_ms (positive=earlier)
+    const syncDelayMs = this.audioProcessor.getSyncDelayMs();
+    const staticDelayMs = Math.max(0, Math.min(5000, Math.round(-syncDelayMs)));
+
     const message: ClientState = {
       type: "client/state" as MessageType.CLIENT_STATE,
       payload: {
@@ -577,6 +588,8 @@ export class ProtocolHandler {
           state: this.stateManager.playerState,
           volume,
           muted,
+          static_delay_ms: staticDelayMs,
+          supported_commands: ["set_static_delay"],
         },
       },
     };

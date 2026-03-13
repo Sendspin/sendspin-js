@@ -909,6 +909,10 @@ export class AudioProcessor {
     });
   }
 
+  getSyncDelayMs(): number {
+    return this.syncDelayMs;
+  }
+
   // Update sync delay at runtime
   setSyncDelay(delayMs: number): void {
     const oldDelayMs = this.syncDelayMs;

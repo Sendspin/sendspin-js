@@ -217,6 +217,7 @@ export class SendspinPlayer {
   // Set sync delay (in milliseconds). Runtime behavior depends on correction mode settings.
   setSyncDelay(delayMs: number): void {
     this.audioProcessor.setSyncDelay(delayMs);
+    this.protocolHandler.sendStateUpdate();
   }
 
   /**

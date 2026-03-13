@@ -91,6 +91,8 @@ export interface ClientState {
       state: "synchronized" | "error";
       volume: number;
       muted: boolean;
+      static_delay_ms: number;
+      supported_commands?: string[];
     };
   };
 }
@@ -196,9 +198,10 @@ export interface ServerCommand {
   type: MessageType.SERVER_COMMAND;
   payload: {
     player: {
-      command: "volume" | "mute";
+      command: "volume" | "mute" | "set_static_delay";
       volume?: number;
       mute?: boolean;
+      static_delay_ms?: number;
     };
   };
 }
