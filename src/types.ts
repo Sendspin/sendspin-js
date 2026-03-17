@@ -91,6 +91,8 @@ export interface ClientState {
       state: "synchronized" | "error";
       volume: number;
       muted: boolean;
+      static_delay_ms: number;
+      supported_commands?: string[];
     };
   };
 }
@@ -196,9 +198,10 @@ export interface ServerCommand {
   type: MessageType.SERVER_COMMAND;
   payload: {
     player: {
-      command: "volume" | "mute";
+      command: "volume" | "mute" | "set_static_delay";
       volume?: number;
       mute?: boolean;
+      static_delay_ms?: number;
     };
   };
 }
@@ -361,6 +364,13 @@ export interface SendspinPlayerConfig {
    * The app should apply the volume to hardware (e.g., Cast system volume).
    */
   onVolumeCommand?: (volume: number, muted: boolean) => void;
+
+  /**
+   * Callback when server sends a set_static_delay command.
+   * Called with the new delay in milliseconds (0-5000, protocol convention:
+   * positive = play earlier to compensate for device latency).
+   */
+  onDelayCommand?: (delayMs: number) => void;
 
   /**
    * Getter for external volume state.
