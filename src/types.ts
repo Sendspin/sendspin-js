@@ -366,6 +366,13 @@ export interface SendspinPlayerConfig {
   onVolumeCommand?: (volume: number, muted: boolean) => void;
 
   /**
+   * Callback when server sends a set_static_delay command.
+   * Called with the new delay in milliseconds (0-5000, protocol convention:
+   * positive = play earlier to compensate for device latency).
+   */
+  onDelayCommand?: (delayMs: number) => void;
+
+  /**
    * Getter for external volume state.
    * Called periodically when reporting state to server if useHardwareVolume is true.
    * Should return current hardware volume (0-100) and muted state.

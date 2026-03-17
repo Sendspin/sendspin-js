@@ -125,6 +125,7 @@ export class SendspinPlayer {
         bufferCapacity: config.bufferCapacity,
         useHardwareVolume: config.useHardwareVolume,
         onVolumeCommand: config.onVolumeCommand,
+        onDelayCommand: config.onDelayCommand,
         getExternalVolume: config.getExternalVolume,
         useOutputLatencyCompensation: config.useOutputLatencyCompensation,
       },
