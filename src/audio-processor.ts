@@ -223,6 +223,7 @@ export class AudioProcessor {
     private outputMode: AudioOutputMode = "direct",
     private audioElement?: HTMLAudioElement,
     private isAndroid: boolean = false,
+    private ownsAudioElement: boolean = false,
     private silentAudioSrc?: string,
     private syncDelayMs: number = 0,
     private useHardwareVolume: boolean = false,
@@ -269,6 +270,25 @@ export class AudioProcessor {
     } catch {
       // Storage may fail depending on the implementation, ignore errors
     }
+  }
+
+  private ensureAudioElement(): HTMLAudioElement | undefined {
+    if (this.outputMode !== "media-element") {
+      return undefined;
+    }
+
+    if (this.audioElement) {
+      return this.audioElement;
+    }
+
+    if (!this.ownsAudioElement) {
+      return undefined;
+    }
+
+    this.audioElement = document.createElement("audio");
+    this.audioElement.style.display = "none";
+    document.body.appendChild(this.audioElement);
+    return this.audioElement;
   }
 
   // Get current correction mode
@@ -1139,6 +1159,8 @@ export class AudioProcessor {
     if (this.audioContext) {
       return; // Already initialized
     }
+
+    this.ensureAudioElement();
 
     // Set audio session to "playback" so audio continues when iOS device is muted
     // (iOS 17+, no-op on other platforms)
@@ -2264,14 +2286,20 @@ export class AudioProcessor {
     this.gainNode = null;
     this.streamDestination = null;
 
-    // Stop and clear the audio element (only for non-Android media-element mode)
-    if (
-      this.outputMode === "media-element" &&
-      this.audioElement &&
-      !this.isAndroid
-    ) {
+    // Always stop and clear the audio element on full disconnect/teardown.
+    if (this.outputMode === "media-element" && this.audioElement) {
       this.audioElement.pause();
       this.audioElement.srcObject = null;
+      this.audioElement.loop = false;
+      this.audioElement.removeAttribute("src");
+      this.audioElement.load();
+
+      if (this.ownsAudioElement) {
+        if (this.audioElement.isConnected) {
+          this.audioElement.remove();
+        }
+        this.audioElement = undefined;
+      }
     }
   }
 
