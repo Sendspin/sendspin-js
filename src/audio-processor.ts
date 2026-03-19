@@ -272,25 +272,6 @@ export class AudioProcessor {
     }
   }
 
-  private ensureAudioElement(): HTMLAudioElement | undefined {
-    if (this.outputMode !== "media-element") {
-      return undefined;
-    }
-
-    if (this.audioElement) {
-      return this.audioElement;
-    }
-
-    if (!this.ownsAudioElement) {
-      return undefined;
-    }
-
-    this.audioElement = document.createElement("audio");
-    this.audioElement.style.display = "none";
-    document.body.appendChild(this.audioElement);
-    return this.audioElement;
-  }
-
   // Get current correction mode
   get correctionMode(): CorrectionMode {
     return this._correctionMode;
@@ -1160,7 +1141,11 @@ export class AudioProcessor {
       return; // Already initialized
     }
 
-    this.ensureAudioElement();
+    if (this.outputMode === "media-element" && this.ownsAudioElement) {
+      this.audioElement = document.createElement("audio");
+      this.audioElement.style.display = "none";
+      document.body.appendChild(this.audioElement);
+    }
 
     // Set audio session to "playback" so audio continues when iOS device is muted
     // (iOS 17+, no-op on other platforms)
@@ -1173,10 +1158,18 @@ export class AudioProcessor {
     this.audioContext = new AudioContext({ sampleRate: streamSampleRate });
     this.gainNode = this.audioContext.createGain();
 
+    const audioElement = this.audioElement;
+
     if (this.outputMode === "direct") {
       // Direct output to audioContext.destination (e.g., Cast receiver)
       this.gainNode.connect(this.audioContext.destination);
-    } else if (this.outputMode === "media-element" && this.audioElement) {
+    } else {
+      if (!audioElement) {
+        throw new Error(
+          "Media-element output requires an audio element to be available during initialization.",
+        );
+      }
+
       if (this.isAndroid && this.silentAudioSrc) {
         // Android MediaSession workaround: Play almost-silent audio file
         // Android browsers don't support MediaSession with MediaStream from Web Audio API
@@ -1185,14 +1178,14 @@ export class AudioProcessor {
         this.gainNode.connect(this.audioContext.destination);
 
         // Use almost-silent audio file to trick Android into showing MediaSession
-        this.audioElement.src = this.silentAudioSrc;
-        this.audioElement.loop = true;
+        audioElement.src = this.silentAudioSrc;
+        audioElement.loop = true;
         // CRITICAL: Do NOT mute - Android requires audible audio for MediaSession
-        this.audioElement.muted = false;
+        audioElement.muted = false;
         // Set volume to 100% (the file itself is almost silent)
-        this.audioElement.volume = 1.0;
+        audioElement.volume = 1.0;
         // Start playing to activate MediaSession
-        this.audioElement.play().catch((e) => {
+        audioElement.play().catch((e) => {
           console.warn("Sendspin: Audio autoplay blocked:", e);
         });
       } else {
@@ -1204,10 +1197,10 @@ export class AudioProcessor {
         // Do NOT connect to audioContext.destination to avoid echo
 
         // Connect to HTML5 audio element for iOS background playback
-        this.audioElement.srcObject = this.streamDestination.stream;
-        this.audioElement.volume = 1.0;
+        audioElement.srcObject = this.streamDestination.stream;
+        audioElement.volume = 1.0;
         // Start playing to activate MediaSession
-        this.audioElement.play().catch((e) => {
+        audioElement.play().catch((e) => {
           console.warn("Sendspin: Audio autoplay blocked:", e);
         });
       }
