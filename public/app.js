@@ -278,7 +278,7 @@ function updateStatusDisplay() {
   // Format info
   const format = player.currentFormat;
   if (format) {
-    formatStatus.textContent = `${format.codec.toUpperCase()} ${format.sampleRate / 1000}kHz ${format.channels}ch`;
+    formatStatus.textContent = `${format.codec.toUpperCase()} ${format.sample_rate / 1000}kHz ${format.channels}ch`;
   }
 
   // Sync info
