@@ -2295,9 +2295,7 @@ export class AudioProcessor {
       this.audioElement.load();
 
       if (this.ownsAudioElement) {
-        if (this.audioElement.isConnected) {
-          this.audioElement.remove();
-        }
+        this.audioElement.remove();
         this.audioElement = undefined;
       }
     }
