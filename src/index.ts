@@ -24,11 +24,43 @@ function detectIsAndroid(): boolean {
 
 function detectIsIOS(): boolean {
   if (typeof navigator === "undefined") return false;
-  return /iPad|iPhone|iPod/.test(navigator.userAgent);
+  return (
+    /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+    (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1)
+  );
 }
 
 function detectIsMobile(): boolean {
   return detectIsAndroid() || detectIsIOS();
+}
+
+function detectIsSafari(): boolean {
+  if (typeof navigator === "undefined") return false;
+  const ua = navigator.userAgent;
+  return /Safari/i.test(ua) && !/Chrome/i.test(ua);
+}
+
+function detectIsMac(): boolean {
+  if (typeof navigator === "undefined") return false;
+  return /Macintosh/i.test(navigator.userAgent);
+}
+
+function detectIsWindows(): boolean {
+  if (typeof navigator === "undefined") return false;
+  return /Windows/i.test(navigator.userAgent);
+}
+
+/**
+ * Get platform-specific default sync delay in milliseconds.
+ * Based on testing across various platforms and browsers.
+ */
+function getDefaultSyncDelay(): number {
+  if (detectIsIOS()) return -250;
+  if (detectIsAndroid()) return -200;
+  if (detectIsMac()) return detectIsSafari() ? -190 : -150;
+  if (detectIsWindows()) return -250;
+  // Linux and others
+  return -200;
 }
 
 function generateRandomId(): string {
@@ -99,7 +131,7 @@ export class SendspinPlayer {
       isAndroid,
       this.ownsAudioElement,
       isAndroid ? SILENT_AUDIO_SRC : undefined,
-      config.syncDelay ?? 0,
+      config.syncDelay ?? getDefaultSyncDelay(),
       config.useHardwareVolume ?? false,
       config.correctionMode ?? "sync",
       storage,
@@ -380,4 +412,4 @@ export * from "./types";
 export { SendspinTimeFilter } from "./time-filter";
 
 // Export platform detection utilities
-export { detectIsAndroid, detectIsIOS, detectIsMobile };
+export { detectIsAndroid, detectIsIOS, detectIsMobile, getDefaultSyncDelay };
