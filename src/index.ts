@@ -76,6 +76,7 @@ export class SendspinPlayer {
 
   private config: SendspinPlayerConfig;
   private wsUrl: string = "";
+  private ownsAudioElement = false;
 
   constructor(config: SendspinPlayerConfig) {
     // Apply defaults for playerId and clientName (share same random ID)
@@ -93,17 +94,13 @@ export class SendspinPlayer {
     // - Otherwise, use direct
     const outputMode =
       config.audioElement || isMobile ? "media-element" : "direct";
+    this.ownsAudioElement =
+      outputMode === "media-element" && !config.audioElement;
 
-    // Auto-create audio element for mobile if not provided and using media-element mode
-    let audioElement = config.audioElement;
-    if (
-      outputMode === "media-element" &&
-      !audioElement &&
-      typeof document !== "undefined"
-    ) {
-      audioElement = document.createElement("audio");
-      audioElement.style.display = "none";
-      document.body.appendChild(audioElement);
+    if (this.ownsAudioElement && typeof document === "undefined") {
+      throw new Error(
+        "SendspinPlayer requires a DOM document to use media-element output without a provided audioElement.",
+      );
     }
 
     // Store config with resolved defaults
@@ -111,7 +108,6 @@ export class SendspinPlayer {
       ...config,
       playerId,
       clientName,
-      audioElement,
     };
 
     // Initialize time filter (shared between audio processor and protocol handler)
@@ -131,8 +127,9 @@ export class SendspinPlayer {
       this.stateManager,
       this.timeFilter,
       outputMode,
-      audioElement,
+      config.audioElement,
       isAndroid,
+      this.ownsAudioElement,
       isAndroid ? SILENT_AUDIO_SRC : undefined,
       config.syncDelay ?? getDefaultSyncDelay(),
       config.useHardwareVolume ?? false,
@@ -229,6 +226,7 @@ export class SendspinPlayer {
     // Reset MediaSession playbackState (if available)
     if (typeof navigator !== "undefined" && navigator.mediaSession) {
       navigator.mediaSession.playbackState = "none";
+      navigator.mediaSession.metadata = null;
     }
   }
 
