@@ -5,13 +5,11 @@
  * to build a synchronized audio player.
  */
 
-// Detect if running on localhost for development
-const isLocalhost =
-  window.location.hostname === "localhost" ||
-  window.location.hostname === "127.0.0.1";
+// Detect if running on dev server (must match port in package.json "dev-server" script)
+const isLocalDev = window.location.port === "6001";
 
 // Import the SDK from local build (development) or unpkg CDN (production)
-const sdkPath = isLocalhost
+const sdkPath = isLocalDev
   ? "./dev/index.js"
   : "https://unpkg.com/@sendspin/sendspin-js@latest/dist/index.js";
 const { SendspinPlayer } = await import(sdkPath);
@@ -736,7 +734,7 @@ function init() {
 
   console.log("Sendspin Sample Player initialized");
   console.log("Player ID:", getPlayerId());
-  if (isLocalhost) {
+  if (isLocalDev) {
     console.log("Development mode: using local SDK build");
   }
 }
