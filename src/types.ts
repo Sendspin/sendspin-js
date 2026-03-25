@@ -306,7 +306,7 @@ export interface SendspinPlayerConfig {
 
   /**
    * Static sync delay in milliseconds.
-   * Positive values delay playback, negative values advance it.
+   * Positive values make playback earlier, negative values delay it.
    * Use this to compensate for device-specific audio latency.
    * Runtime update behavior depends on the active correction mode settings.
    */

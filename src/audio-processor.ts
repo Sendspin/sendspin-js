@@ -1905,7 +1905,7 @@ export class AudioProcessor {
     } = this.getTimingSnapshot();
     this.pruneExpiredScheduledSources(audioContextRawTimeSec);
 
-    // Convert sync delay from ms to seconds (positive = delay, negative = advance)
+    // Convert sync delay from ms to seconds (positive = play earlier)
     const syncDelaySec = this.syncDelayMs / 1000;
 
     const outputLatencySec = this.useOutputLatencyCompensation
@@ -2158,7 +2158,7 @@ export class AudioProcessor {
     return (
       audioContextTime +
       deltaSec +
-      SCHEDULE_HEADROOM_SEC +
+      SCHEDULE_HEADROOM_SEC -
       syncDelaySec -
       outputLatencySec
     );
