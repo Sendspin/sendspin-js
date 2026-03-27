@@ -24,11 +24,43 @@ function detectIsAndroid(): boolean {
 
 function detectIsIOS(): boolean {
   if (typeof navigator === "undefined") return false;
-  return /iPad|iPhone|iPod/.test(navigator.userAgent);
+  return (
+    /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+    (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1)
+  );
 }
 
 function detectIsMobile(): boolean {
   return detectIsAndroid() || detectIsIOS();
+}
+
+function detectIsSafari(): boolean {
+  if (typeof navigator === "undefined") return false;
+  const ua = navigator.userAgent;
+  return /Safari/i.test(ua) && !/Chrome/i.test(ua);
+}
+
+function detectIsMac(): boolean {
+  if (typeof navigator === "undefined") return false;
+  return /Macintosh/i.test(navigator.userAgent);
+}
+
+function detectIsWindows(): boolean {
+  if (typeof navigator === "undefined") return false;
+  return /Windows/i.test(navigator.userAgent);
+}
+
+/**
+ * Get platform-specific default sync delay in milliseconds.
+ * Based on testing across various platforms and browsers.
+ */
+function getDefaultSyncDelay(): number {
+  if (detectIsIOS()) return -250;
+  if (detectIsAndroid()) return -200;
+  if (detectIsMac()) return detectIsSafari() ? -190 : -150;
+  if (detectIsWindows()) return -250;
+  // Linux and others
+  return -200;
 }
 
 function generateRandomId(): string {
@@ -44,6 +76,7 @@ export class SendspinPlayer {
 
   private config: SendspinPlayerConfig;
   private wsUrl: string = "";
+  private ownsAudioElement = false;
 
   constructor(config: SendspinPlayerConfig) {
     // Apply defaults for playerId and clientName (share same random ID)
@@ -61,17 +94,13 @@ export class SendspinPlayer {
     // - Otherwise, use direct
     const outputMode =
       config.audioElement || isMobile ? "media-element" : "direct";
+    this.ownsAudioElement =
+      outputMode === "media-element" && !config.audioElement;
 
-    // Auto-create audio element for mobile if not provided and using media-element mode
-    let audioElement = config.audioElement;
-    if (
-      outputMode === "media-element" &&
-      !audioElement &&
-      typeof document !== "undefined"
-    ) {
-      audioElement = document.createElement("audio");
-      audioElement.style.display = "none";
-      document.body.appendChild(audioElement);
+    if (this.ownsAudioElement && typeof document === "undefined") {
+      throw new Error(
+        "SendspinPlayer requires a DOM document to use media-element output without a provided audioElement.",
+      );
     }
 
     // Store config with resolved defaults
@@ -79,7 +108,6 @@ export class SendspinPlayer {
       ...config,
       playerId,
       clientName,
-      audioElement,
     };
 
     // Initialize time filter (shared between audio processor and protocol handler)
@@ -99,10 +127,11 @@ export class SendspinPlayer {
       this.stateManager,
       this.timeFilter,
       outputMode,
-      audioElement,
+      config.audioElement,
       isAndroid,
+      this.ownsAudioElement,
       isAndroid ? SILENT_AUDIO_SRC : undefined,
-      config.syncDelay ?? 0,
+      config.syncDelay ?? getDefaultSyncDelay(),
       config.useHardwareVolume ?? false,
       config.correctionMode ?? "sync",
       storage,
@@ -198,6 +227,7 @@ export class SendspinPlayer {
     // Reset MediaSession playbackState (if available)
     if (typeof navigator !== "undefined" && navigator.mediaSession) {
       navigator.mediaSession.playbackState = "none";
+      navigator.mediaSession.metadata = null;
     }
   }
 
@@ -384,4 +414,4 @@ export * from "./types";
 export { SendspinTimeFilter } from "./time-filter";
 
 // Export platform detection utilities
-export { detectIsAndroid, detectIsIOS, detectIsMobile };
+export { detectIsAndroid, detectIsIOS, detectIsMobile, getDefaultSyncDelay };
