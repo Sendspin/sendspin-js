@@ -154,6 +154,7 @@ export class SendspinPlayer {
         bufferCapacity: config.bufferCapacity,
         useHardwareVolume: config.useHardwareVolume,
         onVolumeCommand: config.onVolumeCommand,
+        onDelayCommand: config.onDelayCommand,
         getExternalVolume: config.getExternalVolume,
         useOutputLatencyCompensation: config.useOutputLatencyCompensation,
       },
@@ -247,6 +248,7 @@ export class SendspinPlayer {
   // Set sync delay (in milliseconds). Runtime behavior depends on correction mode settings.
   setSyncDelay(delayMs: number): void {
     this.audioProcessor.setSyncDelay(delayMs);
+    this.protocolHandler.sendStateUpdate();
   }
 
   /**
