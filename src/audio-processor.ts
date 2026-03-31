@@ -851,7 +851,6 @@ export class AudioProcessor {
       return;
     }
 
-    const syncDelaySec = this.syncDelayMs / 1000;
     const outputLatencySec = this.useOutputLatencyCompensation
       ? this.getSmoothedOutputLatencyUs() / 1_000_000
       : 0;
@@ -859,7 +858,6 @@ export class AudioProcessor {
       this.lastScheduledServerTime,
       audioContextTime,
       nowUs,
-      syncDelaySec,
       outputLatencySec,
     );
     const syncErrorMs = (this.nextPlaybackTime - targetPlaybackTime) * 1000;
@@ -1923,9 +1921,6 @@ export class AudioProcessor {
     } = this.getTimingSnapshot();
     this.pruneExpiredScheduledSources(audioContextRawTimeSec);
 
-    // Convert sync delay from ms to seconds (positive = play earlier)
-    const syncDelaySec = this.syncDelayMs / 1000;
-
     const outputLatencySec = this.useOutputLatencyCompensation
       ? this.getSmoothedOutputLatencyUs() / 1_000_000
       : 0;
@@ -1966,7 +1961,6 @@ export class AudioProcessor {
         chunk.serverTime,
         audioContextTime,
         nowUs,
-        syncDelaySec,
         outputLatencySec,
       );
 
@@ -2167,7 +2161,6 @@ export class AudioProcessor {
     serverTimeUs: number,
     audioContextTime: number,
     nowUs: number,
-    syncDelaySec: number,
     outputLatencySec: number,
   ): number {
     const chunkClientTimeUs = this.timeFilter.computeClientTime(serverTimeUs);
@@ -2177,7 +2170,6 @@ export class AudioProcessor {
       audioContextTime +
       deltaSec +
       SCHEDULE_HEADROOM_SEC -
-      syncDelaySec -
       outputLatencySec
     );
   }
