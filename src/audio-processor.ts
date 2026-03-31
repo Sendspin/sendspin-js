@@ -158,7 +158,8 @@ export class AudioProcessor {
   }[] = [];
 
   // Seamless playback tracking
-  private nextPlaybackTime: number = 0; // AudioContext time when next chunk should start
+  private nextPlaybackTime: number = 0; // AudioContext time when next chunk should start (non-delayed, for correction)
+  private nextScheduleTime: number = 0; // AudioContext time for source.start() (delayed, for Web Audio)
   private lastScheduledServerTime: number = 0; // Server timestamp of last scheduled chunk end
 
   // Sync tracking (for debugging/display)
@@ -651,6 +652,7 @@ export class AudioProcessor {
       this.scheduledSources.length > 0;
 
     this.nextPlaybackTime = 0;
+    this.nextScheduleTime = 0;
     this.lastScheduledServerTime = 0;
     this.recorrectionMinStartTimeSec = null;
     this.resetRecorrectionCheckState();
@@ -791,6 +793,7 @@ export class AudioProcessor {
       cutResult.keptTailEndTimeSec,
     );
     this.nextPlaybackTime = 0;
+    this.nextScheduleTime = 0;
     this.lastScheduledServerTime = 0;
     this.resetRecorrectionCheckState();
     if (markCooldown) {
