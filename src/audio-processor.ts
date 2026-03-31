@@ -331,7 +331,7 @@ export class AudioProcessor {
   }
 
   private getScheduledAheadSec(currentTimeSec: number): number {
-    let farthestScheduledSec = this.nextPlaybackTime;
+    let farthestScheduledSec = this.nextScheduleTime;
     for (const entry of this.scheduledSources) {
       if (entry.endTime > farthestScheduledSec) {
         farthestScheduledSec = entry.endTime;
