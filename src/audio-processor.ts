@@ -2137,6 +2137,7 @@ export class AudioProcessor {
       if (scheduleTime < audioContextRawTimeSec) {
         // Reset seamless tracking since we dropped a chunk
         this.nextPlaybackTime = 0;
+        this.nextScheduleTime = 0;
         this.lastScheduledServerTime = 0;
         continue;
       }
