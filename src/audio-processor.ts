@@ -1924,6 +1924,7 @@ export class AudioProcessor {
     const outputLatencySec = this.useOutputLatencyCompensation
       ? this.getSmoothedOutputLatencyUs() / 1_000_000
       : 0;
+    const syncDelaySec = this.syncDelayMs / 1000;
     const targetScheduledHorizonSec = this.getTargetScheduledHorizonSec();
     if (
       this._debugLogging &&
@@ -1954,6 +1955,7 @@ export class AudioProcessor {
       const chunk = this.audioBufferQueue.shift()!;
 
       let playbackTime: number;
+      let scheduleTime: number;
       let playbackRate: number;
 
       // Always compute the drift-corrected target time
@@ -1975,6 +1977,11 @@ export class AudioProcessor {
             ? Math.max(targetPlaybackTime, this.recorrectionMinStartTimeSec)
             : targetPlaybackTime;
         this.recorrectionMinStartTimeSec = null;
+        // Apply delay shift for scheduling; clamp to now during transients
+        scheduleTime = Math.max(
+          audioContextRawTimeSec,
+          playbackTime - syncDelaySec,
+        );
         playbackRate = 1.0;
         chunk.buffer = this.copyBuffer(chunk.buffer);
       } else {
@@ -2009,6 +2016,7 @@ export class AudioProcessor {
             // until the filter stabilizes (or timeout elapses)
             this.currentClockPrecision = "imprecise";
             playbackTime = this.nextPlaybackTime;
+            scheduleTime = this.nextScheduleTime;
             playbackRate = 1.0;
             this.currentCorrectionMethod = "none";
             this.lastSamplesAdjusted = 0;
@@ -2023,8 +2031,12 @@ export class AudioProcessor {
               // Tier 4: Hard resync if sync error exceeds threshold
               this.resyncCount++;
               this.resetSyncErrorEma();
-              this.cutScheduledSources(targetPlaybackTime);
+              this.cutScheduledSources(targetPlaybackTime - syncDelaySec);
               playbackTime = targetPlaybackTime;
+              scheduleTime = Math.max(
+                audioContextRawTimeSec,
+                playbackTime - syncDelaySec,
+              );
               playbackRate = 1.0;
               this.currentCorrectionMethod = "resync";
               this.lastSamplesAdjusted = 0;
@@ -2034,6 +2046,7 @@ export class AudioProcessor {
             ) {
               // Tier 1: Within deadband - no correction needed
               playbackTime = this.nextPlaybackTime;
+              scheduleTime = this.nextScheduleTime;
               playbackRate = 1.0;
               this.currentCorrectionMethod = "none";
               this.lastSamplesAdjusted = 0;
@@ -2043,6 +2056,7 @@ export class AudioProcessor {
             ) {
               // Tier 2: Small error - use single sample insertion/deletion
               playbackTime = this.nextPlaybackTime;
+              scheduleTime = this.nextScheduleTime;
               playbackRate = 1.0;
               const samplesToAdjust = correctionErrorMs > 0 ? -1 : 1;
               chunk.buffer = this.adjustBufferSamples(
@@ -2054,6 +2068,7 @@ export class AudioProcessor {
             } else {
               // Tier 3: Medium error - use playback rate adjustment
               playbackTime = this.nextPlaybackTime;
+              scheduleTime = this.nextScheduleTime;
               const absErrorMs = Math.abs(correctionErrorMs);
 
               if (correctionErrorMs > 0) {
@@ -2081,8 +2096,12 @@ export class AudioProcessor {
         } else {
           // Gap detected in server timestamps - hard resync
           this.resyncCount++;
-          this.cutScheduledSources(targetPlaybackTime);
+          this.cutScheduledSources(targetPlaybackTime - syncDelaySec);
           playbackTime = targetPlaybackTime;
+          scheduleTime = Math.max(
+            audioContextRawTimeSec,
+            playbackTime - syncDelaySec,
+          );
           playbackRate = 1.0;
           this.currentCorrectionMethod = "resync";
           this.lastSamplesAdjusted = 0;
@@ -2115,7 +2134,7 @@ export class AudioProcessor {
       this.currentPlaybackRate = playbackRate;
 
       // Drop chunks that arrived too late
-      if (playbackTime < audioContextRawTimeSec) {
+      if (scheduleTime < audioContextRawTimeSec) {
         // Reset seamless tracking since we dropped a chunk
         this.nextPlaybackTime = 0;
         this.lastScheduledServerTime = 0;
@@ -2126,19 +2145,20 @@ export class AudioProcessor {
       source.buffer = chunk.buffer;
       source.playbackRate.value = playbackRate; // Apply rate correction
       source.connect(this.gainNode);
-      source.start(playbackTime);
+      source.start(scheduleTime);
 
       // Track for seamless scheduling of next chunk
       // Account for actual duration with playback rate adjustment
       const actualDuration = chunk.buffer.duration / playbackRate;
       this.nextPlaybackTime = playbackTime + actualDuration;
+      this.nextScheduleTime = scheduleTime + actualDuration;
       this.lastScheduledServerTime =
         chunk.serverTime + chunk.buffer.duration * 1_000_000;
 
       const scheduledEntry = {
         source,
-        startTime: playbackTime,
-        endTime: playbackTime + actualDuration,
+        startTime: scheduleTime,
+        endTime: scheduleTime + actualDuration,
         buffer: chunk.buffer,
         serverTime: chunk.serverTime,
         generation: chunk.generation,
@@ -2167,10 +2187,7 @@ export class AudioProcessor {
     const deltaUs = chunkClientTimeUs - nowUs;
     const deltaSec = deltaUs / 1_000_000;
     return (
-      audioContextTime +
-      deltaSec +
-      SCHEDULE_HEADROOM_SEC -
-      outputLatencySec
+      audioContextTime + deltaSec + SCHEDULE_HEADROOM_SEC - outputLatencySec
     );
   }
 
