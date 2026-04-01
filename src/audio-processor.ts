@@ -182,10 +182,11 @@ export class AudioProcessor {
 
   // Correction mode
   private _correctionMode: CorrectionMode = "sync";
-  private _debugLogging: boolean = false;
-  private _lastLoggedCorrectionMethod: "none" | "samples" | "rate" | "resync" =
-    "none";
-  private _lastLoggedTime: number = 0;
+
+  // Periodic status logging
+  private _lastStatusLogMs: number = 0;
+  private _lastTimestampRejectReason: string | null = null;
+  private _intervalResyncCount: number = 0;
 
   // Native Opus decoder (uses WebCodecs API)
   private webCodecsDecoder: AudioDecoder | null = null;
