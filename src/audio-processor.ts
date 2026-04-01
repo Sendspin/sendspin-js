@@ -778,6 +778,7 @@ export class AudioProcessor {
       this.audioContext.currentTime + RECORRECTION_CUTOVER_GUARD_SEC;
     if (incrementResyncCount) {
       this.resyncCount++;
+      this._intervalResyncCount++;
     }
     this.resetSyncErrorEma();
     this.currentCorrectionMethod = "resync";
@@ -2023,6 +2024,7 @@ export class AudioProcessor {
             if (Math.abs(correctionErrorMs) > thresholds.resyncAboveMs) {
               // Tier 4: Hard resync if sync error exceeds threshold
               this.resyncCount++;
+              this._intervalResyncCount++;
               this.resetSyncErrorEma();
               this.cutScheduledSources(targetPlaybackTime);
               playbackTime = targetPlaybackTime;
@@ -2082,6 +2084,7 @@ export class AudioProcessor {
         } else {
           // Gap detected in server timestamps - hard resync
           this.resyncCount++;
+          this._intervalResyncCount++;
           this.cutScheduledSources(targetPlaybackTime);
           playbackTime = targetPlaybackTime;
           playbackRate = 1.0;
