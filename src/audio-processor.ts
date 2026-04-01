@@ -932,6 +932,7 @@ export class AudioProcessor {
         ` clock=${clock}` +
         ` tf=${tf}` +
         ` lat=${latMs}ms` +
+        ` mode=${this._correctionMode}` +
         ` prec=${this.currentClockPrecision}` +
         ` ctx=${this.audioContext?.state ?? "null"}` +
         ` gen=${this.stateManager.streamGeneration}`,
@@ -1408,12 +1409,18 @@ export class AudioProcessor {
       const metadata = this.nativeDecoderQueue.shift();
 
       if (!metadata) {
+        console.warn(
+          `[NativeOpus] Dropping frame with empty decode queue (out ts=${outputTimestampUs})`,
+        );
         audioData.close();
         return;
       }
 
       const { serverTimeUs, generation } = metadata;
       if (generation !== this.stateManager.streamGeneration) {
+        console.warn(
+          `[NativeOpus] Dropping old-stream frame (ts=${serverTimeUs}, gen=${generation} != current=${this.stateManager.streamGeneration})`,
+        );
         audioData.close();
         return;
       }
