@@ -978,6 +978,67 @@ export class AudioProcessor {
     };
   }
 
+  private emitStatusLog(nowMs: number): void {
+    if (nowMs - this._lastStatusLogMs < 10_000) {
+      return;
+    }
+    this._lastStatusLogMs = nowMs;
+
+    // corr field
+    let corr: string;
+    switch (this.currentCorrectionMethod) {
+      case "rate":
+        corr = `rate@${this.currentPlaybackRate}`;
+        break;
+      case "samples":
+        corr = `samples:${this.lastSamplesAdjusted}`;
+        break;
+      default:
+        corr = this.currentCorrectionMethod;
+    }
+
+    // q field
+    const queueDepth = this.audioBufferQueue.length + this.scheduledSources.length;
+    const aheadSec = this.audioContext
+      ? this.getScheduledAheadSec(this.audioContext.currentTime)
+      : 0;
+
+    // clock field
+    let clock: string;
+    if (this.activeAudioClockSource === "timestamp") {
+      clock = `timestamp(good:${this.outputTimestampGoodSamples})`;
+    } else if (this._lastTimestampRejectReason) {
+      clock = `estimated(reject:"${this._lastTimestampRejectReason}")`;
+    } else {
+      clock = "estimated";
+    }
+
+    // tf field
+    const tf = this.timeFilter.is_synchronized
+      ? `synced(err=${(this.timeFilter.error / 1000).toFixed(1)}ms,drift=${this.timeFilter.drift.toFixed(3)},n=${this.timeFilter.count})`
+      : `pending(n=${this.timeFilter.count})`;
+
+    // lat field
+    const latMs = this.smoothedOutputLatencyUs !== null
+      ? Math.round(this.smoothedOutputLatencyUs / 1000)
+      : 0;
+
+    console.log(
+      `Sendspin: sync=${this.smoothedSyncErrorMs >= 0 ? "+" : ""}${this.smoothedSyncErrorMs.toFixed(1)}ms` +
+        ` corr=${corr}` +
+        ` q=${queueDepth}/${aheadSec.toFixed(1)}s` +
+        ` resyncs=${this._intervalResyncCount}` +
+        ` clock=${clock}` +
+        ` tf=${tf}` +
+        ` lat=${latMs}ms` +
+        ` prec=${this.currentClockPrecision}` +
+        ` ctx=${this.audioContext?.state ?? "null"}` +
+        ` gen=${this.stateManager.streamGeneration}`,
+    );
+
+    this._intervalResyncCount = 0;
+  }
+
   private applySyncErrorEma(inputMs: number): number {
     this.currentSyncErrorMs = inputMs;
     this.smoothedSyncErrorMs =
@@ -1915,6 +1976,7 @@ export class AudioProcessor {
     const {
       audioContextTimeSec: audioContextTime,
       audioContextRawTimeSec,
+      nowMs,
       nowUs,
     } = this.getTimingSnapshot();
     this.pruneExpiredScheduledSources(audioContextRawTimeSec);
@@ -2159,6 +2221,7 @@ export class AudioProcessor {
         }
       };
     }
+    this.emitStatusLog(nowMs);
   }
 
   private computeTargetPlaybackTime(
