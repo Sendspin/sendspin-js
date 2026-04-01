@@ -329,6 +329,7 @@ export class AudioProcessor {
     this.activeAudioClockSource = "estimated";
     this.outputTimestampLastSample = null;
     this.outputTimestampGoodSamples = 0;
+    this._lastTimestampRejectReason = null;
     this.outputTimestampBadSamples = 0;
     this.outputTimestampGoodSinceMs = null;
   }
@@ -614,6 +615,8 @@ export class AudioProcessor {
     this.lastSamplesAdjusted = 0;
     this.playbackStartedAt = null;
     this.currentClockPrecision = "imprecise";
+    this._lastStatusLogMs = 0;
+    this._intervalResyncCount = 0;
   }
 
   private pruneExpiredScheduledSources(currentTimeSec: number): void {
@@ -878,7 +881,7 @@ export class AudioProcessor {
   }
 
   private emitStatusLog(nowMs: number): void {
-    if (nowMs - this._lastStatusLogMs < 10_000) {
+    if (this._lastStatusLogMs !== 0 && nowMs - this._lastStatusLogMs < 10_000) {
       return;
     }
     this._lastStatusLogMs = nowMs;
