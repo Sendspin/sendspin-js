@@ -274,9 +274,7 @@ export class AudioProcessor {
 
   // Set correction mode at runtime
   setCorrectionMode(mode: CorrectionMode): void {
-    const oldMode = this._correctionMode;
     this._correctionMode = mode;
-    const thresholds = CORRECTION_THRESHOLDS[mode];
     if (!this.modeUsesRecorrectionMonitor(mode)) {
       this.stopRecorrectionMonitor();
     } else {
