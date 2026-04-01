@@ -51,16 +51,16 @@ function detectIsWindows(): boolean {
 }
 
 /**
- * Get platform-specific default sync delay in milliseconds.
+ * Get platform-specific default static delay in milliseconds.
  * Based on testing across various platforms and browsers.
  */
 function getDefaultSyncDelay(): number {
-  if (detectIsIOS()) return -250;
-  if (detectIsAndroid()) return -200;
-  if (detectIsMac()) return detectIsSafari() ? -190 : -150;
-  if (detectIsWindows()) return -250;
+  if (detectIsIOS()) return 250;
+  if (detectIsAndroid()) return 200;
+  if (detectIsMac()) return detectIsSafari() ? 190 : 150;
+  if (detectIsWindows()) return 250;
   // Linux and others
-  return -200;
+  return 200;
 }
 
 function generateRandomId(): string {
@@ -245,7 +245,7 @@ export class SendspinPlayer {
     this.protocolHandler.sendStateUpdate();
   }
 
-  // Set sync delay (in milliseconds). Runtime behavior depends on correction mode settings.
+  // Set static delay (in milliseconds, 0-5000). Positive values schedule playback earlier.
   setSyncDelay(delayMs: number): void {
     this.audioProcessor.setSyncDelay(delayMs);
     this.protocolHandler.sendStateUpdate();

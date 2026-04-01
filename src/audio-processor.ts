@@ -158,7 +158,7 @@ export class AudioProcessor {
   }[] = [];
 
   // Seamless playback tracking
-  private nextPlaybackTime: number = 0; // AudioContext time when next chunk should start (non-delayed, for correction)
+  private nextPlaybackTime: number = 0; // AudioContext time when audio should reach the output
   private nextScheduleTime: number = 0; // AudioContext time for source.start() (delayed, for Web Audio)
   private lastScheduledServerTime: number = 0; // Server timestamp of last scheduled chunk end
 
@@ -207,7 +207,7 @@ export class AudioProcessor {
   private recorrectionInterval: ReturnType<typeof setInterval> | null = null;
   private recorrectionBreachStartedAtMs: number | null = null;
   private lastRecorrectionAtMs: number = -Infinity;
-  private recorrectionMinStartTimeSec: number | null = null;
+  private recorrectionMinScheduleTimeSec: number | null = null;
   private recorrectionPrevRawSyncErrorMs: number | null = null;
   private recorrectionPendingJumpSign: number | null = null;
   private recorrectionPendingJumpAtMs: number | null = null;
@@ -234,9 +234,17 @@ export class AudioProcessor {
   ) {
     this._correctionMode = correctionMode;
     this.useOutputLatencyCompensation = useOutputLatencyCompensation;
+    this.syncDelayMs = this.sanitizeSyncDelayMs(this.syncDelayMs);
 
     // Load persisted output latency from storage
     this.loadPersistedLatency();
+  }
+
+  private sanitizeSyncDelayMs(delayMs: number): number {
+    if (!isFinite(delayMs)) {
+      return 0;
+    }
+    return Math.max(0, Math.min(5000, Math.round(delayMs)));
   }
 
   // Load persisted output latency from storage
@@ -654,7 +662,7 @@ export class AudioProcessor {
     this.nextPlaybackTime = 0;
     this.nextScheduleTime = 0;
     this.lastScheduledServerTime = 0;
-    this.recorrectionMinStartTimeSec = null;
+    this.recorrectionMinScheduleTimeSec = null;
     this.resetRecorrectionCheckState();
     this.resetSyncErrorEma();
     this.currentSyncErrorMs = 0;
@@ -788,7 +796,7 @@ export class AudioProcessor {
     this.lastSamplesAdjusted = 0;
     this.currentPlaybackRate = 1.0;
     const cutResult = this.cutScheduledSources(cutoffTime);
-    this.recorrectionMinStartTimeSec = Math.max(
+    this.recorrectionMinScheduleTimeSec = Math.max(
       cutoffTime,
       cutResult.keptTailEndTimeSec,
     );
@@ -809,7 +817,7 @@ export class AudioProcessor {
         `Sendspin: [sync] ${label} at t+${(
           RECORRECTION_CUTOVER_GUARD_SEC * 1000
         ).toFixed(0)}ms ` +
-          `| minStart=${(this.recorrectionMinStartTimeSec - this.audioContext.currentTime).toFixed(3)}s ` +
+          `| minStart=${(this.recorrectionMinScheduleTimeSec - this.audioContext.currentTime).toFixed(3)}s ` +
           `| requeued=${cutResult.requeuedCount} cut=${cutResult.cutCount} queue=${this.audioBufferQueue.length} scheduled=${this.scheduledSources.length}`,
       );
     }
@@ -917,9 +925,10 @@ export class AudioProcessor {
 
   // Update sync delay at runtime
   setSyncDelay(delayMs: number): void {
+    const sanitizedDelayMs = this.sanitizeSyncDelayMs(delayMs);
     const oldDelayMs = this.syncDelayMs;
-    const deltaMs = delayMs - oldDelayMs;
-    this.syncDelayMs = delayMs;
+    const deltaMs = sanitizedDelayMs - oldDelayMs;
+    this.syncDelayMs = sanitizedDelayMs;
 
     if (this._debugLogging) {
       const scheduledAheadSec =
@@ -927,7 +936,7 @@ export class AudioProcessor {
           ? this.getScheduledAheadSec(this.audioContext.currentTime)
           : 0;
       console.log(
-        `Sendspin: Sync delay changed ${oldDelayMs}ms -> ${delayMs}ms (delta=${deltaMs}ms) ` +
+        `Sendspin: Sync delay changed ${oldDelayMs}ms -> ${sanitizedDelayMs}ms (delta=${deltaMs}ms) ` +
           `| scheduledAhead=${scheduledAheadSec.toFixed(3)}s queue=${this.audioBufferQueue.length} scheduled=${this.scheduledSources.length}`,
       );
     }
@@ -1972,16 +1981,16 @@ export class AudioProcessor {
         if (this.playbackStartedAt === null) {
           this.playbackStartedAt = performance.now();
         }
-        playbackTime =
-          this.recorrectionMinStartTimeSec !== null
-            ? Math.max(targetPlaybackTime, this.recorrectionMinStartTimeSec)
-            : targetPlaybackTime;
-        this.recorrectionMinStartTimeSec = null;
-        // Apply delay shift for scheduling; clamp to now during transients
-        scheduleTime = Math.max(
-          audioContextRawTimeSec,
-          playbackTime - syncDelaySec,
-        );
+        playbackTime = targetPlaybackTime;
+        scheduleTime = playbackTime - syncDelaySec;
+        if (this.recorrectionMinScheduleTimeSec !== null) {
+          scheduleTime = Math.max(
+            scheduleTime,
+            this.recorrectionMinScheduleTimeSec,
+          );
+          playbackTime = scheduleTime + syncDelaySec;
+        }
+        this.recorrectionMinScheduleTimeSec = null;
         playbackRate = 1.0;
         chunk.buffer = this.copyBuffer(chunk.buffer);
       } else {
@@ -2033,10 +2042,7 @@ export class AudioProcessor {
               this.resetSyncErrorEma();
               this.cutScheduledSources(targetPlaybackTime - syncDelaySec);
               playbackTime = targetPlaybackTime;
-              scheduleTime = Math.max(
-                audioContextRawTimeSec,
-                playbackTime - syncDelaySec,
-              );
+              scheduleTime = playbackTime - syncDelaySec;
               playbackRate = 1.0;
               this.currentCorrectionMethod = "resync";
               this.lastSamplesAdjusted = 0;
@@ -2098,10 +2104,7 @@ export class AudioProcessor {
           this.resyncCount++;
           this.cutScheduledSources(targetPlaybackTime - syncDelaySec);
           playbackTime = targetPlaybackTime;
-          scheduleTime = Math.max(
-            audioContextRawTimeSec,
-            playbackTime - syncDelaySec,
-          );
+          scheduleTime = playbackTime - syncDelaySec;
           playbackRate = 1.0;
           this.currentCorrectionMethod = "resync";
           this.lastSamplesAdjusted = 0;

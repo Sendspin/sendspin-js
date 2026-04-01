@@ -306,10 +306,10 @@ export interface SendspinPlayerConfig {
 
   /**
    * Static sync delay in milliseconds.
-   * Positive values make playback earlier, negative values delay it.
-   * Use this to compensate for device-specific audio latency.
+   * Positive values make playback earlier to compensate for downstream device latency.
+   * Allowed range: 0-5000.
    * Runtime update behavior depends on the active correction mode settings.
-   * Defaults to a platform-specific value if not provided (see `getDefaultSyncDelay()`).
+   * Defaults to a browser/platform-specific heuristic value if not provided.
    */
   syncDelay?: number;
 
@@ -368,8 +368,7 @@ export interface SendspinPlayerConfig {
 
   /**
    * Callback when server sends a set_static_delay command.
-   * Called with the new delay in milliseconds (0-5000, protocol convention:
-   * positive = play earlier to compensate for device latency).
+   * Called with the new static delay in milliseconds (0-5000).
    */
   onDelayCommand?: (delayMs: number) => void;
 
