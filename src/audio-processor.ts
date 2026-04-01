@@ -369,13 +369,8 @@ export class AudioProcessor {
   }
 
   private demoteOutputTimestampValidation(reason: string): void {
-    const previousSource = this.activeAudioClockSource;
     this.resetOutputTimestampValidation();
-    if (previousSource !== "estimated" && this._debugLogging) {
-      console.log(
-        `Sendspin: Audio clock source ${previousSource} -> estimated (${reason})`,
-      );
-    }
+    this._lastTimestampRejectReason = reason;
   }
 
   private getEstimatedAudioContextTimeSec(
@@ -429,6 +424,7 @@ export class AudioProcessor {
     this.outputTimestampLastSample = null;
     this.outputTimestampGoodSamples = 0;
     this.outputTimestampGoodSinceMs = null;
+    this._lastTimestampRejectReason = reason;
 
     if (this.activeAudioClockSource !== "timestamp") {
       this.outputTimestampBadSamples = 0;
@@ -587,6 +583,7 @@ export class AudioProcessor {
           "timestamp",
           `validated ${this.outputTimestampGoodSamples} samples over ${(nowMs - this.outputTimestampGoodSinceMs).toFixed(0)}ms`,
         );
+        this._lastTimestampRejectReason = null;
       }
 
       return predictedAudioTimeSec;
