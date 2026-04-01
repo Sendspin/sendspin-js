@@ -2136,8 +2136,9 @@ export class AudioProcessor {
       // Track current rate for debugging
       this.currentPlaybackRate = playbackRate;
 
-      // Drop chunks that arrived too late
-      if (scheduleTime < audioContextRawTimeSec) {
+      // Drop only if we already missed the logical playback time. Missing the
+      // early-start window just means we apply less sync delay for this chunk.
+      if (playbackTime < audioContextRawTimeSec) {
         // Reset seamless tracking since we dropped a chunk
         this.nextPlaybackTime = 0;
         this.nextScheduleTime = 0;
@@ -2145,24 +2146,29 @@ export class AudioProcessor {
         continue;
       }
 
+      const effectiveScheduleTime = Math.max(
+        scheduleTime,
+        audioContextRawTimeSec,
+      );
+
       const source = this.audioContext.createBufferSource();
       source.buffer = chunk.buffer;
       source.playbackRate.value = playbackRate; // Apply rate correction
       source.connect(this.gainNode);
-      source.start(scheduleTime);
+      source.start(effectiveScheduleTime);
 
       // Track for seamless scheduling of next chunk
       // Account for actual duration with playback rate adjustment
       const actualDuration = chunk.buffer.duration / playbackRate;
       this.nextPlaybackTime = playbackTime + actualDuration;
-      this.nextScheduleTime = scheduleTime + actualDuration;
+      this.nextScheduleTime = effectiveScheduleTime + actualDuration;
       this.lastScheduledServerTime =
         chunk.serverTime + chunk.buffer.duration * 1_000_000;
 
       const scheduledEntry = {
         source,
-        startTime: scheduleTime,
-        endTime: scheduleTime + actualDuration,
+        startTime: effectiveScheduleTime,
+        endTime: effectiveScheduleTime + actualDuration,
         buffer: chunk.buffer,
         serverTime: chunk.serverTime,
         generation: chunk.generation,
