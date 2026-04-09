@@ -183,10 +183,11 @@ export class AudioProcessor {
 
   // Correction mode
   private _correctionMode: CorrectionMode = "sync";
-  private _debugLogging: boolean = false;
-  private _lastLoggedCorrectionMethod: "none" | "samples" | "rate" | "resync" =
-    "none";
-  private _lastLoggedTime: number = 0;
+
+  // Periodic status logging
+  private _lastStatusLogMs: number = 0;
+  private _lastTimestampRejectReason: string | null = null;
+  private _intervalResyncCount: number = 0;
 
   // Native Opus decoder (uses WebCodecs API)
   private webCodecsDecoder: AudioDecoder | null = null;
@@ -211,7 +212,6 @@ export class AudioProcessor {
   private recorrectionPrevRawSyncErrorMs: number | null = null;
   private recorrectionPendingJumpSign: number | null = null;
   private recorrectionPendingJumpAtMs: number | null = null;
-  private lastLoggedHorizonSec: number | null = null;
   private activeAudioClockSource: AudioClockSource = "estimated";
   private outputTimestampLastSample: OutputTimestampSample | null = null;
   private outputTimestampGoodSamples: number = 0;
@@ -256,11 +256,6 @@ export class AudioProcessor {
         const latency = parseFloat(stored);
         if (!isNaN(latency) && latency >= 0) {
           this.smoothedOutputLatencyUs = latency;
-          if (this._debugLogging) {
-            console.log(
-              `Sendspin: Loaded persisted output latency: ${(latency / 1000).toFixed(1)}ms`,
-            );
-          }
         }
       }
     } catch {
@@ -288,31 +283,12 @@ export class AudioProcessor {
 
   // Set correction mode at runtime
   setCorrectionMode(mode: CorrectionMode): void {
-    const oldMode = this._correctionMode;
     this._correctionMode = mode;
-    const thresholds = CORRECTION_THRESHOLDS[mode];
     if (!this.modeUsesRecorrectionMonitor(mode)) {
       this.stopRecorrectionMonitor();
     } else {
       this.startRecorrectionMonitor();
     }
-    if (this._debugLogging) {
-      console.log(
-        `Sendspin: Correction mode changed: '${oldMode}' -> '${mode}' ` +
-          `(resyncAboveMs=${thresholds.resyncAboveMs}ms, rate2AboveMs=${thresholds.rate2AboveMs}ms, rate1AboveMs=${thresholds.rate1AboveMs}ms, ` +
-          `samplesBelowMs=${thresholds.samplesBelowMs}ms, deadbandBelowMs=${thresholds.deadbandBelowMs}ms)`,
-      );
-    }
-  }
-
-  // Enable/disable debug logging for sync corrections
-  setDebugLogging(enabled: boolean): void {
-    this._debugLogging = enabled;
-  }
-
-  // Get debug logging state
-  get debugLogging(): boolean {
-    return this._debugLogging;
   }
 
   private modeUsesRecorrectionMonitor(mode: CorrectionMode): boolean {
@@ -351,39 +327,25 @@ export class AudioProcessor {
     return Math.max(0, farthestScheduledSec - currentTimeSec);
   }
 
-  private setActiveAudioClockSource(
-    source: AudioClockSource,
-    reason: string,
-  ): void {
+  private setActiveAudioClockSource(source: AudioClockSource): void {
     if (this.activeAudioClockSource === source) {
       return;
     }
-
-    const previousSource = this.activeAudioClockSource;
     this.activeAudioClockSource = source;
-    if (this._debugLogging) {
-      console.log(
-        `Sendspin: Audio clock source ${previousSource} -> ${source} (${reason})`,
-      );
-    }
   }
 
   private resetOutputTimestampValidation(): void {
     this.activeAudioClockSource = "estimated";
     this.outputTimestampLastSample = null;
     this.outputTimestampGoodSamples = 0;
+    this._lastTimestampRejectReason = null;
     this.outputTimestampBadSamples = 0;
     this.outputTimestampGoodSinceMs = null;
   }
 
   private demoteOutputTimestampValidation(reason: string): void {
-    const previousSource = this.activeAudioClockSource;
     this.resetOutputTimestampValidation();
-    if (previousSource !== "estimated" && this._debugLogging) {
-      console.log(
-        `Sendspin: Audio clock source ${previousSource} -> estimated (${reason})`,
-      );
-    }
+    this._lastTimestampRejectReason = reason;
   }
 
   private getEstimatedAudioContextTimeSec(
@@ -437,6 +399,7 @@ export class AudioProcessor {
     this.outputTimestampLastSample = null;
     this.outputTimestampGoodSamples = 0;
     this.outputTimestampGoodSinceMs = null;
+    this._lastTimestampRejectReason = reason;
 
     if (this.activeAudioClockSource !== "timestamp") {
       this.outputTimestampBadSamples = 0;
@@ -591,10 +554,8 @@ export class AudioProcessor {
         nowMs - this.outputTimestampGoodSinceMs >=
           OUTPUT_TIMESTAMP_PROMOTION_MIN_SPAN_MS
       ) {
-        this.setActiveAudioClockSource(
-          "timestamp",
-          `validated ${this.outputTimestampGoodSamples} samples over ${(nowMs - this.outputTimestampGoodSinceMs).toFixed(0)}ms`,
-        );
+        this.setActiveAudioClockSource("timestamp");
+        this._lastTimestampRejectReason = null;
       }
 
       return predictedAudioTimeSec;
@@ -651,14 +612,7 @@ export class AudioProcessor {
     };
   }
 
-  private resetScheduledPlaybackState(reason?: string): void {
-    const hadScheduledState =
-      this.nextPlaybackTime !== 0 ||
-      this.lastScheduledServerTime !== 0 ||
-      this.currentSyncErrorMs !== 0 ||
-      this.currentCorrectionMethod !== "none" ||
-      this.scheduledSources.length > 0;
-
+  private resetScheduledPlaybackState(_reason?: string): void {
     this.nextPlaybackTime = 0;
     this.nextScheduleTime = 0;
     this.lastScheduledServerTime = 0;
@@ -671,26 +625,18 @@ export class AudioProcessor {
     this.lastSamplesAdjusted = 0;
     this.playbackStartedAt = null;
     this.currentClockPrecision = "imprecise";
-
-    if (reason && hadScheduledState && this._debugLogging) {
-      console.log(`Sendspin: Reset scheduled playback state (${reason})`);
-    }
+    this._lastStatusLogMs = 0;
+    this._intervalResyncCount = 0;
   }
 
   private pruneExpiredScheduledSources(currentTimeSec: number): void {
-    const before = this.scheduledSources.length;
-    if (before === 0) {
+    if (this.scheduledSources.length === 0) {
       return;
     }
 
     this.scheduledSources = this.scheduledSources.filter(
       (entry) => entry.endTime > currentTimeSec,
     );
-
-    const pruned = before - this.scheduledSources.length;
-    if (pruned > 0 && this._debugLogging) {
-      console.log(`Sendspin: Pruned ${pruned} expired scheduled chunk(s)`);
-    }
 
     if (this.scheduledSources.length === 0) {
       this.resetScheduledPlaybackState("no scheduled audio ahead");
@@ -700,9 +646,6 @@ export class AudioProcessor {
   private startRecorrectionMonitor(): void {
     if (this.recorrectionInterval !== null) {
       return;
-    }
-    if (this._debugLogging) {
-      console.log("Sendspin: [sync] Recorrection monitor started (250ms)");
     }
     this.recorrectionInterval = globalThis.setInterval(
       () => this.checkRecorrection(),
@@ -714,9 +657,6 @@ export class AudioProcessor {
     if (this.recorrectionInterval !== null) {
       clearInterval(this.recorrectionInterval);
       this.recorrectionInterval = null;
-      if (this._debugLogging) {
-        console.log("Sendspin: [sync] Recorrection monitor stopped");
-      }
     }
     this.resetRecorrectionCheckState();
     this.lastRecorrectionAtMs = -Infinity;
@@ -790,6 +730,7 @@ export class AudioProcessor {
       this.audioContext.currentTime + RECORRECTION_CUTOVER_GUARD_SEC;
     if (incrementResyncCount) {
       this.resyncCount++;
+      this._intervalResyncCount++;
     }
     this.resetSyncErrorEma();
     this.currentCorrectionMethod = "resync";
@@ -806,20 +747,6 @@ export class AudioProcessor {
     this.resetRecorrectionCheckState();
     if (markCooldown) {
       this.lastRecorrectionAtMs = nowMs;
-    }
-
-    if (this._debugLogging) {
-      const label =
-        reason === "recorrection"
-          ? "Recorrection cutover"
-          : "Delay-change cutover";
-      console.log(
-        `Sendspin: [sync] ${label} at t+${(
-          RECORRECTION_CUTOVER_GUARD_SEC * 1000
-        ).toFixed(0)}ms ` +
-          `| minStart=${(this.recorrectionMinScheduleTimeSec - this.audioContext.currentTime).toFixed(3)}s ` +
-          `| requeued=${cutResult.requeuedCount} cut=${cutResult.cutCount} queue=${this.audioBufferQueue.length} scheduled=${this.scheduledSources.length}`,
-      );
     }
 
     this.processAudioQueue();
@@ -881,20 +808,10 @@ export class AudioProcessor {
     }
     if (isTransientJump) {
       this.clearRecorrectionBreachState();
-      if (this._debugLogging) {
-        console.log(
-          `Sendspin: [sync] Recorrection transient jump ignored: rawError=${syncErrorMs.toFixed(1)}ms`,
-        );
-      }
       return;
     }
     if (this.recorrectionBreachStartedAtMs === null) {
       this.recorrectionBreachStartedAtMs = nowMs;
-      if (this._debugLogging) {
-        console.log(
-          `Sendspin: [sync] Recorrection breach started: error=${absErrorMs.toFixed(1)}ms`,
-        );
-      }
       return;
     }
     if (nowMs - this.recorrectionBreachStartedAtMs < RECORRECTION_SUSTAIN_MS) {
@@ -904,11 +821,6 @@ export class AudioProcessor {
       return;
     }
 
-    if (this._debugLogging) {
-      console.log(
-        `Sendspin: [sync] Recorrection trigger: error=${absErrorMs.toFixed(1)}ms sustained=${(nowMs - this.recorrectionBreachStartedAtMs).toFixed(0)}ms scheduledAhead=${scheduledAheadSec.toFixed(3)}s`,
-      );
-    }
     this.applyRecorrectionCutover();
   }
 
@@ -929,17 +841,6 @@ export class AudioProcessor {
     const oldDelayMs = this.syncDelayMs;
     const deltaMs = sanitizedDelayMs - oldDelayMs;
     this.syncDelayMs = sanitizedDelayMs;
-
-    if (this._debugLogging) {
-      const scheduledAheadSec =
-        this.audioContext && this.audioContext.state === "running"
-          ? this.getScheduledAheadSec(this.audioContext.currentTime)
-          : 0;
-      console.log(
-        `Sendspin: Sync delay changed ${oldDelayMs}ms -> ${sanitizedDelayMs}ms (delta=${deltaMs}ms) ` +
-          `| scheduledAhead=${scheduledAheadSec.toFixed(3)}s queue=${this.audioBufferQueue.length} scheduled=${this.scheduledSources.length}`,
-      );
-    }
 
     if (deltaMs === 0 || !this.usesImmediateDelayCutover) {
       return;
@@ -987,6 +888,70 @@ export class AudioProcessor {
       correctionMode: this._correctionMode,
       clockPrecision: this.currentClockPrecision,
     };
+  }
+
+  private emitStatusLog(nowMs: number): void {
+    if (this._lastStatusLogMs !== 0 && nowMs - this._lastStatusLogMs < 10_000) {
+      return;
+    }
+    this._lastStatusLogMs = nowMs;
+
+    // corr field
+    let corr: string;
+    switch (this.currentCorrectionMethod) {
+      case "rate":
+        corr = `rate@${this.currentPlaybackRate}`;
+        break;
+      case "samples":
+        corr = `samples:${this.lastSamplesAdjusted}`;
+        break;
+      default:
+        corr = this.currentCorrectionMethod;
+    }
+
+    // q field
+    const queueDepth =
+      this.audioBufferQueue.length + this.scheduledSources.length;
+    const aheadSec = this.audioContext
+      ? this.getScheduledAheadSec(this.audioContext.currentTime)
+      : 0;
+
+    // clock field
+    let clock: string;
+    if (this.activeAudioClockSource === "timestamp") {
+      clock = `timestamp(good:${this.outputTimestampGoodSamples})`;
+    } else if (this._lastTimestampRejectReason) {
+      clock = `estimated(reject:"${this._lastTimestampRejectReason}")`;
+    } else {
+      clock = "estimated";
+    }
+
+    // tf field
+    const tf = this.timeFilter.is_synchronized
+      ? `synced(err=${(this.timeFilter.error / 1000).toFixed(1)}ms,drift=${this.timeFilter.drift.toFixed(3)},n=${this.timeFilter.count})`
+      : `pending(n=${this.timeFilter.count})`;
+
+    // lat field
+    const latMs =
+      this.smoothedOutputLatencyUs !== null
+        ? Math.round(this.smoothedOutputLatencyUs / 1000)
+        : 0;
+
+    console.log(
+      `Sendspin: sync=${this.smoothedSyncErrorMs >= 0 ? "+" : ""}${this.smoothedSyncErrorMs.toFixed(1)}ms` +
+        ` corr=${corr}` +
+        ` q=${queueDepth}/${aheadSec.toFixed(1)}s` +
+        ` resyncs=${this._intervalResyncCount}` +
+        ` clock=${clock}` +
+        ` tf=${tf}` +
+        ` lat=${latMs}ms` +
+        ` mode=${this._correctionMode}` +
+        ` prec=${this.currentClockPrecision}` +
+        ` ctx=${this.audioContext?.state ?? "null"}` +
+        ` gen=${this.stateManager.streamGeneration}`,
+    );
+
+    this._intervalResyncCount = 0;
   }
 
   private applySyncErrorEma(inputMs: number): number {
@@ -1037,11 +1002,6 @@ export class AudioProcessor {
     ) {
       this.persistLatency();
       this.lastLatencyPersistAtMs = nowMs;
-      if (this._debugLogging) {
-        console.debug(
-          `Sendspin: Persisted smoothed output latency: ${this.smoothedOutputLatencyUs} µs`,
-        );
-      }
     }
 
     return this.smoothedOutputLatencyUs;
@@ -1283,11 +1243,6 @@ export class AudioProcessor {
       cutCount++;
       return false;
     });
-    if (this._debugLogging && requeued > 0) {
-      console.log(
-        `Sendspin: Requeued ${requeued} future chunk(s) after cutover`,
-      );
-    }
     return {
       requeuedCount: requeued,
       cutCount,
@@ -1467,22 +1422,18 @@ export class AudioProcessor {
       const metadata = this.nativeDecoderQueue.shift();
 
       if (!metadata) {
-        if (this._debugLogging) {
-          console.debug(
-            `[NativeOpus] Dropping frame with empty decode queue (out ts=${outputTimestampUs})`,
-          );
-        }
+        console.warn(
+          `[NativeOpus] Dropping frame with empty decode queue (out ts=${outputTimestampUs})`,
+        );
         audioData.close();
         return;
       }
 
       const { serverTimeUs, generation } = metadata;
       if (generation !== this.stateManager.streamGeneration) {
-        if (this._debugLogging) {
-          console.debug(
-            `[NativeOpus] Dropping old-stream frame (ts=${serverTimeUs}, gen=${generation} != current=${this.stateManager.streamGeneration})`,
-          );
-        }
+        console.warn(
+          `[NativeOpus] Dropping old-stream frame (ts=${serverTimeUs}, gen=${generation} != current=${this.stateManager.streamGeneration})`,
+        );
         audioData.close();
         return;
       }
@@ -1926,6 +1877,7 @@ export class AudioProcessor {
     const {
       audioContextTimeSec: audioContextTime,
       audioContextRawTimeSec,
+      nowMs,
       nowUs,
     } = this.getTimingSnapshot();
     this.pruneExpiredScheduledSources(audioContextRawTimeSec);
@@ -1935,15 +1887,6 @@ export class AudioProcessor {
       : 0;
     const syncDelaySec = this.syncDelayMs / 1000;
     const targetScheduledHorizonSec = this.getTargetScheduledHorizonSec();
-    if (
-      this._debugLogging &&
-      this.lastLoggedHorizonSec !== targetScheduledHorizonSec
-    ) {
-      console.log(
-        `Sendspin: Scheduling horizon -> ${targetScheduledHorizonSec.toFixed(0)}s (timeFilterError=${(this.timeFilter.error / 1000).toFixed(2)}ms)`,
-      );
-      this.lastLoggedHorizonSec = targetScheduledHorizonSec;
-    }
 
     if (this.usesRecorrectionMonitor) {
       this.startRecorrectionMonitor();
@@ -2039,6 +1982,7 @@ export class AudioProcessor {
             if (Math.abs(correctionErrorMs) > thresholds.resyncAboveMs) {
               // Tier 4: Hard resync if sync error exceeds threshold
               this.resyncCount++;
+              this._intervalResyncCount++;
               this.resetSyncErrorEma();
               this.cutScheduledSources(targetPlaybackTime - syncDelaySec);
               playbackTime = targetPlaybackTime;
@@ -2102,6 +2046,7 @@ export class AudioProcessor {
         } else {
           // Gap detected in server timestamps - hard resync
           this.resyncCount++;
+          this._intervalResyncCount++;
           this.cutScheduledSources(targetPlaybackTime - syncDelaySec);
           playbackTime = targetPlaybackTime;
           scheduleTime = playbackTime - syncDelaySec;
@@ -2109,27 +2054,6 @@ export class AudioProcessor {
           this.currentCorrectionMethod = "resync";
           this.lastSamplesAdjusted = 0;
           chunk.buffer = this.copyBuffer(chunk.buffer);
-        }
-      }
-
-      // Debug logging when correction method changes
-      if (this._debugLogging) {
-        if (this.currentCorrectionMethod !== this._lastLoggedCorrectionMethod) {
-          const thresholds = CORRECTION_THRESHOLDS[this._correctionMode];
-          console.log(
-            `Sendspin: [${this._correctionMode}] Correction: ${this._lastLoggedCorrectionMethod} -> ${this.currentCorrectionMethod} ` +
-              `| syncError=${this.smoothedSyncErrorMs.toFixed(1)}ms ` +
-              `| rate=${playbackRate} | resyncs=${this.resyncCount} | filterError=${this.timeFilter.error}` +
-              `| thresholds: resync>${thresholds.resyncAboveMs}ms, samples<${thresholds.samplesBelowMs}ms, rate1>=${thresholds.rate1AboveMs}ms, rate2>=${thresholds.rate2AboveMs}ms`,
-          );
-          this._lastLoggedCorrectionMethod = this.currentCorrectionMethod;
-          this._lastLoggedTime = performance.now();
-        } else if (performance.now() - this._lastLoggedTime > 2000) {
-          console.log(
-            `Sendspin: syncError=${this.smoothedSyncErrorMs.toFixed(1)}ms ` +
-              `| filterError=${this.timeFilter.error}`,
-          );
-          this._lastLoggedTime = performance.now();
         }
       }
 
@@ -2185,6 +2109,7 @@ export class AudioProcessor {
         }
       };
     }
+    this.emitStatusLog(nowMs);
   }
 
   private computeTargetPlaybackTime(

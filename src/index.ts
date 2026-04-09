@@ -263,18 +263,6 @@ export class SendspinPlayer {
     this.audioProcessor.setCorrectionMode(mode);
   }
 
-  /**
-   * Enable or disable debug logging for sync corrections.
-   * When enabled, logs to console when correction method changes.
-   */
-  setDebugLogging(enabled: boolean): void {
-    this.audioProcessor.setDebugLogging(enabled);
-  }
-  // Get debug logging state
-  get debugLogging(): boolean {
-    return this.audioProcessor.debugLogging;
-  }
-
   // ========================================
   // Controller Commands (sent to server)
   // ========================================
