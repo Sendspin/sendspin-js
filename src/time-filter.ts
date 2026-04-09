@@ -122,7 +122,7 @@ export class SendspinTimeFilter {
 
       // Drift variance estimated from propagation of offset uncertainties
       this._drift_covariance =
-        (this._offset_covariance + measurement_variance) / dt;
+        (this._offset_covariance + measurement_variance) / (dt * dt);
       this._offset_covariance = measurement_variance;
 
       this._current_time_element = {
@@ -167,7 +167,7 @@ export class SendspinTimeFilter {
     if (this._count < 100) {
       // Build sufficient history before enabling adaptive forgetting
       this._count += 1;
-    } else if (residual > max_residual_cutoff) {
+    } else if (Math.abs(residual) > max_residual_cutoff) {
       // Large prediction error detected - likely network disruption or clock adjustment
       // Apply forgetting factor to increase Kalman gain and accelerate convergence
       new_drift_covariance *= this._forget_variance_factor;
