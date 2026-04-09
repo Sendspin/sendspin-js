@@ -2074,6 +2074,8 @@ export class AudioProcessor {
         scheduleTime,
         audioContextRawTimeSec,
       );
+      const effectivePlaybackTime =
+        effectiveScheduleTime + (playbackTime - scheduleTime);
 
       const source = this.audioContext.createBufferSource();
       source.buffer = chunk.buffer;
@@ -2084,7 +2086,7 @@ export class AudioProcessor {
       // Track for seamless scheduling of next chunk
       // Account for actual duration with playback rate adjustment
       const actualDuration = chunk.buffer.duration / playbackRate;
-      this.nextPlaybackTime = playbackTime + actualDuration;
+      this.nextPlaybackTime = effectivePlaybackTime + actualDuration;
       this.nextScheduleTime = effectiveScheduleTime + actualDuration;
       this.lastScheduledServerTime =
         chunk.serverTime + chunk.buffer.duration * 1_000_000;
