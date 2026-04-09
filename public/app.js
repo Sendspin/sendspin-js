@@ -427,7 +427,7 @@ function loadSettings() {
   // Load sync delay
   const savedSyncDelay = localStorage.getItem(STORAGE_KEYS.SYNC_DELAY);
   if (savedSyncDelay !== null) {
-    syncDelayInput.value = savedSyncDelay;
+    syncDelayInput.value = sanitizeSyncDelay(parseInt(savedSyncDelay, 10));
   }
 
   const savedCorrectionMode = localStorage.getItem(
@@ -457,6 +457,13 @@ function saveMuted(muted) {
  */
 function saveSyncDelay(delay) {
   localStorage.setItem(STORAGE_KEYS.SYNC_DELAY, delay.toString());
+}
+
+function sanitizeSyncDelay(delay) {
+  if (!Number.isFinite(delay)) {
+    return 0;
+  }
+  return Math.max(0, Math.min(5000, Math.round(delay)));
 }
 
 /**
@@ -517,6 +524,7 @@ async function connect() {
       localStorage.getItem(STORAGE_KEYS.SYNC_DELAY) || "0",
       10,
     );
+    const sanitizedSyncDelay = sanitizeSyncDelay(savedSyncDelay);
     const savedCorrectionMode =
       localStorage.getItem(STORAGE_KEYS.CORRECTION_MODE) || "sync";
 
@@ -524,7 +532,7 @@ async function connect() {
       playerId: getPlayerId(),
       baseUrl: serverUrl,
       clientName: "Sendspin Sample Player",
-      syncDelay: savedSyncDelay,
+      syncDelay: sanitizedSyncDelay,
       correctionMode: savedCorrectionMode,
       onStateChange,
     });
@@ -636,7 +644,8 @@ function toggleMute() {
  * Apply sync delay
  */
 function applySyncDelay() {
-  const delay = parseInt(syncDelayInput.value, 10) || 0;
+  const delay = sanitizeSyncDelay(parseInt(syncDelayInput.value, 10));
+  syncDelayInput.value = delay;
   saveSyncDelay(delay);
   player.setSyncDelay(delay);
   showToast(`Sync delay set to ${delay}ms`, "success");
