@@ -301,6 +301,14 @@ export class AudioProcessor {
     }
     this.activeAudioClockSource = source;
     this.pendingClockSourceCutover = source === "timestamp";
+    if (
+      this.pendingClockSourceCutover &&
+      (this.scheduledSources.length > 0 ||
+        this.nextPlaybackTime !== 0 ||
+        this.lastScheduledServerTime !== 0)
+    ) {
+      this.scheduleQueueProcessing();
+    }
   }
 
   private resetOutputTimestampValidation(): void {
