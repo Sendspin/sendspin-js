@@ -38,6 +38,8 @@ const RECORRECTION_CUTOVER_GUARD_SEC = 0.3;
 const RECORRECTION_TRANSIENT_JUMP_MS = 25;
 const RECORRECTION_TRANSIENT_CONFIRM_WINDOW_MS =
   RECORRECTION_CHECK_INTERVAL_MS * 4;
+const HARD_RESYNC_STARTUP_GRACE_MS = 1_000;
+const HARD_RESYNC_COOLDOWN_MS = 500;
 const SCHEDULE_HEADROOM_SEC = 0.2;
 const SCHEDULE_HORIZON_PRECISE_SEC = 20;
 const SCHEDULE_HORIZON_GOOD_SEC = 8;
@@ -61,6 +63,7 @@ const OUTPUT_TIMESTAMP_SLOPE_MAX = 1.05;
 const OUTPUT_TIMESTAMP_MAX_DIVERGENCE_SEC = 0.25;
 const OUTPUT_TIMESTAMP_MAX_DIVERGENCE_DELTA_SEC = 0.05;
 const OUTPUT_TIMESTAMP_MAX_BACKWARD_SEC = 0.005;
+const OUTPUT_TIMESTAMP_FUTURE_TOLERANCE_MS = 5;
 const OUTPUT_TIMESTAMP_PROMOTION_MIN_GOOD_SAMPLES = 6;
 const OUTPUT_TIMESTAMP_PROMOTION_MIN_SPAN_MS = 750;
 const OUTPUT_TIMESTAMP_MAX_CONSECUTIVE_BAD_SAMPLES = 2;
@@ -174,6 +177,9 @@ export class AudioProcessor {
   private recorrectionPrevRawSyncErrorMs: number | null = null;
   private recorrectionPendingJumpSign: number | null = null;
   private recorrectionPendingJumpAtMs: number | null = null;
+  private hardResyncGraceUntilMs: number | null = null;
+  private lastHardResyncAtMs: number = -Infinity;
+  private pendingClockSourceCutover = false;
   private activeAudioClockSource: AudioClockSource = "estimated";
   private outputTimestampLastSample: OutputTimestampSample | null = null;
   private outputTimestampGoodSamples: number = 0;
@@ -294,10 +300,12 @@ export class AudioProcessor {
       return;
     }
     this.activeAudioClockSource = source;
+    this.pendingClockSourceCutover = source === "timestamp";
   }
 
   private resetOutputTimestampValidation(): void {
     this.activeAudioClockSource = "estimated";
+    this.pendingClockSourceCutover = false;
     this.outputTimestampLastSample = null;
     this.outputTimestampGoodSamples = 0;
     this._lastTimestampRejectReason = null;
@@ -378,10 +386,7 @@ export class AudioProcessor {
     }
   }
 
-  private getTimestampDerivedAudioTimeSec(
-    rawTimeSec: number,
-    nowMs: number,
-  ): number | null {
+  private getTimestampDerivedAudioTimeSec(rawTimeSec: number): number | null {
     if (!this.audioContext) {
       return null;
     }
@@ -404,7 +409,20 @@ export class AudioProcessor {
 
     try {
       const ts = getOutputTimestamp.call(this.audioContext);
-      const freshnessMs = nowMs - ts.performanceTime;
+      // Sample performance.now() after getOutputTimestamp() so we validate the
+      // timestamp against a contemporaneous wall-clock reading instead of an
+      // earlier one taken before the browser produced the timestamp snapshot.
+      const nowMs = performance.now();
+      const rawFreshnessMs = nowMs - ts.performanceTime;
+      if (rawFreshnessMs < -OUTPUT_TIMESTAMP_FUTURE_TOLERANCE_MS) {
+        this.rejectOutputTimestampSample(
+          `performanceTime in future (${rawFreshnessMs.toFixed(1)}ms)`,
+          true,
+        );
+        return null;
+      }
+
+      const freshnessMs = Math.max(0, rawFreshnessMs);
       const predictedAudioTimeSec = ts.contextTime + freshnessMs / 1000;
       const sample: OutputTimestampSample = {
         contextTimeSec: ts.contextTime,
@@ -414,13 +432,6 @@ export class AudioProcessor {
         rawAudioTimeSec: rawTimeSec,
       };
 
-      if (freshnessMs < 0) {
-        this.rejectOutputTimestampSample(
-          `performanceTime in future (${freshnessMs.toFixed(1)}ms)`,
-          true,
-        );
-        return null;
-      }
       if (freshnessMs > OUTPUT_TIMESTAMP_MAX_FRESHNESS_MS) {
         this.rejectOutputTimestampSample(
           `stale timestamp (${freshnessMs.toFixed(1)}ms old)`,
@@ -553,10 +564,7 @@ export class AudioProcessor {
       rawTimeSec,
       nowMs,
     );
-    const timestampTimeSec = this.getTimestampDerivedAudioTimeSec(
-      rawTimeSec,
-      nowMs,
-    );
+    const timestampTimeSec = this.getTimestampDerivedAudioTimeSec(rawTimeSec);
 
     let derivedTimeSec =
       this.activeAudioClockSource === "timestamp" && timestampTimeSec !== null
@@ -579,6 +587,9 @@ export class AudioProcessor {
     this.nextScheduleTime = 0;
     this.lastScheduledServerTime = 0;
     this.recorrectionMinScheduleTimeSec = null;
+    this.hardResyncGraceUntilMs = null;
+    this.lastHardResyncAtMs = -Infinity;
+    this.pendingClockSourceCutover = false;
     this.resetRecorrectionCheckState();
     this.resetSyncErrorEma();
     this.currentSyncErrorMs = 0;
@@ -631,6 +642,33 @@ export class AudioProcessor {
   private resetRecorrectionCheckState(): void {
     this.clearRecorrectionBreachState();
     this.recorrectionPrevRawSyncErrorMs = null;
+  }
+
+  private armHardResyncStartupGrace(nowMs: number): void {
+    if (this.activeAudioClockSource === "timestamp") {
+      this.hardResyncGraceUntilMs = null;
+      return;
+    }
+    if (this.hardResyncGraceUntilMs === null) {
+      this.hardResyncGraceUntilMs = nowMs + HARD_RESYNC_STARTUP_GRACE_MS;
+    }
+  }
+
+  private canUseHardResync(nowMs: number): boolean {
+    if (this.activeAudioClockSource === "timestamp") {
+      this.hardResyncGraceUntilMs = null;
+    } else if (
+      this.hardResyncGraceUntilMs !== null &&
+      nowMs < this.hardResyncGraceUntilMs
+    ) {
+      return false;
+    }
+
+    return nowMs - this.lastHardResyncAtMs >= HARD_RESYNC_COOLDOWN_MS;
+  }
+
+  private noteHardResync(nowMs: number): void {
+    this.lastHardResyncAtMs = nowMs;
   }
 
   private shouldIgnoreTransientRecorrectionJump(
@@ -708,6 +746,7 @@ export class AudioProcessor {
     if (markCooldown) {
       this.lastRecorrectionAtMs = nowMs;
     }
+    this.noteHardResync(nowMs);
 
     this.processAudioQueue();
   }
@@ -1849,6 +1888,21 @@ export class AudioProcessor {
       this.startRecorrectionMonitor();
     }
 
+    if (this.pendingClockSourceCutover) {
+      this.pendingClockSourceCutover = false;
+      if (
+        this.scheduledSources.length > 0 ||
+        this.nextPlaybackTime !== 0 ||
+        this.lastScheduledServerTime !== 0
+      ) {
+        this.performGuardedCutover("delay-change", {
+          incrementResyncCount: false,
+          markCooldown: false,
+        });
+        return;
+      }
+    }
+
     // Schedule chunks until we have enough future audio to survive short JS throttling.
     while (this.audioBufferQueue.length > 0) {
       const scheduledAheadSec = this.getScheduledAheadSec(
@@ -1877,6 +1931,7 @@ export class AudioProcessor {
 
       // First chunk or after a gap: calculate from server timestamp
       if (this.nextPlaybackTime === 0 || this.lastScheduledServerTime === 0) {
+        this.armHardResyncStartupGrace(nowMs);
         playbackTime = targetPlaybackTime;
         scheduleTime = playbackTime - syncDelaySec;
         if (this.recorrectionMinScheduleTimeSec !== null) {
@@ -1907,9 +1962,14 @@ export class AudioProcessor {
 
           // Get thresholds for current correction mode
           const thresholds = CORRECTION_THRESHOLDS[this._correctionMode];
+          const canUseHardResync = this.canUseHardResync(nowMs);
 
-          if (Math.abs(correctionErrorMs) > thresholds.resyncAboveMs) {
+          if (
+            Math.abs(correctionErrorMs) > thresholds.resyncAboveMs &&
+            canUseHardResync
+          ) {
             // Tier 4: Hard resync if sync error exceeds threshold
+            this.noteHardResync(nowMs);
             this.resyncCount++;
             this._intervalResyncCount++;
             this.resetSyncErrorEma();
@@ -1918,6 +1978,20 @@ export class AudioProcessor {
             scheduleTime = playbackTime - syncDelaySec;
             playbackRate = 1.0;
             this.currentCorrectionMethod = "resync";
+            this.lastSamplesAdjusted = 0;
+            chunk.buffer = this.copyBuffer(chunk.buffer);
+          } else if (Math.abs(correctionErrorMs) > thresholds.resyncAboveMs) {
+            // We cannot hard resync right now because startup grace or the
+            // cooldown is active, so use the strongest smooth correction instead.
+            playbackTime = this.nextPlaybackTime;
+            scheduleTime = this.nextScheduleTime;
+            playbackRate = Number.isFinite(thresholds.rate2AboveMs)
+              ? correctionErrorMs > 0
+                ? 1.02
+                : 0.98
+              : 1.0;
+            this.currentCorrectionMethod =
+              playbackRate === 1.0 ? "none" : "rate";
             this.lastSamplesAdjusted = 0;
             chunk.buffer = this.copyBuffer(chunk.buffer);
           } else if (Math.abs(correctionErrorMs) < thresholds.deadbandBelowMs) {
@@ -1969,6 +2043,7 @@ export class AudioProcessor {
           }
         } else {
           // Gap detected in server timestamps - hard resync
+          this.noteHardResync(nowMs);
           this.resyncCount++;
           this._intervalResyncCount++;
           this.cutScheduledSources(targetPlaybackTime - syncDelaySec);
