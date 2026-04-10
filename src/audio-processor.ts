@@ -44,6 +44,9 @@ const SCHEDULE_HEADROOM_SEC = 0.2;
 const SCHEDULE_HORIZON_PRECISE_SEC = 20;
 const SCHEDULE_HORIZON_GOOD_SEC = 8;
 const SCHEDULE_HORIZON_POOR_SEC = 4;
+const CAST_SCHEDULE_HORIZON_PRECISE_SEC = 1.5;
+const CAST_SCHEDULE_HORIZON_GOOD_SEC = 1;
+const CAST_SCHEDULE_HORIZON_POOR_SEC = 0.5;
 const SCHEDULE_HORIZON_PRECISE_ERROR_MS = 2;
 const SCHEDULE_HORIZON_GOOD_ERROR_MS = 8;
 type AudioClockSource = "estimated" | "timestamp" | "raw";
@@ -192,6 +195,7 @@ export class AudioProcessor {
     private outputMode: AudioOutputMode = "direct",
     private audioElement?: HTMLAudioElement,
     private isAndroid: boolean = false,
+    private isCastRuntime: boolean = false,
     private ownsAudioElement: boolean = false,
     private silentAudioSrc?: string,
     private syncDelayMs: number = 0,
@@ -272,14 +276,23 @@ export class AudioProcessor {
   }
 
   private getTargetScheduledHorizonSec(): number {
+    const preciseHorizonSec = this.isCastRuntime
+      ? CAST_SCHEDULE_HORIZON_PRECISE_SEC
+      : SCHEDULE_HORIZON_PRECISE_SEC;
+    const goodHorizonSec = this.isCastRuntime
+      ? CAST_SCHEDULE_HORIZON_GOOD_SEC
+      : SCHEDULE_HORIZON_GOOD_SEC;
+    const poorHorizonSec = this.isCastRuntime
+      ? CAST_SCHEDULE_HORIZON_POOR_SEC
+      : SCHEDULE_HORIZON_POOR_SEC;
     const errorMs = this.timeFilter.error / 1000;
     if (errorMs < SCHEDULE_HORIZON_PRECISE_ERROR_MS) {
-      return SCHEDULE_HORIZON_PRECISE_SEC;
+      return preciseHorizonSec;
     }
     if (errorMs <= SCHEDULE_HORIZON_GOOD_ERROR_MS) {
-      return SCHEDULE_HORIZON_GOOD_SEC;
+      return goodHorizonSec;
     }
-    return SCHEDULE_HORIZON_POOR_SEC;
+    return poorHorizonSec;
   }
 
   private getScheduledAheadSec(currentTimeSec: number): number {
