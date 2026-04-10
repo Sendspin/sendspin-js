@@ -3,7 +3,6 @@ import type {
   StreamFormat,
   AudioOutputMode,
   CorrectionMode,
-  ClockPrecision,
   SendspinStorage,
 } from "./types";
 import type { StateManager } from "./state-manager";
@@ -75,69 +74,34 @@ const CORRECTION_THRESHOLDS: Record<
     rate1AboveMs: number; // ms - use 1% rate above this
     samplesBelowMs: number; // ms - use sample manipulation below this
     deadbandBelowMs: number; // ms - don't correct if error < this
-    timeFilterMaxErrorMs: number; // Only correct if the error is below this
-    clockPrecisionTimeoutMs: number; // ms - max time to wait for clock precision after playback starts
     enableRecorrectionMonitor: boolean; // Whether recorrection monitor should run in this mode
     immediateDelayCutover: boolean; // Whether runtime static delay should trigger immediate cutover
   }
 > = {
   sync: {
-    // Simulated results for how long it takes from playback start to correct to +/-5ms error:
-    // Average:
-    // - local devices: 8.748s (time played with distorted pitch 5828.4ms)
-    // - mobile devices on cellular: 11.791s (time played with distorted pitch 5748.8ms)
-    // - devices with already synchronized clocks: 2.431s (time played with distorted pitch 368.0ms)
-    // Worst-case:
-    // - local devices: 14.020s (time played with distorted pitch 10940.0ms)
-    // - mobile devices on cellular: 26.600s (time played with distorted pitch 10940.0ms)
-    // - devices with already synchronized clocks: 4.300s (time played with distorted pitch 1200.0ms)
     resyncAboveMs: 200, // Hard resync for large errors
     rate2AboveMs: 35, // Use 2% rate when error exceeds this
     rate1AboveMs: 8, // Use 1% rate when error exceeds this
     samplesBelowMs: 8, // Use sample insertion/deletion below this
     deadbandBelowMs: 1, // Ignore corrections below this
-    timeFilterMaxErrorMs: 15, // Higher threshold; starts correcting earlier
-    clockPrecisionTimeoutMs: 20_000, // 20s - then correct with imprecise clock
     enableRecorrectionMonitor: true,
     immediateDelayCutover: true,
   },
   quality: {
-    // Simulated results for how long it takes from playback start to correct to +/-5ms error:
-    // Average:
-    // - local devices: 3.338s
-    // - mobile devices on cellular: 23.100s
-    // - devices with already synchronized clocks: 5.564s
-    // Worst-case:
-    // - local devices: 29.920s
-    // - mobile devices on cellular: 30.000s
-    // - devices with already synchronized clocks: 14.620s
     resyncAboveMs: 35, // Tighter resync threshold to avoid drifting too far
     rate2AboveMs: Infinity, // Disabled - never use rate correction
     rate1AboveMs: Infinity, // Disabled - never use rate correction
     samplesBelowMs: 35, // Use sample insertion/deletion below this
     deadbandBelowMs: 1, // Keep deadband tight for accurate sync
-    timeFilterMaxErrorMs: 8, // Lower threshold; wait for a more stable filter to reduce number of resyncs
-    clockPrecisionTimeoutMs: Infinity, // Never force corrections with imprecise clock
     enableRecorrectionMonitor: false,
     immediateDelayCutover: false,
   },
   "quality-local": {
-    // Simulated results for how long it takes from playback start to correct to +/-5ms error:
-    // Average:
-    // - local devices: 26.825s
-    // - mobile devices on cellular: 28.980s
-    // - devices with already synchronized clocks: 5.461s
-    // Worst-case:
-    // - local devices: 30.000s
-    // - mobile devices on cellular: 30.000s
-    // - devices with already synchronized clocks: 14.620s
     resyncAboveMs: 600, // Last resort only (prefer keeping uninterrupted playback even if out of sync)
     rate2AboveMs: Infinity, // Disabled - never use rate correction
     rate1AboveMs: Infinity, // Disabled - never use rate correction
     samplesBelowMs: 0, // Disabled - never use sample corrections (prioritize smooth local playback)
     deadbandBelowMs: 5, // Larger deadband to avoid frequent small adjustments
-    timeFilterMaxErrorMs: 10, // Moderate threshold; only start correcting once we are reasonably sure of the time
-    clockPrecisionTimeoutMs: Infinity, // Never force corrections with imprecise clock
     enableRecorrectionMonitor: false,
     immediateDelayCutover: false,
   },
@@ -169,8 +133,6 @@ export class AudioProcessor {
   private currentPlaybackRate: number = 1.0;
   private currentCorrectionMethod: "none" | "samples" | "rate" | "resync" =
     "none";
-  private currentClockPrecision: ClockPrecision = "imprecise";
-  private playbackStartedAt: number | null = null; // performance.now() when playback started
   private lastSamplesAdjusted: number = 0;
 
   // Output latency smoothing (EMA to filter Chrome jitter)
@@ -623,8 +585,6 @@ export class AudioProcessor {
     this.currentPlaybackRate = 1.0;
     this.currentCorrectionMethod = "none";
     this.lastSamplesAdjusted = 0;
-    this.playbackStartedAt = null;
-    this.currentClockPrecision = "imprecise";
     this._lastStatusLogMs = 0;
     this._intervalResyncCount = 0;
   }
@@ -875,7 +835,6 @@ export class AudioProcessor {
     correctionMethod: "none" | "samples" | "rate" | "resync";
     samplesAdjusted: number;
     correctionMode: CorrectionMode;
-    clockPrecision: ClockPrecision;
   } {
     return {
       clockDriftPercent: this.timeFilter.drift * 100,
@@ -886,7 +845,6 @@ export class AudioProcessor {
       correctionMethod: this.currentCorrectionMethod,
       samplesAdjusted: this.lastSamplesAdjusted,
       correctionMode: this._correctionMode,
-      clockPrecision: this.currentClockPrecision,
     };
   }
 
@@ -946,7 +904,6 @@ export class AudioProcessor {
         ` tf=${tf}` +
         ` lat=${latMs}ms` +
         ` mode=${this._correctionMode}` +
-        ` prec=${this.currentClockPrecision}` +
         ` ctx=${this.audioContext?.state ?? "null"}` +
         ` gen=${this.stateManager.streamGeneration}`,
     );
@@ -1920,10 +1877,6 @@ export class AudioProcessor {
 
       // First chunk or after a gap: calculate from server timestamp
       if (this.nextPlaybackTime === 0 || this.lastScheduledServerTime === 0) {
-        // Track when playback started for clock precision timeout
-        if (this.playbackStartedAt === null) {
-          this.playbackStartedAt = performance.now();
-        }
         playbackTime = targetPlaybackTime;
         scheduleTime = playbackTime - syncDelaySec;
         if (this.recorrectionMinScheduleTimeSec !== null) {
@@ -1955,93 +1908,64 @@ export class AudioProcessor {
           // Get thresholds for current correction mode
           const thresholds = CORRECTION_THRESHOLDS[this._correctionMode];
 
-          const timeFilterErrorMs = this.timeFilter.error / 1000;
-          const isClockImprecise =
-            timeFilterErrorMs > thresholds.timeFilterMaxErrorMs;
-          const playbackDurationMs = this.playbackStartedAt
-            ? performance.now() - this.playbackStartedAt
-            : 0;
-          const timeoutElapsed =
-            playbackDurationMs > thresholds.clockPrecisionTimeoutMs;
-          if (isClockImprecise && !timeoutElapsed) {
-            // Don't trust time filter yet, continue playing without corrections
-            // until the filter stabilizes (or timeout elapses)
-            this.currentClockPrecision = "imprecise";
+          if (Math.abs(correctionErrorMs) > thresholds.resyncAboveMs) {
+            // Tier 4: Hard resync if sync error exceeds threshold
+            this.resyncCount++;
+            this._intervalResyncCount++;
+            this.resetSyncErrorEma();
+            this.cutScheduledSources(targetPlaybackTime - syncDelaySec);
+            playbackTime = targetPlaybackTime;
+            scheduleTime = playbackTime - syncDelaySec;
+            playbackRate = 1.0;
+            this.currentCorrectionMethod = "resync";
+            this.lastSamplesAdjusted = 0;
+            chunk.buffer = this.copyBuffer(chunk.buffer);
+          } else if (Math.abs(correctionErrorMs) < thresholds.deadbandBelowMs) {
+            // Tier 1: Within deadband - no correction needed
             playbackTime = this.nextPlaybackTime;
             scheduleTime = this.nextScheduleTime;
             playbackRate = 1.0;
             this.currentCorrectionMethod = "none";
             this.lastSamplesAdjusted = 0;
             chunk.buffer = this.copyBuffer(chunk.buffer);
+          } else if (Math.abs(correctionErrorMs) <= thresholds.samplesBelowMs) {
+            // Tier 2: Small error - use single sample insertion/deletion
+            playbackTime = this.nextPlaybackTime;
+            scheduleTime = this.nextScheduleTime;
+            playbackRate = 1.0;
+            const samplesToAdjust = correctionErrorMs > 0 ? -1 : 1;
+            chunk.buffer = this.adjustBufferSamples(
+              chunk.buffer,
+              samplesToAdjust,
+            );
+            this.currentCorrectionMethod = "samples";
+            this.lastSamplesAdjusted = samplesToAdjust;
           } else {
-            // Clock is precise OR timeout elapsed - proceed with corrections
-            this.currentClockPrecision = isClockImprecise
-              ? "imprecise-timeout"
-              : "precise";
+            // Tier 3: Medium error - use playback rate adjustment
+            playbackTime = this.nextPlaybackTime;
+            scheduleTime = this.nextScheduleTime;
+            const absErrorMs = Math.abs(correctionErrorMs);
 
-            if (Math.abs(correctionErrorMs) > thresholds.resyncAboveMs) {
-              // Tier 4: Hard resync if sync error exceeds threshold
-              this.resyncCount++;
-              this._intervalResyncCount++;
-              this.resetSyncErrorEma();
-              this.cutScheduledSources(targetPlaybackTime - syncDelaySec);
-              playbackTime = targetPlaybackTime;
-              scheduleTime = playbackTime - syncDelaySec;
-              playbackRate = 1.0;
-              this.currentCorrectionMethod = "resync";
-              this.lastSamplesAdjusted = 0;
-              chunk.buffer = this.copyBuffer(chunk.buffer);
-            } else if (
-              Math.abs(correctionErrorMs) < thresholds.deadbandBelowMs
-            ) {
-              // Tier 1: Within deadband - no correction needed
-              playbackTime = this.nextPlaybackTime;
-              scheduleTime = this.nextScheduleTime;
-              playbackRate = 1.0;
-              this.currentCorrectionMethod = "none";
-              this.lastSamplesAdjusted = 0;
-              chunk.buffer = this.copyBuffer(chunk.buffer);
-            } else if (
-              Math.abs(correctionErrorMs) <= thresholds.samplesBelowMs
-            ) {
-              // Tier 2: Small error - use single sample insertion/deletion
-              playbackTime = this.nextPlaybackTime;
-              scheduleTime = this.nextScheduleTime;
-              playbackRate = 1.0;
-              const samplesToAdjust = correctionErrorMs > 0 ? -1 : 1;
-              chunk.buffer = this.adjustBufferSamples(
-                chunk.buffer,
-                samplesToAdjust,
-              );
-              this.currentCorrectionMethod = "samples";
-              this.lastSamplesAdjusted = samplesToAdjust;
+            if (correctionErrorMs > 0) {
+              playbackRate =
+                absErrorMs >= thresholds.rate2AboveMs
+                  ? 1.02
+                  : absErrorMs >= thresholds.rate1AboveMs
+                    ? 1.01
+                    : 1.0;
             } else {
-              // Tier 3: Medium error - use playback rate adjustment
-              playbackTime = this.nextPlaybackTime;
-              scheduleTime = this.nextScheduleTime;
-              const absErrorMs = Math.abs(correctionErrorMs);
-
-              if (correctionErrorMs > 0) {
-                playbackRate =
-                  absErrorMs >= thresholds.rate2AboveMs
-                    ? 1.02
-                    : absErrorMs >= thresholds.rate1AboveMs
-                      ? 1.01
-                      : 1.0;
-              } else {
-                playbackRate =
-                  absErrorMs >= thresholds.rate2AboveMs
-                    ? 0.98
-                    : absErrorMs >= thresholds.rate1AboveMs
-                      ? 0.99
-                      : 1.0;
-              }
-
-              this.currentCorrectionMethod =
-                playbackRate === 1.0 ? "none" : "rate";
-              this.lastSamplesAdjusted = 0;
-              chunk.buffer = this.copyBuffer(chunk.buffer);
+              playbackRate =
+                absErrorMs >= thresholds.rate2AboveMs
+                  ? 0.98
+                  : absErrorMs >= thresholds.rate1AboveMs
+                    ? 0.99
+                    : 1.0;
             }
+
+            this.currentCorrectionMethod =
+              playbackRate === 1.0 ? "none" : "rate";
+            this.lastSamplesAdjusted = 0;
+            chunk.buffer = this.copyBuffer(chunk.buffer);
           }
         } else {
           // Gap detected in server timestamps - hard resync
