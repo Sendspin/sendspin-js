@@ -386,6 +386,84 @@ export interface AudioBufferQueueItem {
 }
 
 /**
+ * A decoded audio chunk with raw PCM samples.
+ * Emitted by SendspinCore after decoding compressed audio.
+ * Consumed by SendspinPlayer for playback, or by visualization/analysis tools.
+ */
+export interface DecodedAudioChunk {
+  /** PCM sample data, one Float32Array per channel (values in -1.0 to 1.0) */
+  samples: Float32Array[];
+  /** Sample rate in Hz */
+  sampleRate: number;
+  /** Server timestamp in microseconds */
+  serverTimeUs: number;
+  /** Stream generation (incremented on each new stream) */
+  generation: number;
+}
+
+/**
+ * Configuration for SendspinCore (protocol + decoding, no playback).
+ */
+export interface SendspinCoreConfig {
+  /** Unique player identifier. Auto-generated if not provided. */
+  playerId?: string;
+
+  /** Base URL of the Sendspin server (e.g., "http://192.168.1.100:8095") */
+  baseUrl: string;
+
+  /** Human-readable name for this player. Auto-generated if not provided. */
+  clientName?: string;
+
+  /**
+   * Codecs to use for audio streaming, in priority order.
+   * Default: ["opus", "flac", "pcm"]
+   */
+  codecs?: Codec[];
+
+  /** Buffer capacity in bytes. Defaults to 5MB. */
+  bufferCapacity?: number;
+
+  /** Static sync delay in milliseconds (0-5000). */
+  syncDelay?: number;
+
+  /** Use hardware/external volume control instead of software gain. */
+  useHardwareVolume?: boolean;
+
+  /** Callback when server sends volume/mute commands (hardware volume mode). */
+  onVolumeCommand?: (volume: number, muted: boolean) => void;
+
+  /** Callback when server sends a set_static_delay command. */
+  onDelayCommand?: (delayMs: number) => void;
+
+  /** Getter for external volume state (hardware volume mode). */
+  getExternalVolume?: () => { volume: number; muted: boolean };
+
+  /** Callback when player state changes */
+  onStateChange?: (state: {
+    isPlaying: boolean;
+    volume: number;
+    muted: boolean;
+    playerState: PlayerState;
+    serverState: ServerStatePayload;
+    groupState: GroupUpdatePayload;
+  }) => void;
+}
+
+/**
+ * Interface for protocol handler to call into the audio subsystem.
+ * Implemented by SendspinCore as the bridge between protocol and audio.
+ */
+export interface StreamHandler {
+  handleBinaryMessage(data: ArrayBuffer): void;
+  handleStreamStart(format: StreamFormat, isFormatUpdate: boolean): void;
+  handleStreamClear(): void;
+  handleStreamEnd(): void;
+  handleVolumeUpdate(): void;
+  handleSyncDelayChange(delayMs: number): void;
+  getSyncDelayMs(): number;
+}
+
+/**
  * Storage interface for persisting SDK state.
  * Compatible with Web Storage API (localStorage/sessionStorage).
  * Provide a custom implementation to control where the SDK stores data.
