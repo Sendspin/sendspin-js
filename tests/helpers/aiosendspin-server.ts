@@ -11,10 +11,7 @@ import { spawn, type ChildProcess } from "child_process";
 import { createInterface, type Interface } from "readline";
 import { resolve } from "path";
 
-const PYTHON_BIN = resolve(
-  import.meta.dirname,
-  "../../.venv/bin/python",
-);
+const PYTHON_BIN = resolve(import.meta.dirname, "../../.venv/bin/python");
 const SERVER_SCRIPT = resolve(import.meta.dirname, "sendspin-server.py");
 
 export class AiosendspinServer {
