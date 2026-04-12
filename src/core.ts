@@ -183,6 +183,11 @@ export class SendspinCore implements StreamHandler {
       );
     } else {
       // Create connection from baseUrl
+      if (!this.config.baseUrl) {
+        throw new Error(
+          "SendspinCore requires either baseUrl or webSocket to be provided.",
+        );
+      }
       const url = new URL(this.config.baseUrl);
       const wsProtocol = url.protocol === "https:" ? "wss:" : "ws:";
       this.wsUrl = `${wsProtocol}//${url.host}/sendspin`;

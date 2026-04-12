@@ -267,8 +267,11 @@ export interface SendspinPlayerConfig {
   /** Unique player identifier. Auto-generated if not provided. */
   playerId?: string;
 
-  /** Base URL of the Sendspin server (e.g., "http://192.168.1.100:8095") */
-  baseUrl: string;
+  /**
+   * Base URL of the Sendspin server (e.g., "http://192.168.1.100:8095").
+   * Required unless webSocket is provided.
+   */
+  baseUrl?: string;
 
   /** Human-readable name for this player. Auto-generated if not provided. */
   clientName?: string;
@@ -416,8 +419,11 @@ export interface SendspinCoreConfig {
   /** Unique player identifier. Auto-generated if not provided. */
   playerId?: string;
 
-  /** Base URL of the Sendspin server (e.g., "http://192.168.1.100:8095") */
-  baseUrl: string;
+  /**
+   * Base URL of the Sendspin server (e.g., "http://192.168.1.100:8095").
+   * Required unless webSocket is provided.
+   */
+  baseUrl?: string;
 
   /** Human-readable name for this player. Auto-generated if not provided. */
   clientName?: string;
