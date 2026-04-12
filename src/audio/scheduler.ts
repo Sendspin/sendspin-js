@@ -12,9 +12,9 @@ import type {
   CorrectionMode,
   DecodedAudioChunk,
   SendspinStorage,
-} from "./types";
-import type { StateManager } from "./state-manager";
-import type { SendspinTimeFilter } from "./time-filter";
+} from "../types";
+import type { StateManager } from "../core/state-manager";
+import type { SendspinTimeFilter } from "../core/time-filter";
 
 // Sync correction constants
 const SAMPLE_CORRECTION_FADE_LEN = 8;

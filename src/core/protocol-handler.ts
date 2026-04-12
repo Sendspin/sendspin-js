@@ -19,8 +19,8 @@ import type {
   StreamEnd,
   StreamStart,
   SupportedFormat,
-} from "./types";
-import type { StreamHandler } from "./types";
+} from "../types";
+import type { StreamHandler } from "../types";
 import type { StateManager } from "./state-manager";
 import type { WebSocketManager } from "./websocket-manager";
 

@@ -3,7 +3,7 @@ import type {
   StreamFormat,
   ServerStatePayload,
   GroupUpdatePayload,
-} from "./types";
+} from "../types";
 
 /**
  * Apply a diff to an object, returning a new copy.

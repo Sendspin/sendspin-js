@@ -1,5 +1,5 @@
-import { SendspinCore } from "./core";
-import { AudioScheduler } from "./audio-scheduler";
+import { SendspinCore } from "./core/core";
+import { AudioScheduler } from "./audio/scheduler";
 import { SILENT_AUDIO_SRC } from "./silent-audio.generated";
 import type {
   SendspinPlayerConfig,
@@ -280,10 +280,10 @@ export class SendspinPlayer {
 
 // Re-export types for convenience
 export * from "./types";
-export { SendspinTimeFilter } from "./time-filter";
-export { SendspinCore } from "./core";
-export { SendspinDecoder } from "./audio-decoder";
-export { AudioScheduler } from "./audio-scheduler";
+export { SendspinTimeFilter } from "./core/time-filter";
+export { SendspinCore } from "./core/core";
+export { SendspinDecoder } from "./audio/decoder";
+export { AudioScheduler } from "./audio/scheduler";
 
 // Export platform detection utilities
 export { detectIsAndroid, detectIsIOS, detectIsMobile, getDefaultSyncDelay };

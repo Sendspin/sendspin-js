@@ -5,7 +5,7 @@
  * This module has no Web Audio playback concerns — it only produces decoded data.
  */
 
-import type { StreamFormat, DecodedAudioChunk } from "./types";
+import type { StreamFormat, DecodedAudioChunk } from "../types";
 
 export class SendspinDecoder {
   private onDecodedChunk: (chunk: DecodedAudioChunk) => void;

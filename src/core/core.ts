@@ -7,7 +7,7 @@
  * tools directly.
  */
 
-import { SendspinDecoder } from "./audio-decoder";
+import { SendspinDecoder } from "../audio/decoder";
 import { ProtocolHandler } from "./protocol-handler";
 import { StateManager } from "./state-manager";
 import { WebSocketManager } from "./websocket-manager";
@@ -23,7 +23,7 @@ import type {
   ControllerCommands,
   ServerStatePayload,
   GroupUpdatePayload,
-} from "./types";
+} from "../types";
 
 function generateRandomId(): string {
   return Math.random().toString(36).substring(2, 6);
