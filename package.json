@@ -20,6 +20,8 @@
     "build": "tsc",
     "dev": "tsc --watch",
     "dev-server": "rm -rf public/dev && concurrently \"tsc --watch\" \"rollup -c --watch\" \"serve . -l 6001\"",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "lint": "eslint . --fix --ignore-path .gitignore",
     "prepare": "husky",
     "prepublishOnly": "npm run build"
@@ -45,6 +47,7 @@
   "devDependencies": {
     "@rollup/plugin-commonjs": "^29.0.1",
     "@rollup/plugin-node-resolve": "^16.0.3",
+    "@types/ws": "^8.18.1",
     "@typescript-eslint/eslint-plugin": "7.0.0",
     "@typescript-eslint/parser": "6.21.0",
     "concurrently": "^9.2.1",
@@ -55,7 +58,9 @@
     "prettier": "3.8.2",
     "rollup": "^4.54.0",
     "serve": "^14.2.5",
-    "typescript": "^6.0.2"
+    "typescript": "^6.0.2",
+    "vitest": "^4.1.4",
+    "ws": "^8.20.0"
   },
   "publishConfig": {
     "access": "public"
