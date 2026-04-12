@@ -148,7 +148,7 @@ export class ProtocolHandler {
     this.scheduleNextTimeSyncBurstTick();
 
     // Start periodic state updates
-    const stateInterval = window.setInterval(
+    const stateInterval = globalThis.setInterval(
       () => this.sendStateUpdate(),
       STATE_UPDATE_INTERVAL,
     );
@@ -159,7 +159,7 @@ export class ProtocolHandler {
   // Called after volume commands to prevent a pending periodic update
   // from sending stale hardware volume shortly after the command response.
   private restartStateUpdateInterval(): void {
-    const newInterval = window.setInterval(
+    const newInterval = globalThis.setInterval(
       () => this.sendStateUpdate(),
       STATE_UPDATE_INTERVAL,
     );
@@ -168,7 +168,7 @@ export class ProtocolHandler {
 
   // Schedule the next fixed 10s burst tick.
   private scheduleNextTimeSyncBurstTick(): void {
-    const timeSyncTimeout = window.setTimeout(() => {
+    const timeSyncTimeout = globalThis.setTimeout(() => {
       this.startTimeSyncBurstIfIdle();
       this.scheduleNextTimeSyncBurstTick();
     }, TIME_SYNC_BURST_INTERVAL_MS);
@@ -209,7 +209,7 @@ export class ProtocolHandler {
 
   private armTimeSyncProbeTimeout(expectedClientTransmitted: number): void {
     this.clearTimeSyncProbeTimeout();
-    this.timeSyncInFlightTimeout = window.setTimeout(() => {
+    this.timeSyncInFlightTimeout = globalThis.setTimeout(() => {
       this.handleTimeSyncProbeTimeout(expectedClientTransmitted);
     }, TIME_SYNC_REQUEST_TIMEOUT_MS);
   }

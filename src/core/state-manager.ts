@@ -56,8 +56,8 @@ export class StateManager {
   private _groupState: GroupUpdatePayload = {};
 
   // Interval references for cleanup
-  private timeSyncInterval: number | null = null;
-  private stateUpdateInterval: number | null = null;
+  private timeSyncInterval: ReturnType<typeof setTimeout> | null = null;
+  private stateUpdateInterval: ReturnType<typeof setTimeout> | null = null;
 
   // Callback for state changes
   private onStateChangeCallback?: (state: {

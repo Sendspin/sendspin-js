@@ -1,6 +1,7 @@
+import type { ClientMessage } from "../types";
 export class WebSocketManager {
   private ws: WebSocket | null = null;
-  private reconnectTimeout: number | null = null;
+  private reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
   private shouldReconnect: boolean = false;
 
   // Event handlers
@@ -151,7 +152,7 @@ export class WebSocketManager {
       clearTimeout(this.reconnectTimeout);
     }
 
-    this.reconnectTimeout = window.setTimeout(() => {
+    this.reconnectTimeout = globalThis.setTimeout(() => {
       if (this.shouldReconnect) {
         console.log("Sendspin: Attempting to reconnect...");
         this.connect(
@@ -183,7 +184,7 @@ export class WebSocketManager {
   }
 
   // Send message to server (JSON)
-  send(message: any): void {
+  send(message: ClientMessage): void {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify(message));
     } else {
