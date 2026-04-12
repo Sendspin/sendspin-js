@@ -4,7 +4,6 @@ import type {
   ClientGoodbye,
   ClientHello,
   ClientState,
-  ClientTime,
   Codec,
   ControllerCommand,
   ControllerCommands,
@@ -18,25 +17,15 @@ import type {
   StreamClear,
   StreamEnd,
   StreamStart,
-  SupportedFormat,
 } from "../types";
 import type { StreamHandler } from "../types";
 import type { StateManager } from "./state-manager";
 import type { WebSocketManager } from "./websocket-manager";
+import { TimeSyncManager } from "./time-sync-manager";
+import { getSupportedFormats } from "./codec-support";
 
 // Constants
 const STATE_UPDATE_INTERVAL = 5000; // 5 seconds
-const TIME_SYNC_BURST_SIZE = 8;
-const TIME_SYNC_BURST_INTERVAL_MS = 10000;
-const TIME_SYNC_REQUEST_TIMEOUT_MS = 2000;
-const TIME_SYNC_ROBUST_SELECTION_COUNT = 3;
-
-interface TimeSyncSample {
-  measurement: number;
-  maxError: number;
-  t4: number;
-  rttTerm: number;
-}
 
 export interface ProtocolHandlerConfig {
   clientName?: string;
@@ -58,11 +47,7 @@ export class ProtocolHandler {
   private onVolumeCommand?: (volume: number, muted: boolean) => void;
   private onDelayCommand?: (delayMs: number) => void;
   private getExternalVolume?: () => { volume: number; muted: boolean };
-  private timeSyncBurstActive: boolean = false;
-  private timeSyncBurstSentCount: number = 0;
-  private timeSyncInFlightClientTransmitted: number | null = null;
-  private timeSyncInFlightTimeout: number | null = null;
-  private timeSyncBurstSamples: TimeSyncSample[] = [];
+  private timeSyncManager: TimeSyncManager;
 
   constructor(
     private playerId: string,
@@ -81,6 +66,11 @@ export class ProtocolHandler {
     this.onVolumeCommand = config.onVolumeCommand;
     this.onDelayCommand = config.onDelayCommand;
     this.getExternalVolume = config.getExternalVolume;
+    this.timeSyncManager = new TimeSyncManager(
+      wsManager,
+      stateManager,
+      timeFilter,
+    );
   }
 
   // Handle WebSocket messages
@@ -108,7 +98,7 @@ export class ProtocolHandler {
         break;
 
       case "server/time":
-        this.handleServerTime(message);
+        this.timeSyncManager.handleServerTime(message as ServerTime);
         break;
 
       case "stream/start":
@@ -143,9 +133,7 @@ export class ProtocolHandler {
     // Per spec: Send initial client/state immediately after server/hello
     this.sendStateUpdate();
     // Start time synchronization with fixed bursts.
-    this.stopTimeSync();
-    this.startTimeSyncBurstIfIdle();
-    this.scheduleNextTimeSyncBurstTick();
+    this.timeSyncManager.startAndSchedule();
 
     // Start periodic state updates
     const stateInterval = globalThis.setInterval(
@@ -166,170 +154,8 @@ export class ProtocolHandler {
     this.stateManager.setStateUpdateInterval(newInterval);
   }
 
-  // Schedule the next fixed 10s burst tick.
-  private scheduleNextTimeSyncBurstTick(): void {
-    const timeSyncTimeout = globalThis.setTimeout(() => {
-      this.startTimeSyncBurstIfIdle();
-      this.scheduleNextTimeSyncBurstTick();
-    }, TIME_SYNC_BURST_INTERVAL_MS);
-    this.stateManager.setTimeSyncInterval(timeSyncTimeout);
-  }
-
-  private startTimeSyncBurstIfIdle(): void {
-    if (this.timeSyncBurstActive || !this.wsManager.isConnected()) {
-      return;
-    }
-
-    this.timeSyncBurstActive = true;
-    this.timeSyncBurstSentCount = 0;
-    this.timeSyncBurstSamples = [];
-    this.timeSyncInFlightClientTransmitted = null;
-    this.sendNextTimeSyncBurstProbe();
-  }
-
-  private sendNextTimeSyncBurstProbe(): void {
-    if (
-      !this.timeSyncBurstActive ||
-      this.timeSyncInFlightClientTransmitted !== null ||
-      !this.wsManager.isConnected()
-    ) {
-      return;
-    }
-
-    if (this.timeSyncBurstSentCount >= TIME_SYNC_BURST_SIZE) {
-      this.finalizeTimeSyncBurst();
-      return;
-    }
-
-    const clientTransmitted = this.sendTimeSync();
-    this.timeSyncBurstSentCount += 1;
-    this.timeSyncInFlightClientTransmitted = clientTransmitted;
-    this.armTimeSyncProbeTimeout(clientTransmitted);
-  }
-
-  private armTimeSyncProbeTimeout(expectedClientTransmitted: number): void {
-    this.clearTimeSyncProbeTimeout();
-    this.timeSyncInFlightTimeout = globalThis.setTimeout(() => {
-      this.handleTimeSyncProbeTimeout(expectedClientTransmitted);
-    }, TIME_SYNC_REQUEST_TIMEOUT_MS);
-  }
-
-  private clearTimeSyncProbeTimeout(): void {
-    if (this.timeSyncInFlightTimeout !== null) {
-      clearTimeout(this.timeSyncInFlightTimeout);
-      this.timeSyncInFlightTimeout = null;
-    }
-  }
-
-  private handleTimeSyncProbeTimeout(expectedClientTransmitted: number): void {
-    if (
-      !this.timeSyncBurstActive ||
-      this.timeSyncInFlightClientTransmitted !== expectedClientTransmitted
-    ) {
-      return;
-    }
-
-    console.warn("Sendspin: Time sync probe timed out, aborting current burst");
-    this.abortTimeSyncBurst();
-  }
-
-  private finalizeTimeSyncBurst(): void {
-    this.clearTimeSyncProbeTimeout();
-
-    const candidate = this.selectTimeSyncBurstCandidate();
-    if (candidate) {
-      this.timeFilter.update(
-        candidate.measurement,
-        candidate.maxError,
-        candidate.t4,
-      );
-    }
-
-    this.timeSyncBurstActive = false;
-    this.timeSyncBurstSentCount = 0;
-    this.timeSyncInFlightClientTransmitted = null;
-    this.timeSyncBurstSamples = [];
-  }
-
-  private selectTimeSyncBurstCandidate(): TimeSyncSample | null {
-    if (this.timeSyncBurstSamples.length === 0) {
-      return null;
-    }
-
-    const topRttSamples = [...this.timeSyncBurstSamples]
-      .sort((a, b) => a.rttTerm - b.rttTerm)
-      .slice(
-        0,
-        Math.min(
-          TIME_SYNC_ROBUST_SELECTION_COUNT,
-          this.timeSyncBurstSamples.length,
-        ),
-      );
-    const sortedByMeasurement = [...topRttSamples].sort(
-      (a, b) => a.measurement - b.measurement,
-    );
-    return sortedByMeasurement[Math.floor(sortedByMeasurement.length / 2)];
-  }
-
-  private abortTimeSyncBurst(): void {
-    this.clearTimeSyncProbeTimeout();
-    this.timeSyncBurstActive = false;
-    this.timeSyncBurstSentCount = 0;
-    this.timeSyncInFlightClientTransmitted = null;
-    this.timeSyncBurstSamples = [];
-  }
-
   stopTimeSync(): void {
-    this.stateManager.clearTimeSyncInterval();
-    this.abortTimeSyncBurst();
-  }
-
-  // Handle server time synchronization
-  private handleServerTime(message: ServerTime): void {
-    if (
-      !this.timeSyncBurstActive ||
-      this.timeSyncInFlightClientTransmitted === null
-    ) {
-      return;
-    }
-
-    // Per spec: client_transmitted (T1), server_received (T2), server_transmitted (T3)
-    const T1 = message.payload.client_transmitted;
-    if (T1 !== this.timeSyncInFlightClientTransmitted) {
-      console.warn(
-        "Sendspin: Ignoring out-of-order time response",
-        T1,
-        this.timeSyncInFlightClientTransmitted,
-      );
-      return;
-    }
-
-    const T4 = Math.floor(performance.now() * 1000); // client received time
-    const T2 = message.payload.server_received;
-    const T3 = message.payload.server_transmitted;
-
-    // NTP offset calculation: measurement = ((T2 - T1) + (T3 - T4)) / 2
-    const measurement = (T2 - T1 + (T3 - T4)) / 2;
-
-    // Max error (half of round-trip time): max_error = ((T4 - T1) - (T3 - T2)) / 2
-    const rttTerm = Math.max(0, T4 - T1 - (T3 - T2));
-    const maxError = Math.max(1000, rttTerm / 2);
-    this.timeSyncBurstSamples.push({
-      measurement,
-      maxError,
-      t4: T4,
-      rttTerm,
-    });
-
-    this.clearTimeSyncProbeTimeout();
-    this.timeSyncInFlightClientTransmitted = null;
-
-    if (this.timeSyncBurstSentCount >= TIME_SYNC_BURST_SIZE) {
-      this.finalizeTimeSyncBurst();
-      return;
-    }
-
-    this.sendNextTimeSyncBurstProbe();
+    this.timeSyncManager.stop();
   }
 
   private handleStreamStart(message: StreamStart): void {
@@ -449,101 +275,13 @@ export class ProtocolHandler {
             "Unknown",
         },
         "player@v1_support": {
-          supported_formats: this.getSupportedFormats(),
+          supported_formats: getSupportedFormats(this.codecs),
           buffer_capacity: this.bufferCapacity,
           supported_commands: ["volume", "mute"],
         },
       },
     };
     this.wsManager.send(hello);
-  }
-
-  // Get supported codecs for the current browser
-  private getBrowserSupportedCodecs(): Set<Codec> {
-    const userAgent =
-      typeof navigator !== "undefined" ? navigator.userAgent : "";
-    const isSafari = /^((?!chrome|android).)*safari/i.test(userAgent);
-    const isFirefox = /firefox/i.test(userAgent);
-
-    // Check if native Opus decoder is available (requires secure context)
-    const hasNativeOpus = typeof AudioDecoder !== "undefined";
-
-    if (!hasNativeOpus) {
-      if (typeof window !== "undefined" && !window.isSecureContext) {
-        console.warn(
-          "[Opus] Running in insecure context, falling back to FLAC/PCM",
-        );
-      } else {
-        console.warn(
-          "[Opus] Native decoder not available, falling back to FLAC/PCM",
-        );
-      }
-    }
-
-    if (isSafari) {
-      // Safari: No FLAC support
-      return new Set(["pcm", "opus"] as Codec[]);
-    }
-
-    if (isFirefox) {
-      // Firefox: Opus has audio glitches with both native and opus-encdec decoders
-      return new Set(["pcm", "flac"] as Codec[]);
-    }
-
-    if (hasNativeOpus) {
-      // Native Opus available (Chrome, Edge)
-      return new Set(["pcm", "opus", "flac"] as Codec[]);
-    }
-
-    // No WebCodecs AudioDecoder (insecure context or unsupported browser)
-    return new Set(["pcm", "flac"] as Codec[]);
-  }
-
-  // Build supported formats from requested codecs, filtering out unsupported ones
-  private getSupportedFormats(): SupportedFormat[] {
-    const browserSupported = this.getBrowserSupportedCodecs();
-    const formats: SupportedFormat[] = [];
-
-    for (const codec of this.codecs) {
-      if (!browserSupported.has(codec)) {
-        continue;
-      }
-
-      if (codec === "opus") {
-        // Opus requires 48kHz
-        formats.push({
-          codec: "opus",
-          sample_rate: 48000,
-          channels: 2,
-          bit_depth: 16,
-        });
-      } else {
-        // PCM and FLAC support both sample rates
-        formats.push({ codec, sample_rate: 48000, channels: 2, bit_depth: 16 });
-        formats.push({ codec, sample_rate: 44100, channels: 2, bit_depth: 16 });
-      }
-    }
-
-    if (formats.length === 0) {
-      throw new Error(
-        `No supported codecs: requested [${this.codecs.join(", ")}], ` +
-          `browser supports [${[...browserSupported].join(", ")}]`,
-      );
-    }
-
-    return formats;
-  }
-
-  // Send time synchronization message
-  sendTimeSync(clientTimeUs = Math.floor(performance.now() * 1000)): number {
-    const message: ClientTime = {
-      type: "client/time" as MessageType.CLIENT_TIME,
-      payload: {
-        client_transmitted: clientTimeUs,
-      },
-    };
-    this.wsManager.send(message);
-    return clientTimeUs;
   }
 
   // Send state update
