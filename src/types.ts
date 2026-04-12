@@ -256,6 +256,27 @@ export type Codec = "pcm" | "opus" | "flac";
  */
 export type CorrectionMode = "sync" | "quality" | "quality-local";
 
+/**
+ * Sync correction thresholds for a single correction mode.
+ * All values are in milliseconds unless noted.
+ */
+export interface CorrectionThresholds {
+  /** Hard resync when sync error exceeds this (ms) */
+  resyncAboveMs: number;
+  /** Use ±2% playback rate when error exceeds this (ms). Infinity = disabled. */
+  rate2AboveMs: number;
+  /** Use ±1% playback rate when error exceeds this (ms). Infinity = disabled. */
+  rate1AboveMs: number;
+  /** Use sample insertion/deletion when error is below this (ms). 0 = disabled. */
+  samplesBelowMs: number;
+  /** No correction when error is below this (ms) */
+  deadbandBelowMs: number;
+  /** Whether the recorrection monitor runs in this mode */
+  enableRecorrectionMonitor: boolean;
+  /** Whether runtime sync delay changes trigger immediate cutover */
+  immediateDelayCutover: boolean;
+}
+
 export interface SupportedFormat {
   codec: string;
   channels: number;
@@ -328,6 +349,18 @@ export interface SendspinPlayerConfig {
    *   Best for single-device playback where audio quality is priority.
    */
   correctionMode?: CorrectionMode;
+
+  /**
+   * Override default correction thresholds per mode.
+   * Partially override any mode — unspecified fields keep their defaults.
+   *
+   * @example
+   * // Make "sync" mode tolerate more drift before hard resyncing
+   * correctionThresholds: { sync: { resyncAboveMs: 400 } }
+   */
+  correctionThresholds?: Partial<
+    Record<CorrectionMode, Partial<CorrectionThresholds>>
+  >;
 
   /**
    * Use browser's output latency API for automatic latency compensation.

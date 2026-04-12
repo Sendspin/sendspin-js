@@ -122,6 +122,7 @@ export class SendspinPlayer {
       config.correctionMode ?? "sync",
       storage,
       config.useOutputLatencyCompensation ?? true,
+      config.correctionThresholds,
     );
 
     // Wire core events to scheduler
