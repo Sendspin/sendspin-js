@@ -20,7 +20,7 @@ import type {
   StreamStart,
   SupportedFormat,
 } from "./types";
-import type { AudioProcessor } from "./audio-processor";
+import type { StreamHandler } from "./types";
 import type { StateManager } from "./state-manager";
 import type { WebSocketManager } from "./websocket-manager";
 
@@ -67,7 +67,7 @@ export class ProtocolHandler {
   constructor(
     private playerId: string,
     private wsManager: WebSocketManager,
-    private audioProcessor: AudioProcessor,
+    private streamHandler: StreamHandler,
     private stateManager: StateManager,
     private timeFilter: SendspinTimeFilter,
     config: ProtocolHandlerConfig = {},
@@ -91,11 +91,11 @@ export class ProtocolHandler {
       this.handleServerMessage(message);
     } else if (event.data instanceof ArrayBuffer) {
       // Binary message (audio chunk)
-      this.audioProcessor.handleBinaryMessage(event.data);
+      this.streamHandler.handleBinaryMessage(event.data);
     } else if (event.data instanceof Blob) {
       // Convert Blob to ArrayBuffer
       event.data.arrayBuffer().then((buffer) => {
-        this.audioProcessor.handleBinaryMessage(buffer);
+        this.streamHandler.handleBinaryMessage(buffer);
       });
     }
   }
@@ -332,7 +332,6 @@ export class ProtocolHandler {
     this.sendNextTimeSyncBurstProbe();
   }
 
-  // Handle stream start (also used for format updates per new spec)
   private handleStreamStart(message: StreamStart): void {
     const isFormatUpdate = this.stateManager.currentStreamFormat !== null;
 
@@ -350,20 +349,9 @@ export class ProtocolHandler {
         `BitDepth=${this.stateManager.currentStreamFormat.bit_depth}bit`,
     );
 
-    this.audioProcessor.initAudioContext();
-    // Resume AudioContext if suspended (required for browser autoplay policies)
-    this.audioProcessor.resumeAudioContext();
-
-    if (!isFormatUpdate) {
-      // New stream: reset scheduling state and clear buffers
-      this.audioProcessor.clearBuffers();
-    }
-    // Format update: don't clear buffers (per new spec)
+    this.streamHandler.handleStreamStart(this.stateManager.currentStreamFormat, isFormatUpdate);
 
     this.stateManager.isPlaying = true;
-
-    // Ensure audio element is playing for MediaSession
-    this.audioProcessor.startAudioElement();
 
     // Explicitly set playbackState for Android (if mediaSession available)
     if (typeof navigator !== "undefined" && navigator.mediaSession) {
@@ -371,40 +359,27 @@ export class ProtocolHandler {
     }
   }
 
-  // Handle stream clear (for seek operations)
   private handleStreamClear(message: StreamClear): void {
     const roles = message.payload.roles;
-    // If roles is undefined or includes 'player', clear player buffers
     if (!roles || roles.includes("player")) {
       console.log("Sendspin: Stream clear (seek)");
-      this.audioProcessor.clearBuffers();
-      // Note: Don't stop playing, don't clear format - just clear buffers
+      this.streamHandler.handleStreamClear();
     }
   }
 
-  // Handle stream end
   private handleStreamEnd(message: StreamEnd): void {
     const roles = message.payload?.roles;
-
-    // If roles is undefined or includes 'player', handle player stream end
     if (!roles || roles.includes("player")) {
       console.log("Sendspin: Stream ended");
-      // Per spec: Stop playback and clear buffers
-      this.audioProcessor.clearBuffers();
+      this.streamHandler.handleStreamEnd();
 
-      // Clear format and reset state
       this.stateManager.currentStreamFormat = null;
       this.stateManager.isPlaying = false;
 
-      // Stop audio element (except on Android where silent loop continues)
-      this.audioProcessor.stopAudioElement();
-
-      // Explicitly set playbackState (if mediaSession available)
       if (typeof navigator !== "undefined" && navigator.mediaSession) {
         navigator.mediaSession.playbackState = "paused";
       }
 
-      // Send state update to server
       this.sendStateUpdate();
     }
   }
@@ -419,7 +394,7 @@ export class ProtocolHandler {
         // Set volume command
         if (playerCommand.volume !== undefined) {
           this.stateManager.volume = playerCommand.volume;
-          this.audioProcessor.updateVolume();
+          this.streamHandler.handleVolumeUpdate();
           // Notify external handler for hardware volume
           if (this.useHardwareVolume && this.onVolumeCommand) {
             this.onVolumeCommand(playerCommand.volume, this.stateManager.muted);
@@ -431,7 +406,7 @@ export class ProtocolHandler {
         // Mute/unmute command - uses boolean mute field
         if (playerCommand.mute !== undefined) {
           this.stateManager.muted = playerCommand.mute;
-          this.audioProcessor.updateVolume();
+          this.streamHandler.handleVolumeUpdate();
           // Notify external handler for hardware volume
           if (this.useHardwareVolume && this.onVolumeCommand) {
             this.onVolumeCommand(this.stateManager.volume, playerCommand.mute);
@@ -443,7 +418,7 @@ export class ProtocolHandler {
         const delay = playerCommand.static_delay_ms;
         if (typeof delay === "number" && isFinite(delay)) {
           const clamped = Math.max(0, Math.min(5000, Math.round(delay)));
-          this.audioProcessor.setSyncDelay(clamped);
+          this.streamHandler.handleSyncDelayChange(clamped);
           this.onDelayCommand?.(clamped);
         }
         break;
@@ -583,7 +558,7 @@ export class ProtocolHandler {
       muted = externalVol.muted;
     }
 
-    const syncDelayMs = this.audioProcessor.getSyncDelayMs();
+    const syncDelayMs = this.streamHandler.getSyncDelayMs();
     const staticDelayMs = Math.max(0, Math.min(5000, Math.round(syncDelayMs)));
 
     const message: ClientState = {
