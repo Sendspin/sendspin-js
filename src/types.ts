@@ -274,6 +274,14 @@ export interface SendspinPlayerConfig {
   clientName?: string;
 
   /**
+   * Pre-established WebSocket connection.
+   * When provided, the player adopts this socket instead of creating one from baseUrl.
+   * The socket must connect to the Sendspin /sendspin endpoint.
+   * Auto-reconnect is disabled for externally-managed sockets.
+   */
+  webSocket?: WebSocket;
+
+  /**
    * HTMLAudioElement for media-element output mode.
    * Auto-created on mobile browsers if not provided.
    */
@@ -422,6 +430,14 @@ export interface SendspinCoreConfig {
 
   /** Buffer capacity in bytes. Defaults to 5MB. */
   bufferCapacity?: number;
+
+  /**
+   * Pre-established WebSocket connection.
+   * When provided, the core adopts this socket instead of creating one from baseUrl.
+   * The socket must connect to the Sendspin /sendspin endpoint.
+   * Auto-reconnect is disabled for externally-managed sockets.
+   */
+  webSocket?: WebSocket;
 
   /** Static sync delay in milliseconds (0-5000). */
   syncDelay?: number;

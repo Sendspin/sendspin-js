@@ -157,27 +157,44 @@ export class SendspinCore implements StreamHandler {
   // ========================================
 
   async connect(): Promise<void> {
-    const url = new URL(this.config.baseUrl);
-    const wsProtocol = url.protocol === "https:" ? "wss:" : "ws:";
-    this.wsUrl = `${wsProtocol}//${url.host}/sendspin`;
+    const onOpen = () => {
+      console.log("Sendspin: Using player_id:", this.config.playerId);
+      this.protocolHandler.sendClientHello();
+    };
+    const onMessage = (event: MessageEvent) => {
+      this.protocolHandler.handleMessage(event);
+    };
+    const onError = (error: Event) => {
+      console.error("Sendspin: WebSocket error", error);
+    };
+    const onClose = () => {
+      this.protocolHandler.stopTimeSync();
+      console.log("Sendspin: Connection closed");
+    };
 
-    await this.wsManager.connect(
-      this.wsUrl,
-      () => {
-        console.log("Sendspin: Using player_id:", this.config.playerId);
-        this.protocolHandler.sendClientHello();
-      },
-      (event: MessageEvent) => {
-        this.protocolHandler.handleMessage(event);
-      },
-      (error: Event) => {
-        console.error("Sendspin: WebSocket error", error);
-      },
-      () => {
-        this.protocolHandler.stopTimeSync();
-        console.log("Sendspin: Connection closed");
-      },
-    );
+    if (this.config.webSocket) {
+      // Adopt externally-managed WebSocket
+      this.wsManager.adopt(
+        this.config.webSocket,
+        onOpen,
+        onMessage,
+        onError,
+        onClose,
+      );
+    } else {
+      // Create connection from baseUrl
+      const url = new URL(this.config.baseUrl);
+      const wsProtocol = url.protocol === "https:" ? "wss:" : "ws:";
+      this.wsUrl = `${wsProtocol}//${url.host}/sendspin`;
+
+      await this.wsManager.connect(
+        this.wsUrl,
+        onOpen,
+        onMessage,
+        onError,
+        onClose,
+      );
+    }
   }
 
   disconnect(reason: GoodbyeReason = "shutdown"): void {

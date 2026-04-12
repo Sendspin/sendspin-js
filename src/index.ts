@@ -88,6 +88,7 @@ export class SendspinPlayer {
       playerId: config.playerId,
       baseUrl: config.baseUrl,
       clientName: config.clientName,
+      webSocket: config.webSocket,
       codecs: config.codecs,
       bufferCapacity:
         config.bufferCapacity ??

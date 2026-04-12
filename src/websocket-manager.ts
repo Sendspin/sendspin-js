@@ -11,6 +11,72 @@ export class WebSocketManager {
 
   constructor() {}
 
+  /**
+   * Adopt an existing WebSocket connection.
+   * The caller is responsible for having already opened the socket.
+   * Reconnection is disabled for adopted sockets.
+   */
+  adopt(
+    ws: WebSocket,
+    onOpen?: () => void,
+    onMessage?: (event: MessageEvent) => void,
+    onError?: (error: Event) => void,
+    onClose?: () => void,
+  ): void {
+    // Store handlers
+    this.onOpenHandler = onOpen;
+    this.onMessageHandler = onMessage;
+    this.onErrorHandler = onError;
+    this.onCloseHandler = onClose;
+
+    // Close any existing connection
+    if (this.ws) {
+      this.ws.close();
+      this.ws = null;
+    }
+
+    this.ws = ws;
+    this.ws.binaryType = "arraybuffer";
+    // No auto-reconnect for externally-managed sockets
+    this.shouldReconnect = false;
+
+    this.ws.onmessage = (event: MessageEvent) => {
+      if (this.onMessageHandler) {
+        this.onMessageHandler(event);
+      }
+    };
+
+    this.ws.onerror = (error: Event) => {
+      console.error("Sendspin: WebSocket error", error);
+      if (this.onErrorHandler) {
+        this.onErrorHandler(error);
+      }
+    };
+
+    this.ws.onclose = () => {
+      console.log("Sendspin: WebSocket disconnected");
+      if (this.onCloseHandler) {
+        this.onCloseHandler();
+      }
+    };
+
+    // If already open, fire onOpen immediately
+    if (ws.readyState === WebSocket.OPEN) {
+      console.log("Sendspin: Adopted open WebSocket");
+      if (this.onOpenHandler) {
+        this.onOpenHandler();
+      }
+    } else if (ws.readyState === WebSocket.CONNECTING) {
+      // Wait for it to open
+      this.ws.onopen = () => {
+        console.log("Sendspin: Adopted WebSocket connected");
+        if (this.onOpenHandler) {
+          this.onOpenHandler();
+        }
+      };
+    }
+  }
+
   // Connect to WebSocket server
   async connect(
     url: string,
