@@ -33,6 +33,11 @@ function detectIsMobile(): boolean {
   return detectIsAndroid() || detectIsIOS();
 }
 
+function detectIsCastRuntime(): boolean {
+  if (typeof navigator === "undefined") return false;
+  return /CrKey/i.test(navigator.userAgent);
+}
+
 function detectIsSafari(): boolean {
   if (typeof navigator === "undefined") return false;
   const ua = navigator.userAgent;
@@ -85,6 +90,7 @@ export class SendspinPlayer {
 
     // Auto-detect platform
     const isAndroid = detectIsAndroid();
+    const isCastRuntime = detectIsCastRuntime();
     const isMobile = detectIsMobile();
 
     // Determine output mode:
@@ -128,6 +134,7 @@ export class SendspinPlayer {
       outputMode,
       config.audioElement,
       isAndroid,
+      isCastRuntime,
       this.ownsAudioElement,
       isAndroid ? SILENT_AUDIO_SRC : undefined,
       config.syncDelay ?? getDefaultSyncDelay(),
@@ -400,4 +407,10 @@ export * from "./types";
 export { SendspinTimeFilter } from "./time-filter";
 
 // Export platform detection utilities
-export { detectIsAndroid, detectIsIOS, detectIsMobile, getDefaultSyncDelay };
+export {
+  detectIsAndroid,
+  detectIsIOS,
+  detectIsMobile,
+  detectIsCastRuntime,
+  getDefaultSyncDelay,
+};
