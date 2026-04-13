@@ -182,10 +182,10 @@ export class SendspinPlayer {
   }
 
   private resetPlaybackStateAfterDisconnect(): void {
+    this.disconnectPlaybackResetTimeout = null;
     if (this.wsManager.isConnected()) {
       return;
     }
-    this.disconnectPlaybackResetTimeout = null;
     this.audioProcessor.clearBuffers();
     this.stateManager.currentStreamFormat = null;
     this.stateManager.isPlaying = false;
