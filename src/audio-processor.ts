@@ -1728,21 +1728,37 @@ export class AudioProcessor {
       return;
     }
 
-    this.refillTimeout = setTimeout(
-      () => {
-        this.refillTimeout = null;
-        if (
-          !this.audioContext ||
-          this.audioContext.state !== "running" ||
-          !this.stateManager.isPlaying ||
-          this.audioBufferQueue.length === 0
-        ) {
-          return;
-        }
-        this.scheduleQueueProcessing();
-      },
-      (scheduledAheadSec - refillThresholdSec) * 1000,
-    );
+    const runRefill = () => {
+      this.refillTimeout = null;
+      if (
+        !this.audioContext ||
+        this.audioContext.state !== "running" ||
+        !this.stateManager.isPlaying ||
+        this.audioBufferQueue.length === 0
+      ) {
+        return;
+      }
+      this.scheduleQueueProcessing();
+    };
+
+    const delayMs = (scheduledAheadSec - refillThresholdSec) * 1000;
+    if (typeof globalThis.setTimeout === "function") {
+      this.refillTimeout = globalThis.setTimeout(runRefill, delayMs);
+      return;
+    }
+
+    this.refillTimeout = null;
+    if (
+      typeof (globalThis as unknown as { queueMicrotask?: unknown })
+        .queueMicrotask === "function"
+    ) {
+      (
+        globalThis as unknown as { queueMicrotask: (cb: () => void) => void }
+      ).queueMicrotask(runRefill);
+      return;
+    }
+
+    void Promise.resolve().then(runRefill);
   }
 
   // Queue Opus packet to native decoder for async decoding (non-blocking)
