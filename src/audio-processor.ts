@@ -49,6 +49,9 @@ const CAST_SCHEDULE_HORIZON_GOOD_SEC = 1;
 const CAST_SCHEDULE_HORIZON_POOR_SEC = 0.5;
 const SCHEDULE_HORIZON_PRECISE_ERROR_MS = 2;
 const SCHEDULE_HORIZON_GOOD_ERROR_MS = 8;
+const SCHEDULE_REFILL_THRESHOLD_FRACTION = 0.5;
+const SCHEDULE_REFILL_MIN_THRESHOLD_SEC = 0.1;
+const SCHEDULE_REFILL_MAX_THRESHOLD_SEC = 5;
 type AudioClockSource = "estimated" | "timestamp" | "raw";
 
 interface OutputTimestampSample {
@@ -1642,12 +1645,15 @@ export class AudioProcessor {
   }
 
   private scheduleTimeout: ReturnType<typeof setTimeout> | null = null;
+  private refillTimeout: ReturnType<typeof setTimeout> | null = null;
   private queueProcessScheduled = false;
 
   // Schedule queue processing without starvation.
   // Uses a short timeout to allow out-of-order async decodes (FLAC) to batch.
   // TODO: Consider a "max-wait" watchdog if timer throttling/clamping causes excessive scheduling latency.
   private scheduleQueueProcessing(): void {
+    this.cancelScheduledRefill();
+
     if (this.queueProcessScheduled) {
       return;
     }
@@ -1677,6 +1683,66 @@ export class AudioProcessor {
     } else {
       Promise.resolve().then(run);
     }
+  }
+
+  private cancelScheduledRefill(): void {
+    if (this.refillTimeout !== null) {
+      clearTimeout(this.refillTimeout);
+      this.refillTimeout = null;
+    }
+  }
+
+  private getScheduledRefillThresholdSec(
+    targetScheduledHorizonSec: number,
+  ): number {
+    return Math.max(
+      SCHEDULE_REFILL_MIN_THRESHOLD_SEC,
+      Math.min(
+        SCHEDULE_REFILL_MAX_THRESHOLD_SEC,
+        targetScheduledHorizonSec * SCHEDULE_REFILL_THRESHOLD_FRACTION,
+      ),
+    );
+  }
+
+  private scheduleQueueRefill(targetScheduledHorizonSec: number): void {
+    this.cancelScheduledRefill();
+
+    if (
+      !this.audioContext ||
+      this.audioContext.state !== "running" ||
+      !this.stateManager.isPlaying ||
+      this.audioBufferQueue.length === 0
+    ) {
+      return;
+    }
+
+    const currentTimeSec = this.audioContext.currentTime;
+    this.pruneExpiredScheduledSources(currentTimeSec);
+    const scheduledAheadSec = this.getScheduledAheadSec(currentTimeSec);
+    const refillThresholdSec = this.getScheduledRefillThresholdSec(
+      targetScheduledHorizonSec,
+    );
+
+    if (scheduledAheadSec <= refillThresholdSec) {
+      this.scheduleQueueProcessing();
+      return;
+    }
+
+    this.refillTimeout = setTimeout(
+      () => {
+        this.refillTimeout = null;
+        if (
+          !this.audioContext ||
+          this.audioContext.state !== "running" ||
+          !this.stateManager.isPlaying ||
+          this.audioBufferQueue.length === 0
+        ) {
+          return;
+        }
+        this.scheduleQueueProcessing();
+      },
+      (scheduledAheadSec - refillThresholdSec) * 1000,
+    );
   }
 
   // Queue Opus packet to native decoder for async decoding (non-blocking)
@@ -1891,6 +1957,8 @@ export class AudioProcessor {
 
   // Process the audio queue and schedule chunks in order
   processAudioQueue(): void {
+    this.cancelScheduledRefill();
+
     if (!this.audioContext || !this.gainNode) return;
     if (this.audioContext.state !== "running") return;
 
@@ -2148,6 +2216,7 @@ export class AudioProcessor {
         }
       };
     }
+    this.scheduleQueueRefill(targetScheduledHorizonSec);
     this.emitStatusLog(nowMs);
   }
 
@@ -2190,6 +2259,7 @@ export class AudioProcessor {
   // Clear all audio buffers and scheduled sources
   clearBuffers(): void {
     this.stopRecorrectionMonitor();
+    this.cancelScheduledRefill();
 
     // Stop all scheduled audio sources
     this.scheduledSources.forEach((entry) => {
