@@ -83,6 +83,7 @@ export class SendspinPlayer {
   private timeFilter: SendspinTimeFilter;
   private disconnectPlaybackResetTimeout: ReturnType<typeof setTimeout> | null =
     null;
+  private suppressDisconnectPlaybackReset = false;
 
   private config: SendspinPlayerConfig;
   private wsUrl: string = "";
@@ -213,6 +214,8 @@ export class SendspinPlayer {
 
   // Connect to Sendspin server
   async connect(): Promise<void> {
+    this.suppressDisconnectPlaybackReset = false;
+
     // Build WebSocket URL
     const url = new URL(this.config.baseUrl);
     const wsProtocol = url.protocol === "https:" ? "wss:" : "ws:";
@@ -238,6 +241,10 @@ export class SendspinPlayer {
       // onClose
       () => {
         this.protocolHandler.stopTimeSync();
+        if (this.suppressDisconnectPlaybackReset) {
+          console.log("Sendspin: Connection closed");
+          return;
+        }
         this.stateManager.clearStateUpdateInterval();
         this.scheduleDisconnectPlaybackReset();
         console.log("Sendspin: Connection closed");
@@ -255,6 +262,7 @@ export class SendspinPlayer {
    */
   disconnect(reason: GoodbyeReason = "shutdown"): void {
     this.cancelPendingDisconnectPlaybackReset();
+    this.suppressDisconnectPlaybackReset = true;
 
     // Send goodbye message if connected
     if (this.wsManager.isConnected()) {
