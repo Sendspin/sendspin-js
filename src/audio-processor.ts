@@ -402,6 +402,18 @@ export class AudioProcessor {
   }
 
   private getTimestampDerivedAudioTimeSec(rawTimeSec: number): number | null {
+    if (this.isCastRuntime) {
+      if (
+        this.activeAudioClockSource !== "estimated" ||
+        this.outputTimestampLastSample !== null ||
+        this.outputTimestampGoodSamples !== 0 ||
+        this._lastTimestampRejectReason !== null
+      ) {
+        this.resetOutputTimestampValidation();
+      }
+      return null;
+    }
+
     if (!this.audioContext) {
       return null;
     }
@@ -942,7 +954,9 @@ export class AudioProcessor {
 
     // clock field
     let clock: string;
-    if (this.activeAudioClockSource === "timestamp") {
+    if (this.isCastRuntime) {
+      clock = "estimated(cast-disabled)";
+    } else if (this.activeAudioClockSource === "timestamp") {
       clock = `timestamp(good:${this.outputTimestampGoodSamples})`;
     } else if (this._lastTimestampRejectReason) {
       clock = `estimated(reject:"${this._lastTimestampRejectReason}")`;
