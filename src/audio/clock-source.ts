@@ -46,6 +46,7 @@ export class ClockSource {
   private activeSource: AudioClockSource = "estimated";
   private _pendingCutover = false;
   private _lastRejectReason: string | null = null;
+  private _timestampPromotionDisabled = false;
 
   // Output timestamp validation state
   private lastSample: OutputTimestampSample | null = null;
@@ -75,6 +76,15 @@ export class ClockSource {
 
   get timestampGoodSamples(): number {
     return this.goodSamples;
+  }
+
+  get timestampPromotionDisabled(): boolean {
+    return this._timestampPromotionDisabled;
+  }
+
+  /** Disable timestamp promotion (e.g., on Cast receivers to avoid rate oscillations). */
+  disableTimestampPromotion(): void {
+    this._timestampPromotionDisabled = true;
   }
 
   setActive(source: AudioClockSource): boolean {
@@ -154,6 +164,19 @@ export class ClockSource {
     rawTimeSec: number,
     audioContext: AudioContext,
   ): number | null {
+    // On Cast receivers, stay on the estimated clock to avoid rate oscillations.
+    if (this._timestampPromotionDisabled) {
+      if (
+        this.activeSource !== "estimated" ||
+        this.lastSample !== null ||
+        this.goodSamples !== 0 ||
+        this._lastRejectReason !== null
+      ) {
+        this.reset();
+      }
+      return null;
+    }
+
     const getOutputTimestamp = (
       audioContext as unknown as {
         getOutputTimestamp?: () => {

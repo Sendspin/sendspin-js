@@ -158,6 +158,9 @@ export class AudioScheduler {
     }
 
     this.latencyTracker = new OutputLatencyTracker(storage);
+    if (this.isCastRuntime) {
+      this.clockSource.disableTimestampPromotion();
+    }
     this.recorrectionMonitor = new RecorrectionMonitor(
       () => this.checkRecorrection(),
     );
@@ -333,7 +336,9 @@ export class AudioScheduler {
     const aheadSec = this.audioContext ? this.getScheduledAheadSec(this.audioContext.currentTime) : 0;
 
     let clock: string;
-    if (this.clockSource.active === "timestamp") {
+    if (this.clockSource.timestampPromotionDisabled) {
+      clock = "estimated(cast-disabled)";
+    } else if (this.clockSource.active === "timestamp") {
       clock = `timestamp(good:${this.clockSource.timestampGoodSamples})`;
     } else if (this.clockSource.lastRejectReason) {
       clock = `estimated(reject:"${this.clockSource.lastRejectReason}")`;
