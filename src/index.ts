@@ -241,13 +241,12 @@ export class SendspinPlayer {
       // onClose
       () => {
         this.protocolHandler.stopTimeSync();
+        console.log("Sendspin: Connection closed");
         if (this.suppressDisconnectPlaybackReset) {
-          console.log("Sendspin: Connection closed");
           return;
         }
         this.stateManager.clearStateUpdateInterval();
         this.scheduleDisconnectPlaybackReset();
-        console.log("Sendspin: Connection closed");
       },
     );
   }
