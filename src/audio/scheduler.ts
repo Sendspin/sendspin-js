@@ -43,8 +43,14 @@ const SCHEDULE_HEADROOM_SEC = 0.2;
 const SCHEDULE_HORIZON_PRECISE_SEC = 20;
 const SCHEDULE_HORIZON_GOOD_SEC = 8;
 const SCHEDULE_HORIZON_POOR_SEC = 4;
+const CAST_SCHEDULE_HORIZON_PRECISE_SEC = 1.5;
+const CAST_SCHEDULE_HORIZON_GOOD_SEC = 1;
+const CAST_SCHEDULE_HORIZON_POOR_SEC = 0.5;
 const SCHEDULE_HORIZON_PRECISE_ERROR_MS = 2;
 const SCHEDULE_HORIZON_GOOD_ERROR_MS = 8;
+const SCHEDULE_REFILL_THRESHOLD_FRACTION = 0.5;
+const SCHEDULE_REFILL_MIN_THRESHOLD_SEC = 0.1;
+const SCHEDULE_REFILL_MAX_THRESHOLD_SEC = 5;
 
 const DEFAULT_CORRECTION_THRESHOLDS: Record<CorrectionMode, CorrectionThresholds> = {
   sync: {
@@ -109,6 +115,7 @@ export class AudioScheduler {
 
   private useOutputLatencyCompensation: boolean;
   private scheduleTimeout: ReturnType<typeof setTimeout> | null = null;
+  private refillTimeout: ReturnType<typeof setTimeout> | null = null;
   private queueProcessScheduled = false;
 
   // Sub-modules
@@ -122,6 +129,7 @@ export class AudioScheduler {
     private outputMode: AudioOutputMode = "direct",
     private audioElement?: HTMLAudioElement,
     private isAndroid: boolean = false,
+    private isCastRuntime: boolean = false,
     private ownsAudioElement: boolean = false,
     private silentAudioSrc?: string,
     private syncDelayMs: number = 0,
@@ -183,10 +191,13 @@ export class AudioScheduler {
   }
 
   private getTargetScheduledHorizonSec(): number {
+    const precise = this.isCastRuntime ? CAST_SCHEDULE_HORIZON_PRECISE_SEC : SCHEDULE_HORIZON_PRECISE_SEC;
+    const good = this.isCastRuntime ? CAST_SCHEDULE_HORIZON_GOOD_SEC : SCHEDULE_HORIZON_GOOD_SEC;
+    const poor = this.isCastRuntime ? CAST_SCHEDULE_HORIZON_POOR_SEC : SCHEDULE_HORIZON_POOR_SEC;
     const errorMs = this.timeFilter.error / 1000;
-    if (errorMs < SCHEDULE_HORIZON_PRECISE_ERROR_MS) return SCHEDULE_HORIZON_PRECISE_SEC;
-    if (errorMs <= SCHEDULE_HORIZON_GOOD_ERROR_MS) return SCHEDULE_HORIZON_GOOD_SEC;
-    return SCHEDULE_HORIZON_POOR_SEC;
+    if (errorMs < SCHEDULE_HORIZON_PRECISE_ERROR_MS) return precise;
+    if (errorMs <= SCHEDULE_HORIZON_GOOD_ERROR_MS) return good;
+    return poor;
   }
 
   private getScheduledAheadSec(currentTimeSec: number): number {
@@ -473,7 +484,50 @@ export class AudioScheduler {
     this.gainNode.gain.value = this.stateManager.muted ? 0 : this.stateManager.volume / 100;
   }
 
+  measureBufferedPlaybackRunwaySec(): number {
+    if (!this.audioContext) return 0;
+    const currentTimeSec = this.audioContext.currentTime;
+    this.pruneExpiredScheduledSources(currentTimeSec);
+    const scheduledAheadSec = this.getScheduledAheadSec(currentTimeSec);
+    const queuedAheadSec = this.audioBufferQueue.reduce(
+      (totalSec, chunk) => totalSec + chunk.buffer.duration, 0,
+    );
+    return Math.max(0, scheduledAheadSec + queuedAheadSec);
+  }
+
+  private cancelScheduledRefill(): void {
+    if (this.refillTimeout !== null) { clearTimeout(this.refillTimeout); this.refillTimeout = null; }
+  }
+
+  private getScheduledRefillThresholdSec(targetScheduledHorizonSec: number): number {
+    return Math.max(SCHEDULE_REFILL_MIN_THRESHOLD_SEC,
+      Math.min(SCHEDULE_REFILL_MAX_THRESHOLD_SEC, targetScheduledHorizonSec * SCHEDULE_REFILL_THRESHOLD_FRACTION));
+  }
+
+  private scheduleQueueRefill(targetScheduledHorizonSec: number): void {
+    this.cancelScheduledRefill();
+    if (!this.audioContext || this.audioContext.state !== "running" || !this.stateManager.isPlaying || this.audioBufferQueue.length === 0) return;
+    const currentTimeSec = this.audioContext.currentTime;
+    this.pruneExpiredScheduledSources(currentTimeSec);
+    const scheduledAheadSec = this.getScheduledAheadSec(currentTimeSec);
+    const refillThresholdSec = this.getScheduledRefillThresholdSec(targetScheduledHorizonSec);
+    if (scheduledAheadSec <= refillThresholdSec) { this.scheduleQueueProcessing(); return; }
+    const delayMs = (scheduledAheadSec - refillThresholdSec) * 1000;
+    const runRefill = () => {
+      this.refillTimeout = null;
+      if (!this.audioContext || this.audioContext.state !== "running" || !this.stateManager.isPlaying || this.audioBufferQueue.length === 0) return;
+      this.scheduleQueueProcessing();
+    };
+    if (typeof globalThis.setTimeout === "function") { this.refillTimeout = globalThis.setTimeout(runRefill, delayMs); return; }
+    this.refillTimeout = null;
+    if (typeof (globalThis as unknown as { queueMicrotask?: unknown }).queueMicrotask === "function") {
+      (globalThis as unknown as { queueMicrotask: (cb: () => void) => void }).queueMicrotask(runRefill); return;
+    }
+    void Promise.resolve().then(runRefill);
+  }
+
   private scheduleQueueProcessing(): void {
+    this.cancelScheduledRefill();
     if (this.queueProcessScheduled) return;
     this.queueProcessScheduled = true;
     if (typeof globalThis.setTimeout === "function") {
@@ -501,6 +555,7 @@ export class AudioScheduler {
 
 
   processAudioQueue(): void {
+    this.cancelScheduledRefill();
     if (!this.audioContext || !this.gainNode) return;
     if (this.audioContext.state !== "running") return;
 
@@ -637,6 +692,7 @@ export class AudioScheduler {
         }
       };
     }
+    this.scheduleQueueRefill(targetScheduledHorizonSec);
     this.emitStatusLog(nowMs);
   }
 
@@ -660,6 +716,7 @@ export class AudioScheduler {
 
   clearBuffers(): void {
     this.recorrectionMonitor.stop();
+    this.cancelScheduledRefill();
     this.scheduledSources.forEach((entry) => { try { entry.source.stop(); } catch { /* ignore */ } });
     this.scheduledSources = [];
     this.audioBufferQueue = [];

@@ -47,6 +47,8 @@ export class SendspinCore implements StreamHandler {
   private _onStreamEnd?: () => void;
   private _onVolumeUpdate?: () => void;
   private _onSyncDelayChange?: (delayMs: number) => void;
+  private _onConnectionOpen?: () => void;
+  private _onConnectionClose?: () => void;
 
   constructor(config: SendspinCoreConfig) {
     const randomId = generateRandomId();
@@ -151,6 +153,12 @@ export class SendspinCore implements StreamHandler {
   set onSyncDelayChange(cb: ((delayMs: number) => void) | undefined) {
     this._onSyncDelayChange = cb;
   }
+  set onConnectionOpen(cb: (() => void) | undefined) {
+    this._onConnectionOpen = cb;
+  }
+  set onConnectionClose(cb: (() => void) | undefined) {
+    this._onConnectionClose = cb;
+  }
 
   // ========================================
   // Connection
@@ -158,6 +166,7 @@ export class SendspinCore implements StreamHandler {
 
   async connect(): Promise<void> {
     const onOpen = () => {
+      this._onConnectionOpen?.();
       console.log("Sendspin: Using player_id:", this.config.playerId);
       this.protocolHandler.sendClientHello();
     };
@@ -170,6 +179,7 @@ export class SendspinCore implements StreamHandler {
     const onClose = () => {
       this.protocolHandler.stopTimeSync();
       console.log("Sendspin: Connection closed");
+      this._onConnectionClose?.();
     };
 
     if (this.config.webSocket) {

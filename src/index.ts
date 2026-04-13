@@ -30,6 +30,11 @@ function detectIsMobile(): boolean {
   return detectIsAndroid() || detectIsIOS();
 }
 
+function detectIsCastRuntime(): boolean {
+  if (typeof navigator === "undefined") return false;
+  return /CrKey/i.test(navigator.userAgent);
+}
+
 function detectIsSafari(): boolean {
   if (typeof navigator === "undefined") return false;
   const ua = navigator.userAgent;
@@ -59,14 +64,22 @@ function getDefaultSyncDelay(): number {
   return 200;
 }
 
+// Add a small cushion beyond the measured buffered runway so delayed timer
+// delivery does not cut playback off just before the last scheduled audio ends.
+const DISCONNECT_PLAYBACK_RESET_GRACE_MS = 250;
+
 export class SendspinPlayer {
   private core: SendspinCore;
   private scheduler: AudioScheduler;
   private ownsAudioElement = false;
+  private disconnectPlaybackResetTimeout: ReturnType<typeof setTimeout> | null =
+    null;
+  private suppressDisconnectPlaybackReset = false;
 
   constructor(config: SendspinPlayerConfig) {
     // Auto-detect platform
     const isAndroid = detectIsAndroid();
+    const isCastRuntime = detectIsCastRuntime();
     const isMobile = detectIsMobile();
 
     // Determine output mode
@@ -115,6 +128,7 @@ export class SendspinPlayer {
       outputMode,
       config.audioElement,
       isAndroid,
+      isCastRuntime,
       this.ownsAudioElement,
       isAndroid ? SILENT_AUDIO_SRC : undefined,
       syncDelay,
@@ -155,10 +169,62 @@ export class SendspinPlayer {
     this.core.onSyncDelayChange = (delayMs) => {
       this.scheduler.setSyncDelay(delayMs);
     };
+
+    // Wire connection lifecycle for disconnect playback deferral
+    this.core.onConnectionOpen = () => {
+      this.cancelPendingDisconnectPlaybackReset();
+    };
+
+    this.core.onConnectionClose = () => {
+      if (this.suppressDisconnectPlaybackReset) {
+        return;
+      }
+      this.core._stateManager.clearStateUpdateInterval();
+      this.scheduleDisconnectPlaybackReset();
+    };
+  }
+
+  private cancelPendingDisconnectPlaybackReset(): void {
+    if (this.disconnectPlaybackResetTimeout !== null) {
+      clearTimeout(this.disconnectPlaybackResetTimeout);
+      this.disconnectPlaybackResetTimeout = null;
+    }
+  }
+
+  private resetPlaybackStateAfterDisconnect(): void {
+    this.disconnectPlaybackResetTimeout = null;
+    if (this.core.isConnected) {
+      return;
+    }
+    this.scheduler.clearBuffers();
+    this.core._stateManager.currentStreamFormat = null;
+    this.core._stateManager.isPlaying = false;
+    this.scheduler.stopAudioElement();
+    if (typeof navigator !== "undefined" && navigator.mediaSession) {
+      navigator.mediaSession.playbackState = "paused";
+    }
+  }
+
+  private scheduleDisconnectPlaybackReset(): void {
+    this.cancelPendingDisconnectPlaybackReset();
+
+    const runwaySec = this.scheduler.measureBufferedPlaybackRunwaySec();
+    if (runwaySec <= 0) {
+      this.resetPlaybackStateAfterDisconnect();
+      return;
+    }
+
+    this.disconnectPlaybackResetTimeout = setTimeout(
+      () => {
+        this.resetPlaybackStateAfterDisconnect();
+      },
+      runwaySec * 1000 + DISCONNECT_PLAYBACK_RESET_GRACE_MS,
+    );
   }
 
   // Connect to Sendspin server
   async connect(): Promise<void> {
+    this.suppressDisconnectPlaybackReset = false;
     return this.core.connect();
   }
 
@@ -167,6 +233,9 @@ export class SendspinPlayer {
    * @param reason - Optional reason for disconnecting (default: 'shutdown')
    */
   disconnect(reason: GoodbyeReason = "shutdown"): void {
+    this.cancelPendingDisconnectPlaybackReset();
+    this.suppressDisconnectPlaybackReset = true;
+
     this.core.disconnect(reason);
 
     // Close scheduler
@@ -287,4 +356,10 @@ export { SendspinDecoder } from "./audio/decoder";
 export { AudioScheduler } from "./audio/scheduler";
 
 // Export platform detection utilities
-export { detectIsAndroid, detectIsIOS, detectIsMobile, getDefaultSyncDelay };
+export {
+  detectIsAndroid,
+  detectIsIOS,
+  detectIsMobile,
+  detectIsCastRuntime,
+  getDefaultSyncDelay,
+};
