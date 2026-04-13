@@ -855,6 +855,23 @@ export class AudioProcessor {
     return this.syncDelayMs;
   }
 
+  // Refresh expired scheduled-source bookkeeping before measuring how much
+  // queued and already-scheduled audio remains available for playback.
+  measureBufferedPlaybackRunwaySec(): number {
+    if (!this.audioContext) {
+      return 0;
+    }
+
+    const currentTimeSec = this.audioContext.currentTime;
+    this.pruneExpiredScheduledSources(currentTimeSec);
+    const scheduledAheadSec = this.getScheduledAheadSec(currentTimeSec);
+    const queuedAheadSec = this.audioBufferQueue.reduce(
+      (totalSec, chunk) => totalSec + chunk.buffer.duration,
+      0,
+    );
+    return Math.max(0, scheduledAheadSec + queuedAheadSec);
+  }
+
   // Update sync delay at runtime
   setSyncDelay(delayMs: number): void {
     const sanitizedDelayMs = this.sanitizeSyncDelayMs(delayMs);
