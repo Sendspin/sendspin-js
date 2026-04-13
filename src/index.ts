@@ -71,12 +71,19 @@ function generateRandomId(): string {
   return Math.random().toString(36).substring(2, 6);
 }
 
+// Add a small cushion beyond the measured buffered runway so delayed timer
+// delivery does not cut playback off just before the last scheduled audio ends.
+const DISCONNECT_PLAYBACK_RESET_GRACE_MS = 250;
+
 export class SendspinPlayer {
   private wsManager: WebSocketManager;
   private audioProcessor: AudioProcessor;
   private protocolHandler: ProtocolHandler;
   private stateManager: StateManager;
   private timeFilter: SendspinTimeFilter;
+  private disconnectPlaybackResetTimeout: ReturnType<typeof setTimeout> | null =
+    null;
+  private suppressDisconnectPlaybackReset = false;
 
   private config: SendspinPlayerConfig;
   private wsUrl: string = "";
@@ -167,8 +174,48 @@ export class SendspinPlayer {
     );
   }
 
+  private cancelPendingDisconnectPlaybackReset(): void {
+    if (this.disconnectPlaybackResetTimeout !== null) {
+      clearTimeout(this.disconnectPlaybackResetTimeout);
+      this.disconnectPlaybackResetTimeout = null;
+    }
+  }
+
+  private resetPlaybackStateAfterDisconnect(): void {
+    this.disconnectPlaybackResetTimeout = null;
+    if (this.wsManager.isConnected()) {
+      return;
+    }
+    this.audioProcessor.clearBuffers();
+    this.stateManager.currentStreamFormat = null;
+    this.stateManager.isPlaying = false;
+    this.audioProcessor.stopAudioElement();
+    if (typeof navigator !== "undefined" && navigator.mediaSession) {
+      navigator.mediaSession.playbackState = "paused";
+    }
+  }
+
+  private scheduleDisconnectPlaybackReset(): void {
+    this.cancelPendingDisconnectPlaybackReset();
+
+    const runwaySec = this.audioProcessor.measureBufferedPlaybackRunwaySec();
+    if (runwaySec <= 0) {
+      this.resetPlaybackStateAfterDisconnect();
+      return;
+    }
+
+    this.disconnectPlaybackResetTimeout = setTimeout(
+      () => {
+        this.resetPlaybackStateAfterDisconnect();
+      },
+      runwaySec * 1000 + DISCONNECT_PLAYBACK_RESET_GRACE_MS,
+    );
+  }
+
   // Connect to Sendspin server
   async connect(): Promise<void> {
+    this.suppressDisconnectPlaybackReset = false;
+
     // Build WebSocket URL
     const url = new URL(this.config.baseUrl);
     const wsProtocol = url.protocol === "https:" ? "wss:" : "ws:";
@@ -179,6 +226,7 @@ export class SendspinPlayer {
       this.wsUrl,
       // onOpen
       () => {
+        this.cancelPendingDisconnectPlaybackReset();
         console.log("Sendspin: Using player_id:", this.config.playerId);
         this.protocolHandler.sendClientHello();
       },
@@ -194,6 +242,11 @@ export class SendspinPlayer {
       () => {
         this.protocolHandler.stopTimeSync();
         console.log("Sendspin: Connection closed");
+        if (this.suppressDisconnectPlaybackReset) {
+          return;
+        }
+        this.stateManager.clearStateUpdateInterval();
+        this.scheduleDisconnectPlaybackReset();
       },
     );
   }
@@ -207,6 +260,9 @@ export class SendspinPlayer {
    *   - 'user_request': User explicitly requested to disconnect
    */
   disconnect(reason: GoodbyeReason = "shutdown"): void {
+    this.cancelPendingDisconnectPlaybackReset();
+    this.suppressDisconnectPlaybackReset = true;
+
     // Send goodbye message if connected
     if (this.wsManager.isConnected()) {
       this.protocolHandler.sendGoodbye(reason);
