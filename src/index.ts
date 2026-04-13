@@ -407,4 +407,10 @@ export * from "./types";
 export { SendspinTimeFilter } from "./time-filter";
 
 // Export platform detection utilities
-export { detectIsAndroid, detectIsIOS, detectIsMobile, getDefaultSyncDelay };
+export {
+  detectIsAndroid,
+  detectIsIOS,
+  detectIsMobile,
+  detectIsCastRuntime,
+  getDefaultSyncDelay,
+};
