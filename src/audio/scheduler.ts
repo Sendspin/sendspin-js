@@ -43,9 +43,7 @@ const SCHEDULE_HEADROOM_SEC = 0.2;
 const SCHEDULE_HORIZON_PRECISE_SEC = 20;
 const SCHEDULE_HORIZON_GOOD_SEC = 8;
 const SCHEDULE_HORIZON_POOR_SEC = 4;
-const CAST_SCHEDULE_HORIZON_PRECISE_SEC = 1.5;
-const CAST_SCHEDULE_HORIZON_GOOD_SEC = 1;
-const CAST_SCHEDULE_HORIZON_POOR_SEC = 0.5;
+const CAST_SCHEDULE_HORIZON_SEC = 1.5;
 const SCHEDULE_HORIZON_PRECISE_ERROR_MS = 2;
 const SCHEDULE_HORIZON_GOOD_ERROR_MS = 8;
 const SCHEDULE_REFILL_THRESHOLD_FRACTION = 0.5;
@@ -194,13 +192,13 @@ export class AudioScheduler {
   }
 
   private getTargetScheduledHorizonSec(): number {
-    const precise = this.isCastRuntime ? CAST_SCHEDULE_HORIZON_PRECISE_SEC : SCHEDULE_HORIZON_PRECISE_SEC;
-    const good = this.isCastRuntime ? CAST_SCHEDULE_HORIZON_GOOD_SEC : SCHEDULE_HORIZON_GOOD_SEC;
-    const poor = this.isCastRuntime ? CAST_SCHEDULE_HORIZON_POOR_SEC : SCHEDULE_HORIZON_POOR_SEC;
+    if (this.isCastRuntime) {
+      return CAST_SCHEDULE_HORIZON_SEC;
+    }
     const errorMs = this.timeFilter.error / 1000;
-    if (errorMs < SCHEDULE_HORIZON_PRECISE_ERROR_MS) return precise;
-    if (errorMs <= SCHEDULE_HORIZON_GOOD_ERROR_MS) return good;
-    return poor;
+    if (errorMs < SCHEDULE_HORIZON_PRECISE_ERROR_MS) return SCHEDULE_HORIZON_PRECISE_SEC;
+    if (errorMs <= SCHEDULE_HORIZON_GOOD_ERROR_MS) return SCHEDULE_HORIZON_GOOD_SEC;
+    return SCHEDULE_HORIZON_POOR_SEC;
   }
 
   private getScheduledAheadSec(currentTimeSec: number): number {
@@ -656,9 +654,12 @@ export class AudioScheduler {
             chunk.buffer = this.copyBuffer(chunk.buffer);
           }
         } else {
-          this.recorrectionMonitor.noteHardResync(nowMs);
-          this.resyncCount++; this._intervalResyncCount++;
-          this.cutScheduledSources(targetPlaybackTime - syncDelaySec);
+          // Gap detected in server timestamps - hard resync (gated on cooldown)
+          if (this.recorrectionMonitor.canUseHardResync(nowMs, isTimestamp)) {
+            this.recorrectionMonitor.noteHardResync(nowMs);
+            this.resyncCount++; this._intervalResyncCount++;
+            this.cutScheduledSources(targetPlaybackTime - syncDelaySec);
+          }
           playbackTime = targetPlaybackTime; scheduleTime = playbackTime - syncDelaySec;
           playbackRate = 1.0; this.currentCorrectionMethod = "resync"; this.lastSamplesAdjusted = 0;
           chunk.buffer = this.copyBuffer(chunk.buffer);
