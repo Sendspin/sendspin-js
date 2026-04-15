@@ -2,8 +2,7 @@ import type { Codec, SupportedFormat } from "../types";
 
 /** Detect which audio codecs the current browser supports. */
 export function getBrowserSupportedCodecs(): Set<Codec> {
-  const userAgent =
-    typeof navigator !== "undefined" ? navigator.userAgent : "";
+  const userAgent = typeof navigator !== "undefined" ? navigator.userAgent : "";
   const isSafari = /^((?!chrome|android).)*safari/i.test(userAgent);
   const isFirefox = /firefox/i.test(userAgent);
 

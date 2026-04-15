@@ -42,7 +42,10 @@ export class SendspinCore implements StreamHandler {
 
   // Stream events — consumers (e.g., SendspinPlayer) subscribe to these
   private _onAudioData?: (chunk: DecodedAudioChunk) => void;
-  private _onStreamStart?: (format: StreamFormat, isFormatUpdate: boolean) => void;
+  private _onStreamStart?: (
+    format: StreamFormat,
+    isFormatUpdate: boolean,
+  ) => void;
   private _onStreamClear?: () => void;
   private _onStreamEnd?: () => void;
   private _onVolumeUpdate?: () => void;
@@ -56,7 +59,10 @@ export class SendspinCore implements StreamHandler {
     const clientName = config.clientName ?? `Sendspin JS Client (${randomId})`;
 
     this.config = { ...config, playerId, clientName };
-    this._syncDelayMs = Math.max(0, Math.min(5000, Math.round(config.syncDelay ?? 0)));
+    this._syncDelayMs = Math.max(
+      0,
+      Math.min(5000, Math.round(config.syncDelay ?? 0)),
+    );
 
     this.timeFilter = new SendspinTimeFilter(0, 1.1, 2.0, 1e-12);
     this.stateManager = new StateManager(config.onStateChange);
@@ -138,7 +144,9 @@ export class SendspinCore implements StreamHandler {
   set onAudioData(cb: ((chunk: DecodedAudioChunk) => void) | undefined) {
     this._onAudioData = cb;
   }
-  set onStreamStart(cb: ((format: StreamFormat, isFormatUpdate: boolean) => void) | undefined) {
+  set onStreamStart(
+    cb: ((format: StreamFormat, isFormatUpdate: boolean) => void) | undefined,
+  ) {
     this._onStreamStart = cb;
   }
   set onStreamClear(cb: (() => void) | undefined) {

@@ -131,7 +131,6 @@ export class ClockSource {
     }
   }
 
-
   private getEstimatedTime(rawTimeSec: number, nowMs: number): number {
     if (this.estimateAudioTimeSec === null) {
       this.estimateAudioTimeSec = rawTimeSec;
@@ -327,7 +326,12 @@ export class ClockSource {
     const nowMs = performance.now();
     const nowUs = nowMs * 1000;
     if (!audioContext) {
-      return { audioContextTimeSec: 0, audioContextRawTimeSec: 0, nowMs, nowUs };
+      return {
+        audioContextTimeSec: 0,
+        audioContextRawTimeSec: 0,
+        nowMs,
+        nowUs,
+      };
     }
 
     const rawTimeSec = audioContext.currentTime;

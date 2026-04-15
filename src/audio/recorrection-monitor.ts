@@ -89,10 +89,7 @@ export class RecorrectionMonitor {
     this.lastRecorrectionAtMs = nowMs;
   }
 
-  shouldIgnoreTransientJump(
-    rawSyncErrorMs: number,
-    nowMs: number,
-  ): boolean {
+  shouldIgnoreTransientJump(rawSyncErrorMs: number, nowMs: number): boolean {
     const prev = this.prevRawSyncErrorMs;
     this.prevRawSyncErrorMs = rawSyncErrorMs;
 

@@ -175,7 +175,10 @@ export class ProtocolHandler {
         `BitDepth=${this.stateManager.currentStreamFormat.bit_depth}bit`,
     );
 
-    this.streamHandler.handleStreamStart(this.stateManager.currentStreamFormat, isFormatUpdate);
+    this.streamHandler.handleStreamStart(
+      this.stateManager.currentStreamFormat,
+      isFormatUpdate,
+    );
 
     this.stateManager.isPlaying = true;
 
