@@ -2171,10 +2171,12 @@ export class AudioProcessor {
           }
         } else {
           // Gap detected in server timestamps - hard resync
-          this.noteHardResync(nowMs);
-          this.resyncCount++;
-          this._intervalResyncCount++;
-          this.cutScheduledSources(targetPlaybackTime - syncDelaySec);
+          if (this.canUseHardResync(nowMs)) {
+            this.noteHardResync(nowMs);
+            this.resyncCount++;
+            this._intervalResyncCount++;
+            this.cutScheduledSources(targetPlaybackTime - syncDelaySec);
+          }
           playbackTime = targetPlaybackTime;
           scheduleTime = playbackTime - syncDelaySec;
           playbackRate = 1.0;
