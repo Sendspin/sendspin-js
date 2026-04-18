@@ -216,10 +216,14 @@ export class SendspinPlayer {
   async connect(): Promise<void> {
     this.suppressDisconnectPlaybackReset = false;
 
-    // Build WebSocket URL
-    const url = new URL(this.config.baseUrl);
+    // Build WebSocket URL, preserving path from baseUrl for reverse proxy support
+    const url = new URL(
+      this.config.baseUrl,
+      typeof window !== "undefined" ? window.location.href : undefined,
+    );
     const wsProtocol = url.protocol === "https:" ? "wss:" : "ws:";
-    this.wsUrl = `${wsProtocol}//${url.host}/sendspin`;
+    const basePath = url.pathname.replace(/\/$/, "");
+    this.wsUrl = `${wsProtocol}//${url.host}${basePath}/sendspin`;
 
     // Connect to WebSocket
     await this.wsManager.connect(
