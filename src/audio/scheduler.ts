@@ -226,7 +226,7 @@ export class AudioScheduler {
     this.nextPlaybackTime = 0;
     this.nextScheduleTime = 0;
     this.lastScheduledServerTime = 0;
-    this.recorrectionMonitor.minScheduleTimeSec = null;
+    this.recorrectionMonitor.clearMinScheduleTime();
     this.clockSource.pendingCutover = false;
     this.recorrectionMonitor.resetCheckState();
     this.resetSyncErrorEma();
@@ -267,9 +267,8 @@ export class AudioScheduler {
     this.lastSamplesAdjusted = 0;
     this.currentPlaybackRate = 1.0;
     const cutResult = this.cutScheduledSources(cutoffTime);
-    this.recorrectionMonitor.minScheduleTimeSec = Math.max(
-      cutoffTime,
-      cutResult.keptTailEndTimeSec,
+    this.recorrectionMonitor.setMinScheduleTime(
+      Math.max(cutoffTime, cutResult.keptTailEndTimeSec),
     );
     this.nextPlaybackTime = 0;
     this.nextScheduleTime = 0;
@@ -815,14 +814,12 @@ export class AudioScheduler {
         this.recorrectionMonitor.armStartupGrace(nowMs, isTimestamp);
         playbackTime = targetPlaybackTime;
         scheduleTime = playbackTime - syncDelaySec;
-        if (this.recorrectionMonitor.minScheduleTimeSec !== null) {
-          scheduleTime = Math.max(
-            scheduleTime,
-            this.recorrectionMonitor.minScheduleTimeSec,
-          );
+        const minScheduleTimeSec = this.recorrectionMonitor.minScheduleTimeSec;
+        if (minScheduleTimeSec !== null) {
+          scheduleTime = Math.max(scheduleTime, minScheduleTimeSec);
           playbackTime = scheduleTime + syncDelaySec;
         }
-        this.recorrectionMonitor.minScheduleTimeSec = null;
+        this.recorrectionMonitor.clearMinScheduleTime();
         playbackRate = 1.0;
         chunk.buffer = this.copyBuffer(chunk.buffer);
       } else {

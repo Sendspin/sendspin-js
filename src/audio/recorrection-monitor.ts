@@ -26,7 +26,19 @@ export class RecorrectionMonitor {
   private _hardResyncGraceUntilMs: number | null = null;
   private _lastHardResyncAtMs: number = -Infinity;
   /** After a recorrection, scheduling must not start before this time. */
-  minScheduleTimeSec: number | null = null;
+  private _minScheduleTimeSec: number | null = null;
+
+  get minScheduleTimeSec(): number | null {
+    return this._minScheduleTimeSec;
+  }
+
+  setMinScheduleTime(timeSec: number | null): void {
+    this._minScheduleTimeSec = timeSec;
+  }
+
+  clearMinScheduleTime(): void {
+    this._minScheduleTimeSec = null;
+  }
 
   constructor(private onCheck: () => void) {}
 
@@ -162,7 +174,7 @@ export class RecorrectionMonitor {
     this.stop();
     this._hardResyncGraceUntilMs = null;
     this._lastHardResyncAtMs = -Infinity;
-    this.minScheduleTimeSec = null;
+    this._minScheduleTimeSec = null;
   }
 }
 
