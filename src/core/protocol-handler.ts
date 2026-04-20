@@ -23,6 +23,7 @@ import type { StateManager } from "./state-manager";
 import type { WebSocketManager } from "./websocket-manager";
 import { TimeSyncManager } from "./time-sync-manager";
 import { getSupportedFormats } from "./codec-support";
+import { clampSyncDelayMs } from "../sync-delay";
 
 // Constants
 const STATE_UPDATE_INTERVAL = 5000; // 5 seconds
@@ -242,7 +243,7 @@ export class ProtocolHandler {
       case "set_static_delay": {
         const delay = playerCommand.static_delay_ms;
         if (typeof delay === "number" && isFinite(delay)) {
-          const clamped = Math.max(0, Math.min(5000, Math.round(delay)));
+          const clamped = clampSyncDelayMs(delay);
           this.streamHandler.handleSyncDelayChange(clamped);
           this.onDelayCommand?.(clamped);
         }
@@ -296,7 +297,7 @@ export class ProtocolHandler {
     }
 
     const syncDelayMs = this.streamHandler.getSyncDelayMs();
-    const staticDelayMs = Math.max(0, Math.min(5000, Math.round(syncDelayMs)));
+    const staticDelayMs = clampSyncDelayMs(syncDelayMs);
 
     const message: ClientState = {
       type: "client/state" as MessageType.CLIENT_STATE,

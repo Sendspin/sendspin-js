@@ -22,6 +22,7 @@ import {
   RECORRECTION_CUTOVER_GUARD_SEC,
 } from "./recorrection-monitor";
 import { OutputLatencyTracker } from "./output-latency-tracker";
+import { clampSyncDelayMs } from "../sync-delay";
 
 // Sync correction constants
 const SAMPLE_CORRECTION_FADE_LEN = 8;
@@ -145,7 +146,7 @@ export class AudioScheduler {
   ) {
     this._correctionMode = correctionMode;
     this.useOutputLatencyCompensation = useOutputLatencyCompensation;
-    this.syncDelayMs = this.sanitizeSyncDelayMs(this.syncDelayMs);
+    this.syncDelayMs = clampSyncDelayMs(this.syncDelayMs);
 
     // Merge user-provided threshold overrides with defaults
     this.correctionThresholds = { ...DEFAULT_CORRECTION_THRESHOLDS };
@@ -168,11 +169,6 @@ export class AudioScheduler {
     this.recorrectionMonitor = new RecorrectionMonitor(() =>
       this.checkRecorrection(),
     );
-  }
-
-  private sanitizeSyncDelayMs(delayMs: number): number {
-    if (!isFinite(delayMs)) return 0;
-    return Math.max(0, Math.min(5000, Math.round(delayMs)));
   }
 
   get correctionMode(): CorrectionMode {
@@ -334,7 +330,7 @@ export class AudioScheduler {
   }
 
   setSyncDelay(delayMs: number): void {
-    const sanitized = this.sanitizeSyncDelayMs(delayMs);
+    const sanitized = clampSyncDelayMs(delayMs);
     const delta = sanitized - this.syncDelayMs;
     this.syncDelayMs = sanitized;
     if (delta === 0 || !this.usesImmediateDelayCutover) return;

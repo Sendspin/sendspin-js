@@ -12,6 +12,7 @@ import { ProtocolHandler } from "./protocol-handler";
 import { StateManager } from "./state-manager";
 import { WebSocketManager } from "./websocket-manager";
 import { SendspinTimeFilter } from "./time-filter";
+import { clampSyncDelayMs } from "../sync-delay";
 import type {
   SendspinCoreConfig,
   DecodedAudioChunk,
@@ -58,10 +59,7 @@ export class SendspinCore implements StreamHandler {
     const clientName = config.clientName ?? `Sendspin JS Client (${randomId})`;
 
     this.config = { ...config, playerId, clientName };
-    this._syncDelayMs = Math.max(
-      0,
-      Math.min(5000, Math.round(config.syncDelay ?? 0)),
-    );
+    this._syncDelayMs = clampSyncDelayMs(config.syncDelay ?? 0);
 
     this.timeFilter = new SendspinTimeFilter(0, 1.1, 2.0, 1e-12);
     this.stateManager = new StateManager(config.onStateChange);
@@ -128,7 +126,7 @@ export class SendspinCore implements StreamHandler {
   }
 
   handleSyncDelayChange(delayMs: number): void {
-    this._syncDelayMs = Math.max(0, Math.min(5000, Math.round(delayMs)));
+    this._syncDelayMs = clampSyncDelayMs(delayMs);
     this._onSyncDelayChange?.(this._syncDelayMs);
   }
 
@@ -246,7 +244,7 @@ export class SendspinCore implements StreamHandler {
   // ========================================
 
   setSyncDelay(delayMs: number): void {
-    this._syncDelayMs = Math.max(0, Math.min(5000, Math.round(delayMs)));
+    this._syncDelayMs = clampSyncDelayMs(delayMs);
     this._onSyncDelayChange?.(this._syncDelayMs);
     this.protocolHandler.sendStateUpdate();
   }
