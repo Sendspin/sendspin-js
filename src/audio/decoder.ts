@@ -29,6 +29,7 @@ export class SendspinDecoder {
   // FLAC decoding context (OfflineAudioContext, no playback needed)
   private flacDecodingContext: OfflineAudioContext | null = null;
   private flacDecodingContextSampleRate: number = 0;
+  private flacDecodingContextChannels: number = 0;
 
   constructor(
     onDecodedChunk: (chunk: DecodedAudioChunk) => void,
@@ -156,13 +157,22 @@ export class SendspinDecoder {
   // FLAC Decoder (uses OfflineAudioContext)
   // ========================================
 
-  private getFlacDecodingContext(sampleRate: number): OfflineAudioContext {
+  private getFlacDecodingContext(
+    sampleRate: number,
+    channels: number,
+  ): OfflineAudioContext {
     if (
       !this.flacDecodingContext ||
-      this.flacDecodingContextSampleRate !== sampleRate
+      this.flacDecodingContextSampleRate !== sampleRate ||
+      this.flacDecodingContextChannels !== channels
     ) {
-      this.flacDecodingContext = new OfflineAudioContext(2, 1, sampleRate);
+      this.flacDecodingContext = new OfflineAudioContext(
+        channels,
+        1,
+        sampleRate,
+      );
       this.flacDecodingContextSampleRate = sampleRate;
+      this.flacDecodingContextChannels = channels;
     }
     return this.flacDecodingContext;
   }
@@ -186,7 +196,10 @@ export class SendspinDecoder {
         dataToEncode = combined.buffer;
       }
 
-      const ctx = this.getFlacDecodingContext(format.sample_rate);
+      const ctx = this.getFlacDecodingContext(
+        format.sample_rate,
+        format.channels,
+      );
       const audioBuffer = await ctx.decodeAudioData(dataToEncode);
 
       // Extract Float32Array per channel from AudioBuffer
@@ -606,5 +619,6 @@ export class SendspinDecoder {
 
     this.flacDecodingContext = null;
     this.flacDecodingContextSampleRate = 0;
+    this.flacDecodingContextChannels = 0;
   }
 }
