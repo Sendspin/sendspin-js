@@ -206,9 +206,14 @@ export class SendspinCore implements StreamHandler {
           "SendspinCore requires either baseUrl or webSocket to be provided.",
         );
       }
-      const url = new URL(this.config.baseUrl);
+      // Preserve path from baseUrl for reverse proxy support
+      const url = new URL(
+        this.config.baseUrl,
+        typeof window !== "undefined" ? window.location.href : undefined,
+      );
       const wsProtocol = url.protocol === "https:" ? "wss:" : "ws:";
-      const wsUrl = `${wsProtocol}//${url.host}/sendspin`;
+      const basePath = url.pathname.replace(/\/$/, "");
+      const wsUrl = `${wsProtocol}//${url.host}${basePath}/sendspin`;
 
       await this.wsManager.connect(wsUrl, onOpen, onMessage, onError, onClose);
     }
