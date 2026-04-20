@@ -37,7 +37,6 @@ export class SendspinCore implements StreamHandler {
   private decoder: SendspinDecoder;
 
   private config: SendspinCoreConfig;
-  private wsUrl: string = "";
   private _syncDelayMs: number;
 
   // Stream events — consumers (e.g., SendspinPlayer) subscribe to these
@@ -208,15 +207,9 @@ export class SendspinCore implements StreamHandler {
       }
       const url = new URL(this.config.baseUrl);
       const wsProtocol = url.protocol === "https:" ? "wss:" : "ws:";
-      this.wsUrl = `${wsProtocol}//${url.host}/sendspin`;
+      const wsUrl = `${wsProtocol}//${url.host}/sendspin`;
 
-      await this.wsManager.connect(
-        this.wsUrl,
-        onOpen,
-        onMessage,
-        onError,
-        onClose,
-      );
+      await this.wsManager.connect(wsUrl, onOpen, onMessage, onError, onClose);
     }
   }
 
