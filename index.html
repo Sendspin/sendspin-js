@@ -261,6 +261,37 @@
               so it may drift vs. other devices.
             </small>
           </div>
+          <details class="form-group">
+            <summary>Advanced: correction thresholds</summary>
+            <p>
+              <small
+                >Override per-mode tuning for the active correction mode.
+                Applied on connect — reconnect to apply changes.</small
+              >
+            </p>
+            <div class="form-group">
+              <label for="resync-threshold">Resync above (ms)</label>
+              <input
+                type="number"
+                id="resync-threshold"
+                placeholder="default"
+                min="0"
+                step="1"
+              />
+              <small>Hard resync when smoothed sync error exceeds this.</small>
+            </div>
+            <div class="form-group">
+              <label for="deadband-threshold">Deadband below (ms)</label>
+              <input
+                type="number"
+                id="deadband-threshold"
+                placeholder="default"
+                min="0"
+                step="0.5"
+              />
+              <small>Ignore errors smaller than this — no correction.</small>
+            </div>
+          </details>
         </section>
 
         <!-- Status Section -->
