@@ -412,12 +412,8 @@ export class AudioScheduler {
       ? `synced(err=${(this.timeFilter.error / 1000).toFixed(1)}ms,drift=${this.timeFilter.drift.toFixed(3)},n=${this.timeFilter.count})`
       : `pending(n=${this.timeFilter.count})`;
 
-    const latMs =
-      this.latencyTracker.getSmoothedUs(this.audioContext) !== null
-        ? Math.round(
-            this.latencyTracker.getSmoothedUs(this.audioContext) / 1000,
-          )
-        : 0;
+    const smoothedLatUs = this.latencyTracker.getSmoothedUs(this.audioContext);
+    const latMs = Math.round(smoothedLatUs / 1000);
 
     console.log(
       `Sendspin: sync=${this.smoothedSyncErrorMs >= 0 ? "+" : ""}${this.smoothedSyncErrorMs.toFixed(1)}ms` +
