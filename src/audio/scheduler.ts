@@ -167,7 +167,10 @@ export class AudioScheduler {
       this.clockSource.disableTimestampPromotion();
     }
     this.clockSource.onPromotion(() => {
-      if (this.audioBufferQueue.length > 0 || this.scheduledSources.length > 0) {
+      if (
+        this.audioBufferQueue.length > 0 ||
+        this.scheduledSources.length > 0
+      ) {
         this.scheduleQueueProcessing();
       }
     });

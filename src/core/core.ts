@@ -183,6 +183,9 @@ export class SendspinCore implements StreamHandler {
     };
     const onClose = () => {
       this.protocolHandler.stopTimeSync();
+      // Stop periodic state-update sends so they don't spam
+      // "WebSocket not connected" warnings after the transport is gone.
+      this.stateManager.clearStateUpdateInterval();
       console.log("Sendspin: Connection closed");
       this._onConnectionClose?.();
     };
@@ -209,6 +212,16 @@ export class SendspinCore implements StreamHandler {
 
       await this.wsManager.connect(wsUrl, onOpen, onMessage, onError, onClose);
     }
+  }
+
+  /**
+   * Reset playback-related state (isPlaying, currentStreamFormat) without
+   * tearing down the connection. Intended for transport-loss cleanup after
+   * any buffered audio has finished draining.
+   */
+  resetPlaybackState(): void {
+    this.stateManager.isPlaying = false;
+    this.stateManager.currentStreamFormat = null;
   }
 
   disconnect(reason: GoodbyeReason = "shutdown"): void {

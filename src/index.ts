@@ -179,7 +179,6 @@ export class SendspinPlayer {
       if (this.suppressDisconnectPlaybackReset) {
         return;
       }
-      this.core._stateManager.clearStateUpdateInterval();
       this.scheduleDisconnectPlaybackReset();
     };
   }
@@ -197,8 +196,7 @@ export class SendspinPlayer {
       return;
     }
     this.scheduler.clearBuffers();
-    this.core._stateManager.currentStreamFormat = null;
-    this.core._stateManager.isPlaying = false;
+    this.core.resetPlaybackState();
     this.scheduler.stopAudioElement();
     if (typeof navigator !== "undefined" && navigator.mediaSession) {
       navigator.mediaSession.playbackState = "paused";
