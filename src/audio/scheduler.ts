@@ -998,7 +998,7 @@ export class AudioScheduler {
   }
 
   clearBuffers(): void {
-    this.recorrectionMonitor.stop();
+    this.recorrectionMonitor.fullReset();
     this.cancelScheduledRefill();
     this.scheduledSources.forEach((entry) => {
       try {
