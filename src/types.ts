@@ -284,58 +284,12 @@ export interface SupportedFormat {
   bit_depth: number;
 }
 
-export interface SendspinPlayerConfig {
-  /** Unique player identifier. Auto-generated if not provided. */
-  playerId?: string;
-
-  /**
-   * Base URL of the Sendspin server (e.g., "http://192.168.1.100:8095").
-   * Required unless webSocket is provided.
-   */
-  baseUrl?: string;
-
-  /** Human-readable name for this player. Auto-generated if not provided. */
-  clientName?: string;
-
-  /**
-   * Pre-established WebSocket connection.
-   * When provided, the player adopts this socket instead of creating one from baseUrl.
-   * The socket must connect to the Sendspin /sendspin endpoint.
-   * Auto-reconnect is disabled for externally-managed sockets.
-   */
-  webSocket?: WebSocket;
-
+export interface SendspinPlayerConfig extends SendspinCoreConfig {
   /**
    * HTMLAudioElement for media-element output mode.
    * Auto-created on mobile browsers if not provided.
    */
   audioElement?: HTMLAudioElement;
-
-  /**
-   * Codecs to use for audio streaming, in priority order.
-   * Unsupported codecs for the current browser are automatically filtered out:
-   * - Safari: No FLAC support
-   * - Firefox: No Opus (audio glitches with both native and opus-encdec decoders)
-   * - Browsers with WebCodecs (Chrome, Edge): All codecs
-   * - Browsers without WebCodecs (e.g., insecure context or older browsers): No Opus
-   *
-   * Default: ["opus", "flac", "pcm"]
-   */
-  codecs?: Codec[];
-
-  /**
-   * Buffer capacity in bytes. Defaults to 5MB for media-element, 1.5MB for direct.
-   */
-  bufferCapacity?: number;
-
-  /**
-   * Static sync delay in milliseconds.
-   * Positive values make playback earlier to compensate for downstream device latency.
-   * Allowed range: 0-5000.
-   * Runtime update behavior depends on the active correction mode settings.
-   * Defaults to a browser/platform-specific heuristic value if not provided.
-   */
-  syncDelay?: number;
 
   /**
    * Sync correction mode:
@@ -373,48 +327,6 @@ export interface SendspinPlayerConfig {
    * Default: true
    */
   useOutputLatencyCompensation?: boolean;
-
-  /** Callback when player state changes (local or from server) */
-  onStateChange?: (state: {
-    isPlaying: boolean;
-    volume: number;
-    muted: boolean;
-    playerState: PlayerState;
-    /** Cached server state (merged from server/state messages) */
-    serverState: ServerStatePayload;
-    /** Cached group state (merged from group/update messages) */
-    groupState: GroupUpdatePayload;
-  }) => void;
-
-  /**
-   * Use hardware/external volume control instead of software gain.
-   * When true, the internal gain node stays at 1.0 and volume commands
-   * are delegated to the onVolumeCommand callback.
-   *
-   * Default: false
-   */
-  useHardwareVolume?: boolean;
-
-  /**
-   * Callback when server sends volume/mute commands.
-   * Only called when useHardwareVolume is true.
-   * The app should apply the volume to hardware (e.g., Cast system volume).
-   */
-  onVolumeCommand?: (volume: number, muted: boolean) => void;
-
-  /**
-   * Callback when server sends a set_static_delay command.
-   * Called with the new static delay in milliseconds (0-5000).
-   */
-  onDelayCommand?: (delayMs: number) => void;
-
-  /**
-   * Getter for external volume state.
-   * Called periodically when reporting state to server if useHardwareVolume is true.
-   * Should return current hardware volume (0-100) and muted state.
-   * Not called immediately after volume commands to wait for hardware to apply the change.
-   */
-  getExternalVolume?: () => { volume: number; muted: boolean };
 
   /**
    * Storage for persisting SDK state (e.g., cached output latency).
@@ -457,11 +369,19 @@ export interface SendspinCoreConfig {
 
   /**
    * Codecs to use for audio streaming, in priority order.
+   * Unsupported codecs for the current browser are automatically filtered out:
+   * - Safari: No FLAC support
+   * - Firefox: No Opus (audio glitches with both native and opus-encdec decoders)
+   * - Browsers with WebCodecs (Chrome, Edge): All codecs
+   * - Browsers without WebCodecs (e.g., insecure context or older browsers): No Opus
+   *
    * Default: ["opus", "flac", "pcm"]
    */
   codecs?: Codec[];
 
-  /** Buffer capacity in bytes. Defaults to 5MB. */
+  /**
+   * Buffer capacity in bytes. Defaults to 5MB for media-element, 1.5MB for direct.
+   */
   bufferCapacity?: number;
 
   /**
@@ -472,28 +392,54 @@ export interface SendspinCoreConfig {
    */
   webSocket?: WebSocket;
 
-  /** Static sync delay in milliseconds (0-5000). */
+  /**
+   * Static sync delay in milliseconds.
+   * Positive values make playback earlier to compensate for downstream device latency.
+   * Allowed range: 0-5000.
+   * Runtime update behavior depends on the active correction mode settings.
+   * Defaults to a browser/platform-specific heuristic value if not provided.
+   */
   syncDelay?: number;
 
-  /** Use hardware/external volume control instead of software gain. */
+  /**
+   * Use hardware/external volume control instead of software gain.
+   * When true, the internal gain node stays at 1.0 and volume commands
+   * are delegated to the onVolumeCommand callback.
+   *
+   * Default: false
+   */
   useHardwareVolume?: boolean;
 
-  /** Callback when server sends volume/mute commands (hardware volume mode). */
+  /**
+   * Callback when server sends volume/mute commands.
+   * Only called when useHardwareVolume is true.
+   * The app should apply the volume to hardware (e.g., Cast system volume).
+   */
   onVolumeCommand?: (volume: number, muted: boolean) => void;
 
-  /** Callback when server sends a set_static_delay command. */
+  /**
+   * Callback when server sends a set_static_delay command.
+   * Called with the new static delay in milliseconds (0-5000).
+   */
   onDelayCommand?: (delayMs: number) => void;
 
-  /** Getter for external volume state (hardware volume mode). */
+  /**
+   * Getter for external volume state.
+   * Called periodically when reporting state to server if useHardwareVolume is true.
+   * Should return current hardware volume (0-100) and muted state.
+   * Not called immediately after volume commands to wait for hardware to apply the change.
+   */
   getExternalVolume?: () => { volume: number; muted: boolean };
 
-  /** Callback when player state changes */
+  /** Callback when player state changes (local or from server). */
   onStateChange?: (state: {
     isPlaying: boolean;
     volume: number;
     muted: boolean;
     playerState: PlayerState;
+    /** Cached server state (merged from server/state messages) */
     serverState: ServerStatePayload;
+    /** Cached group state (merged from group/update messages) */
     groupState: GroupUpdatePayload;
   }) => void;
 }
