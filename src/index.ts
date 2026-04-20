@@ -122,22 +122,22 @@ export class SendspinPlayer {
       storage = localStorage;
     }
 
-    this.scheduler = new AudioScheduler(
-      this.core._stateManager,
-      this.core._timeFilter,
+    this.scheduler = new AudioScheduler({
+      stateManager: this.core._stateManager,
+      timeFilter: this.core._timeFilter,
       outputMode,
-      config.audioElement,
+      audioElement: config.audioElement,
       isAndroid,
       isCastRuntime,
-      this.ownsAudioElement,
-      isAndroid ? SILENT_AUDIO_SRC : undefined,
-      syncDelay,
-      config.useHardwareVolume ?? false,
-      config.correctionMode ?? "sync",
+      ownsAudioElement: this.ownsAudioElement,
+      silentAudioSrc: isAndroid ? SILENT_AUDIO_SRC : undefined,
+      syncDelayMs: syncDelay,
+      useHardwareVolume: config.useHardwareVolume ?? false,
+      correctionMode: config.correctionMode ?? "sync",
       storage,
-      config.useOutputLatencyCompensation ?? true,
-      config.correctionThresholds,
-    );
+      useOutputLatencyCompensation: config.useOutputLatencyCompensation ?? true,
+      correctionThresholds: config.correctionThresholds,
+    });
 
     // Wire core events to scheduler
     this.core.onAudioData = (chunk) => {

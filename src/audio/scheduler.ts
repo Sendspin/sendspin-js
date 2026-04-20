@@ -51,6 +51,25 @@ const SCHEDULE_REFILL_THRESHOLD_FRACTION = 0.5;
 const SCHEDULE_REFILL_MIN_THRESHOLD_SEC = 0.1;
 const SCHEDULE_REFILL_MAX_THRESHOLD_SEC = 5;
 
+export interface AudioSchedulerOptions {
+  stateManager: StateManager;
+  timeFilter: SendspinTimeFilter;
+  outputMode?: AudioOutputMode;
+  audioElement?: HTMLAudioElement;
+  isAndroid?: boolean;
+  isCastRuntime?: boolean;
+  ownsAudioElement?: boolean;
+  silentAudioSrc?: string;
+  syncDelayMs?: number;
+  useHardwareVolume?: boolean;
+  correctionMode?: CorrectionMode;
+  storage?: SendspinStorage | null;
+  useOutputLatencyCompensation?: boolean;
+  correctionThresholds?: Partial<
+    Record<CorrectionMode, Partial<CorrectionThresholds>>
+  >;
+}
+
 const DEFAULT_CORRECTION_THRESHOLDS: Record<
   CorrectionMode,
   CorrectionThresholds
@@ -126,30 +145,35 @@ export class AudioScheduler {
   private recorrectionMonitor: RecorrectionMonitor;
   private latencyTracker: OutputLatencyTracker;
 
-  constructor(
-    private stateManager: StateManager,
-    private timeFilter: SendspinTimeFilter,
-    private outputMode: AudioOutputMode = "direct",
-    private audioElement?: HTMLAudioElement,
-    private isAndroid: boolean = false,
-    private isCastRuntime: boolean = false,
-    private ownsAudioElement: boolean = false,
-    private silentAudioSrc?: string,
-    private syncDelayMs: number = 0,
-    private useHardwareVolume: boolean = false,
-    correctionMode: CorrectionMode = "sync",
-    storage: SendspinStorage | null = null,
-    useOutputLatencyCompensation: boolean = true,
-    thresholdOverrides?: Partial<
-      Record<CorrectionMode, Partial<CorrectionThresholds>>
-    >,
-  ) {
-    this._correctionMode = correctionMode;
-    this.useOutputLatencyCompensation = useOutputLatencyCompensation;
-    this.syncDelayMs = clampSyncDelayMs(this.syncDelayMs);
+  private stateManager: StateManager;
+  private timeFilter: SendspinTimeFilter;
+  private outputMode: AudioOutputMode;
+  private audioElement?: HTMLAudioElement;
+  private isAndroid: boolean;
+  private isCastRuntime: boolean;
+  private ownsAudioElement: boolean;
+  private silentAudioSrc?: string;
+  private syncDelayMs: number;
+  private useHardwareVolume: boolean;
+
+  constructor(options: AudioSchedulerOptions) {
+    this.stateManager = options.stateManager;
+    this.timeFilter = options.timeFilter;
+    this.outputMode = options.outputMode ?? "direct";
+    this.audioElement = options.audioElement;
+    this.isAndroid = options.isAndroid ?? false;
+    this.isCastRuntime = options.isCastRuntime ?? false;
+    this.ownsAudioElement = options.ownsAudioElement ?? false;
+    this.silentAudioSrc = options.silentAudioSrc;
+    this.syncDelayMs = clampSyncDelayMs(options.syncDelayMs ?? 0);
+    this.useHardwareVolume = options.useHardwareVolume ?? false;
+    this._correctionMode = options.correctionMode ?? "sync";
+    this.useOutputLatencyCompensation =
+      options.useOutputLatencyCompensation ?? true;
 
     // Merge user-provided threshold overrides with defaults
     this.correctionThresholds = { ...DEFAULT_CORRECTION_THRESHOLDS };
+    const thresholdOverrides = options.correctionThresholds;
     if (thresholdOverrides) {
       for (const mode of Object.keys(thresholdOverrides) as CorrectionMode[]) {
         const overrides = thresholdOverrides[mode];
@@ -162,7 +186,7 @@ export class AudioScheduler {
       }
     }
 
-    this.latencyTracker = new OutputLatencyTracker(storage);
+    this.latencyTracker = new OutputLatencyTracker(options.storage ?? null);
     if (this.isCastRuntime) {
       this.clockSource.disableTimestampPromotion();
     }
