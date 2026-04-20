@@ -35,7 +35,6 @@ export interface ProtocolHandlerConfig {
   onVolumeCommand?: (volume: number, muted: boolean) => void;
   onDelayCommand?: (delayMs: number) => void;
   getExternalVolume?: () => { volume: number; muted: boolean };
-  useOutputLatencyCompensation?: boolean;
 }
 
 export class ProtocolHandler {
@@ -43,7 +42,6 @@ export class ProtocolHandler {
   private codecs: Codec[];
   private bufferCapacity: number;
   private useHardwareVolume: boolean;
-  private useOutputLatencyCompensation: boolean;
   private onVolumeCommand?: (volume: number, muted: boolean) => void;
   private onDelayCommand?: (delayMs: number) => void;
   private getExternalVolume?: () => { volume: number; muted: boolean };
@@ -61,8 +59,6 @@ export class ProtocolHandler {
     this.codecs = config.codecs ?? ["opus", "flac", "pcm"];
     this.bufferCapacity = config.bufferCapacity ?? 1024 * 1024 * 5; // 5MB default
     this.useHardwareVolume = config.useHardwareVolume ?? false;
-    this.useOutputLatencyCompensation =
-      config.useOutputLatencyCompensation ?? true;
     this.onVolumeCommand = config.onVolumeCommand;
     this.onDelayCommand = config.onDelayCommand;
     this.getExternalVolume = config.getExternalVolume;
