@@ -251,6 +251,7 @@ export class AudioScheduler {
     this.nextScheduleTime = 0;
     this.lastScheduledServerTime = 0;
     this.recorrectionMonitor.clearMinScheduleTime();
+    this.recorrectionMonitor.clearHardResyncCooldown();
     this.clockSource.pendingCutover = false;
     this.recorrectionMonitor.resetCheckState();
     this.resetSyncErrorEma();

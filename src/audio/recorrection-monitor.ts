@@ -70,6 +70,11 @@ export class RecorrectionMonitor {
     this.prevRawSyncErrorMs = null;
   }
 
+  clearHardResyncCooldown(): void {
+    this._hardResyncGraceUntilMs = null;
+    this._lastHardResyncAtMs = -Infinity;
+  }
+
   armStartupGrace(nowMs: number, isTimestampClock: boolean): void {
     if (isTimestampClock) {
       this._hardResyncGraceUntilMs = null;
