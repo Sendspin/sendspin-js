@@ -370,7 +370,7 @@ export class AudioScheduler {
       clockDriftPercent: this.timeFilter.drift * 100,
       syncErrorMs: this.currentSyncErrorMs,
       resyncCount: this.resyncCount,
-      outputLatencyMs: this.latencyTracker.getLastRawUs() / 1000,
+      outputLatencyMs: this.latencyTracker.getRawUs(this.audioContext) / 1000,
       playbackRate: this.currentPlaybackRate,
       correctionMethod: this.currentCorrectionMethod,
       samplesAdjusted: this.lastSamplesAdjusted,

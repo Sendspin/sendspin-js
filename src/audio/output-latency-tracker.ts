@@ -13,7 +13,6 @@ const OUTPUT_LATENCY_STORAGE_KEY = "sendspin-output-latency-us";
 const OUTPUT_LATENCY_PERSIST_INTERVAL_MS = 10_000;
 
 export class OutputLatencyTracker {
-  private lastRawOutputLatencyUs: number = 0;
   private smoothedOutputLatencyUs: number | null = null;
   private lastLatencyPersistAtMs: number | null = null;
 
@@ -53,9 +52,7 @@ export class OutputLatencyTracker {
     if (!audioContext) return 0;
     const baseLatency = audioContext.baseLatency ?? 0;
     const outputLatency = audioContext.outputLatency ?? 0;
-    const rawUs = (baseLatency + outputLatency) * 1_000_000;
-    this.lastRawOutputLatencyUs = rawUs;
-    return rawUs;
+    return (baseLatency + outputLatency) * 1_000_000;
   }
 
   /** Get EMA-smoothed output latency in microseconds. */
@@ -87,14 +84,8 @@ export class OutputLatencyTracker {
     return this.smoothedOutputLatencyUs;
   }
 
-  /** Get last raw reading in microseconds (for sync info display). */
-  getLastRawUs(): number {
-    return this.lastRawOutputLatencyUs;
-  }
-
   /** Reset smoother (on stream change or audio context recreation). */
   reset(): void {
     this.smoothedOutputLatencyUs = null;
-    this.lastRawOutputLatencyUs = 0;
   }
 }
