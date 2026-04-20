@@ -7,13 +7,13 @@
  */
 
 import type {
-  AudioBufferQueueItem,
   AudioOutputMode,
   CorrectionMode,
   CorrectionThresholds,
   DecodedAudioChunk,
   SendspinStorage,
 } from "../types";
+import type { AudioBufferQueueItem } from "../internal-types";
 import type { StateManager } from "../core/state-manager";
 import type { SendspinTimeFilter } from "../core/time-filter";
 import { ClockSource } from "./clock-source";

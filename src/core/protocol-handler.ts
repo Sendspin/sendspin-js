@@ -18,7 +18,7 @@ import type {
   StreamEnd,
   StreamStart,
 } from "../types";
-import type { StreamHandler } from "../types";
+import type { StreamHandler } from "../internal-types";
 import type { StateManager } from "./state-manager";
 import type { WebSocketManager } from "./websocket-manager";
 import { TimeSyncManager } from "./time-sync-manager";

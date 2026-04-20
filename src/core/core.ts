@@ -17,7 +17,6 @@ import type {
   SendspinCoreConfig,
   DecodedAudioChunk,
   StreamFormat,
-  StreamHandler,
   GoodbyeReason,
   PlayerState,
   ControllerCommand,
@@ -25,6 +24,7 @@ import type {
   ServerStatePayload,
   GroupUpdatePayload,
 } from "../types";
+import type { StreamHandler } from "../internal-types";
 
 function generateRandomId(): string {
   return Math.random().toString(36).substring(2, 6);

@@ -423,12 +423,6 @@ export interface SendspinPlayerConfig {
   storage?: SendspinStorage | null;
 }
 
-export interface AudioBufferQueueItem {
-  buffer: AudioBuffer;
-  serverTime: number;
-  generation: number;
-}
-
 /**
  * A decoded audio chunk with raw PCM samples.
  * Emitted by SendspinCore after decoding compressed audio.
@@ -502,20 +496,6 @@ export interface SendspinCoreConfig {
     serverState: ServerStatePayload;
     groupState: GroupUpdatePayload;
   }) => void;
-}
-
-/**
- * Interface for protocol handler to call into the audio subsystem.
- * Implemented by SendspinCore as the bridge between protocol and audio.
- */
-export interface StreamHandler {
-  handleBinaryMessage(data: ArrayBuffer): void;
-  handleStreamStart(format: StreamFormat, isFormatUpdate: boolean): void;
-  handleStreamClear(): void;
-  handleStreamEnd(): void;
-  handleVolumeUpdate(): void;
-  handleSyncDelayChange(delayMs: number): void;
-  getSyncDelayMs(): number;
 }
 
 /**
