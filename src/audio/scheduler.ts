@@ -715,7 +715,10 @@ export class AudioScheduler {
   }
 
   handleDecodedChunk(chunk: DecodedAudioChunk): void {
-    if (!this.audioContext || !this.gainNode) return;
+    if (!this.audioContext || !this.gainNode) {
+      console.warn("Sendspin: Received audio chunk but no audio context");
+      return;
+    }
     if (chunk.generation !== this.stateManager.streamGeneration) return;
     const numChannels = chunk.samples.length;
     const numFrames = chunk.samples[0].length;
