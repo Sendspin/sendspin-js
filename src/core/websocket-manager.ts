@@ -103,9 +103,7 @@ export class WebSocketManager {
         if (prevOnClose) {
           prevOnClose.call(this.ws!, event);
         }
-        reject(
-          new Error("Sendspin: Adopted WebSocket closed before opening"),
-        );
+        reject(new Error("Sendspin: Adopted WebSocket closed before opening"));
       };
     });
   }

@@ -47,6 +47,7 @@ export class ClockSource {
   private _pendingCutover = false;
   private _lastRejectReason: string | null = null;
   private _timestampPromotionDisabled = false;
+  private _onPromotion?: () => void;
 
   // Output timestamp validation state
   private lastSample: OutputTimestampSample | null = null;
@@ -91,7 +92,14 @@ export class ClockSource {
     if (this.activeSource === source) return false;
     this.activeSource = source;
     this._pendingCutover = source === "timestamp";
+    if (this._pendingCutover) {
+      this._onPromotion?.();
+    }
     return this._pendingCutover;
+  }
+
+  onPromotion(cb: () => void): void {
+    this._onPromotion = cb;
   }
 
   reset(): void {

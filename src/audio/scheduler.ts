@@ -166,6 +166,11 @@ export class AudioScheduler {
     if (this.isCastRuntime) {
       this.clockSource.disableTimestampPromotion();
     }
+    this.clockSource.onPromotion(() => {
+      if (this.audioBufferQueue.length > 0 || this.scheduledSources.length > 0) {
+        this.scheduleQueueProcessing();
+      }
+    });
     this.recorrectionMonitor = new RecorrectionMonitor(() =>
       this.checkRecorrection(),
     );
