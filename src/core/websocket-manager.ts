@@ -16,6 +16,9 @@ export class WebSocketManager {
    * Adopt an existing WebSocket connection.
    * The caller is responsible for having already opened the socket.
    * Reconnection is disabled for adopted sockets.
+   *
+   * Returns a Promise that resolves once the adopted socket is open. Throws
+   * synchronously if the socket is already CLOSING or CLOSED.
    */
   adopt(
     ws: WebSocket,
@@ -23,16 +26,31 @@ export class WebSocketManager {
     onMessage?: (event: MessageEvent) => void,
     onError?: (error: Event) => void,
     onClose?: () => void,
-  ): void {
+  ): Promise<void> {
+    if (
+      ws.readyState !== WebSocket.OPEN &&
+      ws.readyState !== WebSocket.CONNECTING
+    ) {
+      throw new Error(
+        `Sendspin: Cannot adopt WebSocket in readyState ${ws.readyState} (must be OPEN or CONNECTING)`,
+      );
+    }
+
     // Store handlers
     this.onOpenHandler = onOpen;
     this.onMessageHandler = onMessage;
     this.onErrorHandler = onError;
     this.onCloseHandler = onClose;
 
-    // Close any existing connection
+    // Detach handlers from any existing socket so its async close event
+    // cannot fire into the newly-adopted session.
     if (this.ws) {
-      this.ws.close();
+      const old = this.ws;
+      old.onopen = null;
+      old.onmessage = null;
+      old.onerror = null;
+      old.onclose = null;
+      old.close();
       this.ws = null;
     }
 
@@ -61,21 +79,35 @@ export class WebSocketManager {
       }
     };
 
-    // If already open, fire onOpen immediately
-    if (ws.readyState === WebSocket.OPEN) {
-      console.log("Sendspin: Adopted open WebSocket");
-      if (this.onOpenHandler) {
-        this.onOpenHandler();
-      }
-    } else if (ws.readyState === WebSocket.CONNECTING) {
-      // Wait for it to open
-      this.ws.onopen = () => {
-        console.log("Sendspin: Adopted WebSocket connected");
+    return new Promise<void>((resolve, reject) => {
+      const fireOpen = () => {
         if (this.onOpenHandler) {
           this.onOpenHandler();
         }
+        resolve();
       };
-    }
+
+      if (ws.readyState === WebSocket.OPEN) {
+        console.log("Sendspin: Adopted open WebSocket");
+        fireOpen();
+        return;
+      }
+
+      // CONNECTING: wait for open or early close.
+      const prevOnClose = this.ws!.onclose;
+      this.ws!.onopen = () => {
+        console.log("Sendspin: Adopted WebSocket connected");
+        fireOpen();
+      };
+      this.ws!.onclose = (event: CloseEvent) => {
+        if (prevOnClose) {
+          prevOnClose.call(this.ws!, event);
+        }
+        reject(
+          new Error("Sendspin: Adopted WebSocket closed before opening"),
+        );
+      };
+    });
   }
 
   // Connect to WebSocket server

@@ -189,7 +189,7 @@ export class SendspinCore implements StreamHandler {
 
     if (this.config.webSocket) {
       // Adopt externally-managed WebSocket
-      this.wsManager.adopt(
+      await this.wsManager.adopt(
         this.config.webSocket,
         onOpen,
         onMessage,
