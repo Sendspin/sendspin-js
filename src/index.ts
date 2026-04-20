@@ -1,8 +1,5 @@
-import { AudioProcessor } from "./audio-processor";
-import { ProtocolHandler } from "./protocol-handler";
-import { StateManager } from "./state-manager";
-import { WebSocketManager } from "./websocket-manager";
-import { SendspinTimeFilter } from "./time-filter";
+import { SendspinCore } from "./core/core";
+import { AudioScheduler } from "./audio/scheduler";
 import { SILENT_AUDIO_SRC } from "./silent-audio.generated";
 import type {
   SendspinPlayerConfig,
@@ -67,43 +64,25 @@ function getDefaultSyncDelay(): number {
   return 200;
 }
 
-function generateRandomId(): string {
-  return Math.random().toString(36).substring(2, 6);
-}
-
 // Add a small cushion beyond the measured buffered runway so delayed timer
 // delivery does not cut playback off just before the last scheduled audio ends.
 const DISCONNECT_PLAYBACK_RESET_GRACE_MS = 250;
 
 export class SendspinPlayer {
-  private wsManager: WebSocketManager;
-  private audioProcessor: AudioProcessor;
-  private protocolHandler: ProtocolHandler;
-  private stateManager: StateManager;
-  private timeFilter: SendspinTimeFilter;
+  private core: SendspinCore;
+  private scheduler: AudioScheduler;
+  private ownsAudioElement = false;
   private disconnectPlaybackResetTimeout: ReturnType<typeof setTimeout> | null =
     null;
   private suppressDisconnectPlaybackReset = false;
 
-  private config: SendspinPlayerConfig;
-  private wsUrl: string = "";
-  private ownsAudioElement = false;
-
   constructor(config: SendspinPlayerConfig) {
-    // Apply defaults for playerId and clientName (share same random ID)
-    const randomId = generateRandomId();
-    const playerId = config.playerId ?? `sendspin-js-${randomId}`;
-    const clientName = config.clientName ?? `Sendspin JS Client (${randomId})`;
-
     // Auto-detect platform
     const isAndroid = detectIsAndroid();
     const isCastRuntime = detectIsCastRuntime();
     const isMobile = detectIsMobile();
 
-    // Determine output mode:
-    // - If audioElement provided, use media-element
-    // - If mobile (iOS/Android), default to media-element
-    // - Otherwise, use direct
+    // Determine output mode
     const outputMode =
       config.audioElement || isMobile ? "media-element" : "direct";
     this.ownsAudioElement =
@@ -115,63 +94,93 @@ export class SendspinPlayer {
       );
     }
 
-    // Store config with resolved defaults
-    this.config = {
-      ...config,
-      playerId,
-      clientName,
-    };
+    const syncDelay = config.syncDelay ?? getDefaultSyncDelay();
 
-    // Initialize time filter (shared between audio processor and protocol handler)
-    this.timeFilter = new SendspinTimeFilter(0, 1.1, 2.0, 1e-12);
+    // Create core (protocol + decoding)
+    this.core = new SendspinCore({
+      playerId: config.playerId,
+      baseUrl: config.baseUrl,
+      clientName: config.clientName,
+      webSocket: config.webSocket,
+      codecs: config.codecs,
+      bufferCapacity:
+        config.bufferCapacity ??
+        (outputMode === "media-element" ? 1024 * 1024 * 5 : 1024 * 1024 * 1.5),
+      syncDelay,
+      useHardwareVolume: config.useHardwareVolume,
+      onVolumeCommand: config.onVolumeCommand,
+      onDelayCommand: config.onDelayCommand,
+      getExternalVolume: config.getExternalVolume,
+      onStateChange: config.onStateChange,
+    });
 
-    // Initialize state manager with callback
-    this.stateManager = new StateManager(config.onStateChange);
-
-    // Initialize audio processor
+    // Create scheduler (Web Audio playback)
     let storage: SendspinStorage | null = null;
     if (config.storage !== undefined) {
       storage = config.storage;
     } else if (typeof localStorage !== "undefined") {
       storage = localStorage;
     }
-    this.audioProcessor = new AudioProcessor(
-      this.stateManager,
-      this.timeFilter,
+
+    this.scheduler = new AudioScheduler({
+      stateManager: this.core._stateManager,
+      timeFilter: this.core._timeFilter,
       outputMode,
-      config.audioElement,
+      audioElement: config.audioElement,
       isAndroid,
       isCastRuntime,
-      this.ownsAudioElement,
-      isAndroid ? SILENT_AUDIO_SRC : undefined,
-      config.syncDelay ?? getDefaultSyncDelay(),
-      config.useHardwareVolume ?? false,
-      config.correctionMode ?? "sync",
+      ownsAudioElement: this.ownsAudioElement,
+      silentAudioSrc: isAndroid ? SILENT_AUDIO_SRC : undefined,
+      syncDelayMs: syncDelay,
+      useHardwareVolume: config.useHardwareVolume ?? false,
+      correctionMode: config.correctionMode ?? "sync",
       storage,
-      config.useOutputLatencyCompensation ?? true,
-    );
+      useOutputLatencyCompensation: config.useOutputLatencyCompensation ?? true,
+      correctionThresholds: config.correctionThresholds,
+    });
 
-    // Initialize WebSocket manager
-    this.wsManager = new WebSocketManager();
+    // Wire core events to scheduler
+    this.core.onAudioData = (chunk) => {
+      this.scheduler.handleDecodedChunk(chunk);
+    };
 
-    // Initialize protocol handler
-    this.protocolHandler = new ProtocolHandler(
-      playerId,
-      this.wsManager,
-      this.audioProcessor,
-      this.stateManager,
-      this.timeFilter,
-      {
-        clientName,
-        codecs: config.codecs,
-        bufferCapacity: config.bufferCapacity,
-        useHardwareVolume: config.useHardwareVolume,
-        onVolumeCommand: config.onVolumeCommand,
-        onDelayCommand: config.onDelayCommand,
-        getExternalVolume: config.getExternalVolume,
-        useOutputLatencyCompensation: config.useOutputLatencyCompensation,
-      },
-    );
+    this.core.onStreamStart = (format, isFormatUpdate) => {
+      this.scheduler.initAudioContext();
+      this.scheduler.resumeAudioContext();
+      if (!isFormatUpdate) {
+        this.scheduler.clearBuffers();
+      }
+      this.scheduler.startAudioElement();
+    };
+
+    this.core.onStreamClear = () => {
+      this.scheduler.clearBuffers();
+    };
+
+    this.core.onStreamEnd = () => {
+      this.scheduler.clearBuffers();
+      this.scheduler.stopAudioElement();
+    };
+
+    this.core.onVolumeUpdate = () => {
+      this.scheduler.updateVolume();
+    };
+
+    this.core.onSyncDelayChange = (delayMs) => {
+      this.scheduler.setSyncDelay(delayMs);
+    };
+
+    // Wire connection lifecycle for disconnect playback deferral
+    this.core.onConnectionOpen = () => {
+      this.cancelPendingDisconnectPlaybackReset();
+    };
+
+    this.core.onConnectionClose = () => {
+      if (this.suppressDisconnectPlaybackReset) {
+        return;
+      }
+      this.scheduleDisconnectPlaybackReset();
+    };
   }
 
   private cancelPendingDisconnectPlaybackReset(): void {
@@ -183,13 +192,12 @@ export class SendspinPlayer {
 
   private resetPlaybackStateAfterDisconnect(): void {
     this.disconnectPlaybackResetTimeout = null;
-    if (this.wsManager.isConnected()) {
+    if (this.core.isConnected) {
       return;
     }
-    this.audioProcessor.clearBuffers();
-    this.stateManager.currentStreamFormat = null;
-    this.stateManager.isPlaying = false;
-    this.audioProcessor.stopAudioElement();
+    this.scheduler.clearBuffers();
+    this.core.resetPlaybackState();
+    this.scheduler.stopAudioElement();
     if (typeof navigator !== "undefined" && navigator.mediaSession) {
       navigator.mediaSession.playbackState = "paused";
     }
@@ -198,7 +206,7 @@ export class SendspinPlayer {
   private scheduleDisconnectPlaybackReset(): void {
     this.cancelPendingDisconnectPlaybackReset();
 
-    const runwaySec = this.audioProcessor.measureBufferedPlaybackRunwaySec();
+    const runwaySec = this.scheduler.measureBufferedPlaybackRunwaySec();
     if (runwaySec <= 0) {
       this.resetPlaybackStateAfterDisconnect();
       return;
@@ -215,80 +223,21 @@ export class SendspinPlayer {
   // Connect to Sendspin server
   async connect(): Promise<void> {
     this.suppressDisconnectPlaybackReset = false;
-
-    // Build WebSocket URL, preserving path from baseUrl for reverse proxy support
-    const url = new URL(
-      this.config.baseUrl,
-      typeof window !== "undefined" ? window.location.href : undefined,
-    );
-    const wsProtocol = url.protocol === "https:" ? "wss:" : "ws:";
-    const basePath = url.pathname.replace(/\/$/, "");
-    this.wsUrl = `${wsProtocol}//${url.host}${basePath}/sendspin`;
-
-    // Connect to WebSocket
-    await this.wsManager.connect(
-      this.wsUrl,
-      // onOpen
-      () => {
-        this.cancelPendingDisconnectPlaybackReset();
-        console.log("Sendspin: Using player_id:", this.config.playerId);
-        this.protocolHandler.sendClientHello();
-      },
-      // onMessage
-      (event: MessageEvent) => {
-        this.protocolHandler.handleMessage(event);
-      },
-      // onError
-      (error: Event) => {
-        console.error("Sendspin: WebSocket error", error);
-      },
-      // onClose
-      () => {
-        this.protocolHandler.stopTimeSync();
-        console.log("Sendspin: Connection closed");
-        if (this.suppressDisconnectPlaybackReset) {
-          return;
-        }
-        this.stateManager.clearStateUpdateInterval();
-        this.scheduleDisconnectPlaybackReset();
-      },
-    );
+    return this.core.connect();
   }
 
   /**
    * Disconnect from Sendspin server
    * @param reason - Optional reason for disconnecting (default: 'shutdown')
-   *   - 'another_server': Switching to a different Sendspin server
-   *   - 'shutdown': Client is shutting down
-   *   - 'restart': Client is restarting and will reconnect
-   *   - 'user_request': User explicitly requested to disconnect
    */
   disconnect(reason: GoodbyeReason = "shutdown"): void {
     this.cancelPendingDisconnectPlaybackReset();
     this.suppressDisconnectPlaybackReset = true;
 
-    // Send goodbye message if connected
-    if (this.wsManager.isConnected()) {
-      this.protocolHandler.sendGoodbye(reason);
-    }
+    this.core.disconnect(reason);
 
-    // Stop time sync burst scheduler and in-flight timeout state
-    this.protocolHandler.stopTimeSync();
-
-    // Clear intervals
-    this.stateManager.clearAllIntervals();
-
-    // Disconnect WebSocket
-    this.wsManager.disconnect();
-
-    // Close audio processor
-    this.audioProcessor.close();
-
-    // Reset time filter
-    this.timeFilter.reset();
-
-    // Reset state
-    this.stateManager.reset();
+    // Close scheduler
+    this.scheduler.close();
 
     // Reset MediaSession playbackState (if available)
     if (typeof navigator !== "undefined" && navigator.mediaSession) {
@@ -299,34 +248,24 @@ export class SendspinPlayer {
 
   // Set volume (0-100)
   setVolume(volume: number): void {
-    this.stateManager.volume = volume;
-    this.audioProcessor.updateVolume();
-    this.protocolHandler.sendStateUpdate();
+    this.core.setVolume(volume);
   }
 
   // Set muted state
   setMuted(muted: boolean): void {
-    this.stateManager.muted = muted;
-    this.audioProcessor.updateVolume();
-    this.protocolHandler.sendStateUpdate();
+    this.core.setMuted(muted);
   }
 
-  // Set static delay (in milliseconds, 0-5000). Positive values schedule playback earlier.
+  // Set static delay (in milliseconds, 0-5000)
   setSyncDelay(delayMs: number): void {
-    this.audioProcessor.setSyncDelay(delayMs);
-    this.protocolHandler.sendStateUpdate();
+    this.core.setSyncDelay(delayMs);
   }
 
   /**
    * Set the sync correction mode at runtime.
-   * @param mode - The correction mode to use:
-   *   - "sync": Multi-device sync, may use pitch-changing playback-rate adjustments for faster convergence.
-   *   - "quality": No playback-rate changes; uses sample fixes and tighter resyncs, so expect fewer adjustments but occasional jumps. Starts out of sync until the clock converges. Not recommended for bad networks.
-   *   - "quality-local": Avoids playback-rate changes; may drift vs. other players and only resyncs
-   *     as a last resort.
    */
   setCorrectionMode(mode: CorrectionMode): void {
-    this.audioProcessor.setCorrectionMode(mode);
+    this.scheduler.setCorrectionMode(mode);
   }
 
   // ========================================
@@ -335,87 +274,52 @@ export class SendspinPlayer {
 
   /**
    * Send a controller command to the server.
-   * Use this for playback control when the server manages the audio source.
-   *
-   * @throws Error if the command is not supported by the server
-   *
-   * @example
-   * // Simple commands (no parameters)
-   * player.sendCommand('play');
-   * player.sendCommand('pause');
-   * player.sendCommand('next');
-   * player.sendCommand('previous');
-   * player.sendCommand('stop');
-   * player.sendCommand('shuffle');
-   * player.sendCommand('unshuffle');
-   * player.sendCommand('repeat_off');
-   * player.sendCommand('repeat_one');
-   * player.sendCommand('repeat_all');
-   * player.sendCommand('switch');
-   *
-   * // Commands with required parameters
-   * player.sendCommand('volume', { volume: 50 });
-   * player.sendCommand('mute', { mute: true });
    */
   sendCommand<T extends ControllerCommand>(
     command: T,
     params: ControllerCommands[T],
   ): void {
-    const supportedCommands =
-      this.stateManager.serverState.controller?.supported_commands;
-    if (supportedCommands && !supportedCommands.includes(command)) {
-      throw new Error(
-        `Command '${command}' is not supported by the server. ` +
-          `Supported commands: ${supportedCommands.join(", ")}`,
-      );
-    }
-    this.protocolHandler.sendCommand(command, params);
+    this.core.sendCommand(command, params);
   }
 
   // Getters for reactive state
   get isPlaying(): boolean {
-    return this.stateManager.isPlaying;
+    return this.core.isPlaying;
   }
 
   get volume(): number {
-    return this.stateManager.volume;
+    return this.core.volume;
   }
 
   get muted(): boolean {
-    return this.stateManager.muted;
+    return this.core.muted;
   }
 
   get playerState(): PlayerState {
-    return this.stateManager.playerState;
+    return this.core.playerState;
   }
 
   get currentFormat(): StreamFormat | null {
-    return this.stateManager.currentStreamFormat;
+    return this.core.currentFormat;
   }
 
   get isConnected(): boolean {
-    return this.wsManager.isConnected();
+    return this.core.isConnected;
   }
 
   // Get current correction mode
   get correctionMode(): CorrectionMode {
-    return this.audioProcessor.correctionMode;
+    return this.scheduler.correctionMode;
   }
 
   // Time sync info for debugging
   get timeSyncInfo(): { synced: boolean; offset: number; error: number } {
-    return {
-      synced: this.timeFilter.is_synchronized,
-      offset: Math.round(this.timeFilter.offset / 1000), // ms
-      error: Math.round(this.timeFilter.error / 1000), // ms
-    };
+    return this.core.timeSyncInfo;
   }
 
   /** Get current server time in microseconds using synchronized clock */
   getCurrentServerTimeUs(): number {
-    return this.timeFilter.computeServerTime(
-      Math.floor(performance.now() * 1000),
-    );
+    return this.core.getCurrentServerTimeUs();
   }
 
   /** Get current track progress with real-time position calculation */
@@ -424,27 +328,7 @@ export class SendspinPlayer {
     durationMs: number;
     playbackSpeed: number;
   } | null {
-    const metadata = this.stateManager.serverState.metadata;
-    if (!metadata?.progress || metadata.timestamp === undefined) {
-      return null;
-    }
-
-    const serverTimeUs = this.getCurrentServerTimeUs();
-    const elapsedUs = serverTimeUs - metadata.timestamp;
-    // playback_speed is multiplied by 1000 in protocol (1000 = normal speed)
-    const positionMs =
-      metadata.progress.track_progress +
-      (elapsedUs * metadata.progress.playback_speed) / 1_000_000;
-
-    return {
-      positionMs: Math.max(
-        0,
-        Math.min(positionMs, metadata.progress.track_duration),
-      ),
-      durationMs: metadata.progress.track_duration,
-      // Normalize to float (1.0 = normal speed)
-      playbackSpeed: metadata.progress.playback_speed / 1000,
-    };
+    return this.core.trackProgress;
   }
 
   // Sync info for debugging/display
@@ -458,13 +342,16 @@ export class SendspinPlayer {
     samplesAdjusted: number;
     correctionMode: CorrectionMode;
   } {
-    return this.audioProcessor.syncInfo;
+    return this.scheduler.syncInfo;
   }
 }
 
 // Re-export types for convenience
 export * from "./types";
-export { SendspinTimeFilter } from "./time-filter";
+export { SendspinTimeFilter } from "./core/time-filter";
+export { SendspinCore } from "./core/core";
+export { SendspinDecoder } from "./audio/decoder";
+export { AudioScheduler } from "./audio/scheduler";
 
 // Export platform detection utilities
 export {

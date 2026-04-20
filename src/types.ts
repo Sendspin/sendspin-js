@@ -256,6 +256,27 @@ export type Codec = "pcm" | "opus" | "flac";
  */
 export type CorrectionMode = "sync" | "quality" | "quality-local";
 
+/**
+ * Sync correction thresholds for a single correction mode.
+ * All values are in milliseconds unless noted.
+ */
+export interface CorrectionThresholds {
+  /** Hard resync when sync error exceeds this (ms) */
+  resyncAboveMs: number;
+  /** Use ±2% playback rate when error exceeds this (ms). Infinity = disabled. */
+  rate2AboveMs: number;
+  /** Use ±1% playback rate when error exceeds this (ms). Infinity = disabled. */
+  rate1AboveMs: number;
+  /** Use sample insertion/deletion when error is below this (ms). 0 = disabled. */
+  samplesBelowMs: number;
+  /** No correction when error is below this (ms) */
+  deadbandBelowMs: number;
+  /** Whether the recorrection monitor runs in this mode */
+  enableRecorrectionMonitor: boolean;
+  /** Whether runtime sync delay changes trigger immediate cutover */
+  immediateDelayCutover: boolean;
+}
+
 export interface SupportedFormat {
   codec: string;
   channels: number;
@@ -263,21 +284,88 @@ export interface SupportedFormat {
   bit_depth: number;
 }
 
-export interface SendspinPlayerConfig {
-  /** Unique player identifier. Auto-generated if not provided. */
-  playerId?: string;
-
-  /** Base URL of the Sendspin server (e.g., "http://192.168.1.100:8095") */
-  baseUrl: string;
-
-  /** Human-readable name for this player. Auto-generated if not provided. */
-  clientName?: string;
-
+export interface SendspinPlayerConfig extends SendspinCoreConfig {
   /**
    * HTMLAudioElement for media-element output mode.
    * Auto-created on mobile browsers if not provided.
    */
   audioElement?: HTMLAudioElement;
+
+  /**
+   * Sync correction mode:
+   * - "sync" (default): Corrects out of sync playback using all methods and may use pitch-changing
+   *   playback-rate adjustments for faster convergence.
+   *   Best for multi-device sync but may cause audible pitch shifts, especially just
+   *   after starting of playback.
+   * - "quality": No playback-rate changes; uses sample fixes and tighter resyncs, so expect fewer adjustments but occasional jumps. Starts out of sync until the clock converges. Not recommended for bad networks.
+   * - "quality-local": Avoids playback-rate changes; may drift vs. other players and only resyncs
+   *   as a last resort.
+   *   Best for single-device playback where audio quality is priority.
+   */
+  correctionMode?: CorrectionMode;
+
+  /**
+   * Override default correction thresholds per mode.
+   * Partially override any mode — unspecified fields keep their defaults.
+   *
+   * @example
+   * // Make "sync" mode tolerate more drift before hard resyncing
+   * correctionThresholds: { sync: { resyncAboveMs: 400 } }
+   */
+  correctionThresholds?: Partial<
+    Record<CorrectionMode, Partial<CorrectionThresholds>>
+  >;
+
+  /**
+   * Use browser's output latency API for automatic latency compensation.
+   * When enabled, reads AudioContext.baseLatency and outputLatency to
+   * compensate for hardware delay (e.g., Bluetooth headphones).
+   *
+   * Note: API reliability varies by browser/platform. But generally works well,
+   * especially on modern mobile browsers.
+   *
+   * Default: true
+   */
+  useOutputLatencyCompensation?: boolean;
+
+  /**
+   * Storage for persisting SDK state (e.g., cached output latency).
+   * Defaults to localStorage. Pass null to disable persistence.
+   */
+  storage?: SendspinStorage | null;
+}
+
+/**
+ * A decoded audio chunk with raw PCM samples.
+ * Emitted by SendspinCore after decoding compressed audio.
+ * Consumed by SendspinPlayer for playback, or by visualization/analysis tools.
+ */
+export interface DecodedAudioChunk {
+  /** PCM sample data, one Float32Array per channel (values in -1.0 to 1.0) */
+  samples: Float32Array[];
+  /** Sample rate in Hz */
+  sampleRate: number;
+  /** Server timestamp in microseconds */
+  serverTimeUs: number;
+  /** Stream generation (incremented on each new stream) */
+  generation: number;
+}
+
+/**
+ * Configuration for SendspinCore (protocol + decoding, no playback).
+ */
+export interface SendspinCoreConfig {
+  /** Unique player identifier. Auto-generated if not provided. */
+  playerId?: string;
+
+  /**
+   * Base URL of the Sendspin server (e.g., "http://192.168.1.100:8095").
+   * Required unless webSocket is provided.
+   */
+  baseUrl?: string;
+
+  /** Human-readable name for this player. Auto-generated if not provided. */
+  clientName?: string;
 
   /**
    * Codecs to use for audio streaming, in priority order.
@@ -297,6 +385,14 @@ export interface SendspinPlayerConfig {
   bufferCapacity?: number;
 
   /**
+   * Pre-established WebSocket connection.
+   * When provided, the core adopts this socket instead of creating one from baseUrl.
+   * The socket must connect to the Sendspin /sendspin endpoint.
+   * Auto-reconnect is disabled for externally-managed sockets.
+   */
+  webSocket?: WebSocket;
+
+  /**
    * Static sync delay in milliseconds.
    * Positive values make playback earlier to compensate for downstream device latency.
    * Allowed range: 0-5000.
@@ -304,43 +400,6 @@ export interface SendspinPlayerConfig {
    * Defaults to a browser/platform-specific heuristic value if not provided.
    */
   syncDelay?: number;
-
-  /**
-   * Sync correction mode:
-   * - "sync" (default): Corrects out of sync playback using all methods and may use pitch-changing
-   *   playback-rate adjustments for faster convergence.
-   *   Best for multi-device sync but may cause audible pitch shifts, especially just
-   *   after starting of playback.
-   * - "quality": No playback-rate changes; uses sample fixes and tighter resyncs, so expect fewer adjustments but occasional jumps. Starts out of sync until the clock converges. Not recommended for bad networks.
-   * - "quality-local": Avoids playback-rate changes; may drift vs. other players and only resyncs
-   *   as a last resort.
-   *   Best for single-device playback where audio quality is priority.
-   */
-  correctionMode?: CorrectionMode;
-
-  /**
-   * Use browser's output latency API for automatic latency compensation.
-   * When enabled, reads AudioContext.baseLatency and outputLatency to
-   * compensate for hardware delay (e.g., Bluetooth headphones).
-   *
-   * Note: API reliability varies by browser/platform. But generally works well,
-   * especially on modern mobile browsers.
-   *
-   * Default: true
-   */
-  useOutputLatencyCompensation?: boolean;
-
-  /** Callback when player state changes (local or from server) */
-  onStateChange?: (state: {
-    isPlaying: boolean;
-    volume: number;
-    muted: boolean;
-    playerState: PlayerState;
-    /** Cached server state (merged from server/state messages) */
-    serverState: ServerStatePayload;
-    /** Cached group state (merged from group/update messages) */
-    groupState: GroupUpdatePayload;
-  }) => void;
 
   /**
    * Use hardware/external volume control instead of software gain.
@@ -372,17 +431,17 @@ export interface SendspinPlayerConfig {
    */
   getExternalVolume?: () => { volume: number; muted: boolean };
 
-  /**
-   * Storage for persisting SDK state (e.g., cached output latency).
-   * Defaults to localStorage. Pass null to disable persistence.
-   */
-  storage?: SendspinStorage | null;
-}
-
-export interface AudioBufferQueueItem {
-  buffer: AudioBuffer;
-  serverTime: number;
-  generation: number;
+  /** Callback when player state changes (local or from server). */
+  onStateChange?: (state: {
+    isPlaying: boolean;
+    volume: number;
+    muted: boolean;
+    playerState: PlayerState;
+    /** Cached server state (merged from server/state messages) */
+    serverState: ServerStatePayload;
+    /** Cached group state (merged from group/update messages) */
+    groupState: GroupUpdatePayload;
+  }) => void;
 }
 
 /**

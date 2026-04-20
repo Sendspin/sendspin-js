@@ -65,6 +65,65 @@ player.sendCommand('switch');  // Switch group
 player.disconnect('user_request');
 ```
 
+## Advanced configuration
+
+### Bring your own WebSocket
+
+Provide an already-open (or CONNECTING) `WebSocket` via `webSocket` to let the
+player adopt it instead of creating a new one. Useful when the connection is
+managed by a surrounding app framework. Auto-reconnect is disabled for adopted
+sockets.
+
+```typescript
+const ws = new WebSocket('ws://your-server:8095/sendspin');
+const player = new SendspinPlayer({
+  playerId: 'my-player',
+  clientName: 'My Player',
+  webSocket: ws,
+});
+await player.connect();
+```
+
+### Tuning correction thresholds
+
+Override the per-mode thresholds that control when/how the scheduler corrects
+drift. Unspecified fields keep their defaults.
+
+```typescript
+const player = new SendspinPlayer({
+  baseUrl: 'http://your-server:8095',
+  correctionMode: 'sync',
+  correctionThresholds: {
+    sync: {
+      resyncAboveMs: 400,   // tolerate more drift before hard resync
+      deadbandBelowMs: 2,   // ignore errors under 2ms
+    },
+  },
+});
+```
+
+### Core + scheduler as separate layers
+
+Apps that need the decoded PCM stream (e.g. visualizers) can use
+`SendspinCore` on its own and skip the playback layer. `SendspinCore` emits
+`DecodedAudioChunk` events; `AudioScheduler` is the Web Audio consumer that
+`SendspinPlayer` wires for you.
+
+```typescript
+import { SendspinCore } from '@sendspin/sendspin-js';
+
+const core = new SendspinCore({
+  baseUrl: 'http://your-server:8095',
+});
+
+core.onAudioData = (chunk) => {
+  // chunk.samples: Float32Array per channel
+  // chunk.sampleRate, chunk.serverTimeUs, chunk.generation
+};
+
+await core.connect();
+```
+
 ## Local development
 
 ```

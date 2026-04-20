@@ -1,6 +1,7 @@
+import type { ClientMessage } from "../types";
 export class WebSocketManager {
   private ws: WebSocket | null = null;
-  private reconnectTimeout: number | null = null;
+  private reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
   private shouldReconnect: boolean = false;
 
   // Event handlers
@@ -10,6 +11,102 @@ export class WebSocketManager {
   private onCloseHandler?: () => void;
 
   constructor() {}
+
+  /**
+   * Adopt an existing WebSocket connection.
+   * The caller is responsible for having already opened the socket.
+   * Reconnection is disabled for adopted sockets.
+   *
+   * Returns a Promise that resolves once the adopted socket is open. Throws
+   * synchronously if the socket is already CLOSING or CLOSED.
+   */
+  adopt(
+    ws: WebSocket,
+    onOpen?: () => void,
+    onMessage?: (event: MessageEvent) => void,
+    onError?: (error: Event) => void,
+    onClose?: () => void,
+  ): Promise<void> {
+    if (
+      ws.readyState !== WebSocket.OPEN &&
+      ws.readyState !== WebSocket.CONNECTING
+    ) {
+      throw new Error(
+        `Sendspin: Cannot adopt WebSocket in readyState ${ws.readyState} (must be OPEN or CONNECTING)`,
+      );
+    }
+
+    // Store handlers
+    this.onOpenHandler = onOpen;
+    this.onMessageHandler = onMessage;
+    this.onErrorHandler = onError;
+    this.onCloseHandler = onClose;
+
+    // Detach handlers from any existing socket so its async close event
+    // cannot fire into the newly-adopted session.
+    if (this.ws) {
+      const old = this.ws;
+      old.onopen = null;
+      old.onmessage = null;
+      old.onerror = null;
+      old.onclose = null;
+      old.close();
+      this.ws = null;
+    }
+
+    this.ws = ws;
+    this.ws.binaryType = "arraybuffer";
+    // No auto-reconnect for externally-managed sockets
+    this.shouldReconnect = false;
+
+    this.ws.onmessage = (event: MessageEvent) => {
+      if (this.onMessageHandler) {
+        this.onMessageHandler(event);
+      }
+    };
+
+    this.ws.onerror = (error: Event) => {
+      console.error("Sendspin: WebSocket error", error);
+      if (this.onErrorHandler) {
+        this.onErrorHandler(error);
+      }
+    };
+
+    this.ws.onclose = () => {
+      console.log("Sendspin: WebSocket disconnected");
+      if (this.onCloseHandler) {
+        this.onCloseHandler();
+      }
+    };
+
+    return new Promise<void>((resolve, reject) => {
+      const fireOpen = () => {
+        if (this.onOpenHandler) {
+          this.onOpenHandler();
+        }
+        resolve();
+      };
+
+      if (ws.readyState === WebSocket.OPEN) {
+        console.log("Sendspin: Adopted open WebSocket");
+        fireOpen();
+        return;
+      }
+
+      // CONNECTING: wait for open or early close.
+      const prevOnClose = this.ws!.onclose;
+      this.ws!.onopen = () => {
+        console.log("Sendspin: Adopted WebSocket connected");
+        fireOpen();
+      };
+      this.ws!.onclose = (event: CloseEvent) => {
+        if (prevOnClose) {
+          prevOnClose.call(this.ws!, event);
+        }
+        reject(new Error("Sendspin: Adopted WebSocket closed before opening"));
+      };
+    });
+  }
 
   // Connect to WebSocket server
   async connect(
@@ -85,7 +182,7 @@ export class WebSocketManager {
       clearTimeout(this.reconnectTimeout);
     }
 
-    this.reconnectTimeout = window.setTimeout(() => {
+    this.reconnectTimeout = globalThis.setTimeout(() => {
       if (this.shouldReconnect) {
         console.log("Sendspin: Attempting to reconnect...");
         this.connect(
@@ -117,7 +214,7 @@ export class WebSocketManager {
   }
 
   // Send message to server (JSON)
-  send(message: any): void {
+  send(message: ClientMessage): void {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify(message));
     } else {

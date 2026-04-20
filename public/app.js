@@ -24,6 +24,8 @@ const STORAGE_KEYS = {
   MUTED: "sendspin-muted",
   SYNC_DELAY: "sendspin-sync-delay",
   CORRECTION_MODE: "sendspin-correction-mode",
+  RESYNC_THRESHOLD: "sendspin-resync-threshold",
+  DEADBAND_THRESHOLD: "sendspin-deadband-threshold",
 };
 
 // DOM Elements
@@ -39,6 +41,8 @@ const muteIcon = document.getElementById("mute-icon");
 const syncDelayInput = document.getElementById("sync-delay");
 const applySyncDelayBtn = document.getElementById("apply-sync-delay");
 const correctionModeSelect = document.getElementById("correction-mode");
+const resyncThresholdInput = document.getElementById("resync-threshold");
+const deadbandThresholdInput = document.getElementById("deadband-threshold");
 const groupVolumeSlider = document.getElementById("group-volume-slider");
 const groupVolumeValue = document.getElementById("group-volume-value");
 const groupMuteBtn = document.getElementById("group-mute-btn");
@@ -426,6 +430,20 @@ function loadSettings() {
   if (savedCorrectionMode !== null) {
     correctionModeSelect.value = savedCorrectionMode;
   }
+
+  const savedResyncThreshold = localStorage.getItem(
+    STORAGE_KEYS.RESYNC_THRESHOLD,
+  );
+  if (savedResyncThreshold !== null && resyncThresholdInput) {
+    resyncThresholdInput.value = savedResyncThreshold;
+  }
+
+  const savedDeadbandThreshold = localStorage.getItem(
+    STORAGE_KEYS.DEADBAND_THRESHOLD,
+  );
+  if (savedDeadbandThreshold !== null && deadbandThresholdInput) {
+    deadbandThresholdInput.value = savedDeadbandThreshold;
+  }
 }
 
 /**
@@ -454,6 +472,28 @@ function sanitizeSyncDelay(delay) {
     return 0;
   }
   return Math.max(0, Math.min(5000, Math.round(delay)));
+}
+
+/**
+ * Build a correctionThresholds override from the Advanced inputs.
+ * Returns undefined when no override is set for the current mode.
+ */
+function buildCorrectionThresholds(mode) {
+  const overrides = {};
+  const resyncRaw = resyncThresholdInput?.value;
+  const deadbandRaw = deadbandThresholdInput?.value;
+  const resync = resyncRaw ? parseFloat(resyncRaw) : NaN;
+  const deadband = deadbandRaw ? parseFloat(deadbandRaw) : NaN;
+  if (Number.isFinite(resync) && resync >= 0) {
+    overrides.resyncAboveMs = resync;
+  }
+  if (Number.isFinite(deadband) && deadband >= 0) {
+    overrides.deadbandBelowMs = deadband;
+  }
+  if (Object.keys(overrides).length === 0) {
+    return undefined;
+  }
+  return { [mode]: overrides };
 }
 
 /**
@@ -518,12 +558,15 @@ async function connect() {
     const savedCorrectionMode =
       localStorage.getItem(STORAGE_KEYS.CORRECTION_MODE) || "sync";
 
+    const correctionThresholds = buildCorrectionThresholds(savedCorrectionMode);
+
     player = new SendspinPlayer({
       playerId: getPlayerId(),
       baseUrl: serverUrl,
       clientName: "Sendspin Sample Player",
       syncDelay: sanitizedSyncDelay,
       correctionMode: savedCorrectionMode,
+      correctionThresholds,
       onStateChange,
     });
 
@@ -684,6 +727,18 @@ function init() {
   muteBtn.addEventListener("click", toggleMute);
   applySyncDelayBtn.addEventListener("click", applySyncDelay);
   correctionModeSelect.addEventListener("change", applyCorrectionMode);
+  resyncThresholdInput?.addEventListener("change", () => {
+    localStorage.setItem(
+      STORAGE_KEYS.RESYNC_THRESHOLD,
+      resyncThresholdInput.value,
+    );
+  });
+  deadbandThresholdInput?.addEventListener("change", () => {
+    localStorage.setItem(
+      STORAGE_KEYS.DEADBAND_THRESHOLD,
+      deadbandThresholdInput.value,
+    );
+  });
   groupVolumeSlider.addEventListener("input", () => {
     player.sendCommand("volume", {
       volume: parseInt(groupVolumeSlider.value, 10),
