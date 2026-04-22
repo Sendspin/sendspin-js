@@ -1,8 +1,18 @@
-import type { ClientMessage } from "../types";
+import type { ClientMessage, ReconnectConfig } from "../types";
+
 export class WebSocketManager {
   private ws: WebSocket | null = null;
   private reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
   private shouldReconnect: boolean = false;
+  private isReconnecting: boolean = false;
+  private reconnectAttempt: number = 0;
+
+  private baseDelayMs: number;
+  private maxDelayMs: number;
+  private maxAttempts: number;
+  private onReconnecting?: ReconnectConfig["onReconnecting"];
+  private onReconnected?: ReconnectConfig["onReconnected"];
+  private onExhausted?: ReconnectConfig["onExhausted"];
 
   // Event handlers
   private onOpenHandler?: () => void;
@@ -10,7 +20,17 @@ export class WebSocketManager {
   private onErrorHandler?: (error: Event) => void;
   private onCloseHandler?: () => void;
 
-  constructor() {}
+  constructor(config?: ReconnectConfig) {
+    this.baseDelayMs = Math.max(0, config?.baseDelayMs ?? 1000);
+    this.maxDelayMs = Math.max(this.baseDelayMs, config?.maxDelayMs ?? 15000);
+    this.maxAttempts =
+      config?.maxAttempts === undefined
+        ? Infinity
+        : Math.max(0, config.maxAttempts);
+    this.onReconnecting = config?.onReconnecting;
+    this.onReconnected = config?.onReconnected;
+    this.onExhausted = config?.onExhausted;
+  }
 
   /**
    * Adopt an existing WebSocket connection.
@@ -58,6 +78,7 @@ export class WebSocketManager {
     this.ws.binaryType = "arraybuffer";
     // No auto-reconnect for externally-managed sockets
     this.shouldReconnect = false;
+    this.clearReconnectState();
 
     this.ws.onmessage = (event: MessageEvent) => {
       if (this.onMessageHandler) {
@@ -128,6 +149,10 @@ export class WebSocketManager {
       this.ws = null;
     }
 
+    return this.openSocket(url);
+  }
+
+  private openSocket(url: string): Promise<void> {
     return new Promise((resolve, reject) => {
       try {
         console.log("Sendspin: Connecting to", url);
@@ -138,8 +163,14 @@ export class WebSocketManager {
 
         this.ws.onopen = () => {
           console.log("Sendspin: WebSocket connected");
+          const wasReconnecting = this.isReconnecting;
+          this.isReconnecting = false;
+          this.reconnectAttempt = 0;
           if (this.onOpenHandler) {
             this.onOpenHandler();
+          }
+          if (wasReconnecting) {
+            this.onReconnected?.();
           }
           resolve();
         };
@@ -176,36 +207,64 @@ export class WebSocketManager {
     });
   }
 
+  private getReconnectDelayMs(attempt: number): number {
+    const exponential = this.baseDelayMs * 2 ** (attempt - 1);
+    return Math.min(exponential, this.maxDelayMs);
+  }
+
   // Schedule reconnection attempt
   private scheduleReconnect(url: string): void {
     if (this.reconnectTimeout !== null) {
       clearTimeout(this.reconnectTimeout);
+      this.reconnectTimeout = null;
     }
 
+    const attempt = this.reconnectAttempt + 1;
+    if (attempt > this.maxAttempts) {
+      console.warn(
+        `Sendspin: Reconnect exhausted after ${this.maxAttempts} attempt(s)`,
+      );
+      this.shouldReconnect = false;
+      this.isReconnecting = false;
+      this.reconnectAttempt = 0;
+      this.onExhausted?.();
+      return;
+    }
+
+    this.reconnectAttempt = attempt;
+    this.isReconnecting = true;
+    const delayMs = this.getReconnectDelayMs(attempt);
+
     this.reconnectTimeout = globalThis.setTimeout(() => {
-      if (this.shouldReconnect) {
-        console.log("Sendspin: Attempting to reconnect...");
-        this.connect(
-          url,
-          this.onOpenHandler,
-          this.onMessageHandler,
-          this.onErrorHandler,
-          this.onCloseHandler,
-        ).catch((error) => {
-          console.error("Sendspin: Reconnection failed", error);
-        });
+      this.reconnectTimeout = null;
+      if (!this.shouldReconnect) {
+        return;
       }
-    }, 5000);
+      this.onReconnecting?.({ attempt, delayMs });
+      console.log(
+        `Sendspin: Attempting to reconnect (attempt ${attempt}${
+          this.maxAttempts === Infinity ? "" : `/${this.maxAttempts}`
+        })...`,
+      );
+      this.openSocket(url).catch((error) => {
+        console.error("Sendspin: Reconnection failed", error);
+      });
+    }, delayMs);
+  }
+
+  private clearReconnectState(): void {
+    if (this.reconnectTimeout !== null) {
+      clearTimeout(this.reconnectTimeout);
+      this.reconnectTimeout = null;
+    }
+    this.isReconnecting = false;
+    this.reconnectAttempt = 0;
   }
 
   // Disconnect from WebSocket server
   disconnect(): void {
     this.shouldReconnect = false;
-
-    if (this.reconnectTimeout !== null) {
-      clearTimeout(this.reconnectTimeout);
-      this.reconnectTimeout = null;
-    }
+    this.clearReconnectState();
 
     if (this.ws) {
       this.ws.close();

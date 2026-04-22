@@ -111,6 +111,7 @@ export class SendspinPlayer {
       onVolumeCommand: config.onVolumeCommand,
       onDelayCommand: config.onDelayCommand,
       getExternalVolume: config.getExternalVolume,
+      reconnect: config.reconnect,
       onStateChange: config.onStateChange,
     });
 
