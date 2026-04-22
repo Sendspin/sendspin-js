@@ -143,9 +143,17 @@ export class WebSocketManager {
     this.onErrorHandler = onError;
     this.onCloseHandler = onClose;
 
-    // Disconnect if already connected
+    // Detach the old socket before replacing it: its async onclose would
+    // otherwise re-enter scheduleReconnect once openSocket re-arms retry.
+    this.shouldReconnect = false;
+    this.clearReconnectState();
     if (this.ws) {
-      this.ws.close();
+      const old = this.ws;
+      old.onopen = null;
+      old.onmessage = null;
+      old.onerror = null;
+      old.onclose = null;
+      old.close();
       this.ws = null;
     }
 
