@@ -567,6 +567,16 @@ async function connect() {
       syncDelay: sanitizedSyncDelay,
       correctionMode: savedCorrectionMode,
       correctionThresholds,
+      reconnect: {
+        onReconnecting: ({ attempt, delayMs }) => {
+          showToast(
+            `Reconnecting in ${Math.round(delayMs / 1000)}s (attempt ${attempt})`,
+            "info",
+          );
+        },
+        onReconnected: () => showToast("Reconnected", "success"),
+        onExhausted: () => showToast("Reconnect failed", "error"),
+      },
       onStateChange,
     });
 
