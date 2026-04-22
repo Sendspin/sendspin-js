@@ -352,6 +352,55 @@ export interface DecodedAudioChunk {
 }
 
 /**
+ * Reconnection behavior when the WebSocket closes unexpectedly.
+ *
+ * Defaults: exponential backoff starting at 1s, capped at 15s, unlimited attempts.
+ * Reconnection is only active for connections opened via `baseUrl` — adopted
+ * sockets (via `webSocket`) never auto-reconnect.
+ */
+export interface ReconnectConfig {
+  /**
+   * Base delay in ms for the first reconnect attempt.
+   * Subsequent attempts double this up to `maxDelayMs`.
+   *
+   * Default: 1000
+   */
+  baseDelayMs?: number;
+
+  /**
+   * Upper bound for the exponential backoff delay in ms.
+   *
+   * Default: 15000
+   */
+  maxDelayMs?: number;
+
+  /**
+   * Maximum number of reconnect attempts before giving up and firing
+   * `onExhausted`. Pass `Infinity` for unlimited retries.
+   *
+   * Default: Infinity
+   */
+  maxAttempts?: number;
+
+  /**
+   * Called immediately before each reconnect attempt opens a new socket.
+   * `attempt` is 1-based.
+   */
+  onReconnecting?: (attempt: number) => void;
+
+  /**
+   * Called once the socket re-opens successfully after one or more retries.
+   */
+  onReconnected?: () => void;
+
+  /**
+   * Called when `maxAttempts` is reached without a successful reconnect.
+   * After this fires, the manager stops retrying automatically.
+   */
+  onExhausted?: () => void;
+}
+
+/**
  * Configuration for SendspinCore (protocol + decoding, no playback).
  */
 export interface SendspinCoreConfig {
@@ -430,6 +479,12 @@ export interface SendspinCoreConfig {
    * Not called immediately after volume commands to wait for hardware to apply the change.
    */
   getExternalVolume?: () => { volume: number; muted: boolean };
+
+  /**
+   * Reconnection behavior for connections opened via `baseUrl`.
+   * See {@link ReconnectConfig} for defaults.
+   */
+  reconnect?: ReconnectConfig;
 
   /** Callback when player state changes (local or from server). */
   onStateChange?: (state: {

@@ -84,6 +84,29 @@ const player = new SendspinPlayer({
 await player.connect();
 ```
 
+### Reconnect behavior
+
+Built-in auto-reconnect uses exponential backoff (1s → 15s, unlimited
+attempts). Override the bounds, cap the retry count, or hook callbacks to
+drive UI and fatal-error paths via `reconnect`.
+
+```typescript
+const player = new SendspinPlayer({
+  baseUrl: 'http://your-server:8095',
+  reconnect: {
+    baseDelayMs: 1000,
+    maxDelayMs: 15000,
+    maxAttempts: 7,
+    onReconnecting: (attempt) => console.log(`Reconnecting (attempt ${attempt})`),
+    onReconnected: () => console.log('Reconnected'),
+    onExhausted: () => console.log('Giving up'),
+  },
+});
+```
+
+Reconnection only applies to connections opened via `baseUrl`; adopted
+sockets (`webSocket`) never auto-reconnect.
+
 ### Tuning correction thresholds
 
 Override the per-mode thresholds that control when/how the scheduler corrects

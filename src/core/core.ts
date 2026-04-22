@@ -69,7 +69,7 @@ export class SendspinCore implements StreamHandler {
       () => this.stateManager.streamGeneration,
     );
 
-    this.wsManager = new WebSocketManager();
+    this.wsManager = new WebSocketManager(config.reconnect);
 
     this.protocolHandler = new ProtocolHandler(
       playerId,
