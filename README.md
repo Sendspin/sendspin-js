@@ -97,9 +97,7 @@ const player = new SendspinPlayer({
     baseDelayMs: 1000,
     maxDelayMs: 15000,
     maxAttempts: 7,
-    onReconnecting: ({ attempt, delayMs }) => {
-      console.log(`Reconnecting in ${delayMs}ms (attempt ${attempt})`);
-    },
+    onReconnecting: (attempt) => console.log(`Reconnecting (attempt ${attempt})`),
     onReconnected: () => console.log('Reconnected'),
     onExhausted: () => console.log('Giving up'),
   },

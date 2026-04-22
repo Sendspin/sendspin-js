@@ -248,7 +248,7 @@ export class WebSocketManager {
       if (!this.shouldReconnect) {
         return;
       }
-      this.onReconnecting?.({ attempt, delayMs });
+      this.onReconnecting?.(attempt);
       console.log(
         `Sendspin: Attempting to reconnect (attempt ${attempt}${
           this.maxAttempts === Infinity ? "" : `/${this.maxAttempts}`

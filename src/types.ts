@@ -352,16 +352,6 @@ export interface DecodedAudioChunk {
 }
 
 /**
- * Information about a reconnect attempt.
- */
-export interface ReconnectAttemptInfo {
-  /** 1-based attempt counter. */
-  attempt: number;
-  /** Delay (ms) before this attempt fires. */
-  delayMs: number;
-}
-
-/**
  * Reconnection behavior when the WebSocket closes unexpectedly.
  *
  * Defaults: exponential backoff starting at 1s, capped at 15s, unlimited attempts.
@@ -393,10 +383,10 @@ export interface ReconnectConfig {
   maxAttempts?: number;
 
   /**
-   * Called before each reconnect attempt fires (after the delay has elapsed
-   * but before the WebSocket is created).
+   * Called immediately before each reconnect attempt opens a new socket.
+   * `attempt` is 1-based.
    */
-  onReconnecting?: (info: ReconnectAttemptInfo) => void;
+  onReconnecting?: (attempt: number) => void;
 
   /**
    * Called once the socket re-opens successfully after one or more retries.
