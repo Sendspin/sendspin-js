@@ -1,6 +1,6 @@
 {
   "name": "@sendspin/sendspin-js",
-  "version": "0.1.0",
+  "version": "2.0.6",
   "type": "module",
   "description": "TypeScript client library for the Sendspin synchronized audio protocol",
   "main": "dist/index.js",
