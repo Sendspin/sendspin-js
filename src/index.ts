@@ -13,6 +13,7 @@ import type {
   ControllerCommand,
   ControllerCommands,
   CorrectionMode,
+  ClockPrecision,
 } from "./types";
 
 // Platform detection utilities
@@ -323,6 +324,17 @@ export class SendspinPlayer {
     this.audioProcessor.setCorrectionMode(mode);
   }
 
+  /**
+   * Enable or disable debug logging for sync diagnostics.
+   */
+  setDebugLogging(enabled: boolean): void {
+    this.audioProcessor.setDebugLogging(enabled);
+  }
+
+  get debugLogging(): boolean {
+    return this.audioProcessor.debugLogging;
+  }
+
   // ========================================
   // Controller Commands (sent to server)
   // ========================================
@@ -451,6 +463,7 @@ export class SendspinPlayer {
     correctionMethod: "none" | "samples" | "rate" | "resync";
     samplesAdjusted: number;
     correctionMode: CorrectionMode;
+    clockPrecision: ClockPrecision;
   } {
     return this.audioProcessor.syncInfo;
   }

@@ -253,6 +253,14 @@ export type Codec = "pcm" | "opus" | "flac";
  */
 export type CorrectionMode = "sync" | "quality" | "quality-local";
 
+/**
+ * Compatibility clock precision state exposed by syncInfo.
+ * - "precise": A validated timestamp-derived audio clock is active
+ * - "imprecise": Time sync is not yet established
+ * - "imprecise-timeout": Time sync is established but playback is using a fallback clock
+ */
+export type ClockPrecision = "precise" | "imprecise" | "imprecise-timeout";
+
 export interface SupportedFormat {
   codec: string;
   channels: number;

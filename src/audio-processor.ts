@@ -3,6 +3,7 @@ import type {
   StreamFormat,
   AudioOutputMode,
   CorrectionMode,
+  ClockPrecision,
   SendspinStorage,
 } from "./types";
 import type { StateManager } from "./state-manager";
@@ -151,6 +152,7 @@ export class AudioProcessor {
 
   // Correction mode
   private _correctionMode: CorrectionMode = "sync";
+  private _debugLogging: boolean = false;
 
   // Periodic status logging
   private _lastStatusLogMs: number = 0;
@@ -253,6 +255,15 @@ export class AudioProcessor {
     } else {
       this.startRecorrectionMonitor();
     }
+  }
+
+  // Compatibility shim for the published 2.0.x API.
+  setDebugLogging(enabled: boolean): void {
+    this._debugLogging = enabled;
+  }
+
+  get debugLogging(): boolean {
+    return this._debugLogging;
   }
 
   private modeUsesRecorrectionMonitor(mode: CorrectionMode): boolean {
@@ -905,7 +916,17 @@ export class AudioProcessor {
     correctionMethod: "none" | "samples" | "rate" | "resync";
     samplesAdjusted: number;
     correctionMode: CorrectionMode;
+    clockPrecision: ClockPrecision;
   } {
+    let clockPrecision: ClockPrecision;
+    if (this.activeAudioClockSource === "timestamp") {
+      clockPrecision = "precise";
+    } else if (this.timeFilter.is_synchronized) {
+      clockPrecision = "imprecise-timeout";
+    } else {
+      clockPrecision = "imprecise";
+    }
+
     return {
       clockDriftPercent: this.timeFilter.drift * 100,
       syncErrorMs: this.currentSyncErrorMs,
@@ -915,10 +936,14 @@ export class AudioProcessor {
       correctionMethod: this.currentCorrectionMethod,
       samplesAdjusted: this.lastSamplesAdjusted,
       correctionMode: this._correctionMode,
+      clockPrecision,
     };
   }
 
   private emitStatusLog(nowMs: number): void {
+    if (!this._debugLogging) {
+      return;
+    }
     if (this._lastStatusLogMs !== 0 && nowMs - this._lastStatusLogMs < 10_000) {
       return;
     }
