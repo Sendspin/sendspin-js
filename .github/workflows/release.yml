@@ -80,4 +80,11 @@ jobs:
         run: npm version ${{ needs.build.outputs.version }} --no-git-tag-version
 
       - name: Publish release to npm
-        run: npm publish --access public --provenance
+        run: |
+          VERSION="${{ needs.build.outputs.version }}"
+          if [[ "$VERSION" =~ ^2\. ]]; then
+            echo "Publishing 2.x release with dist-tag 'legacy'"
+            npm publish --access public --provenance --tag legacy
+          else
+            npm publish --access public --provenance
+          fi
