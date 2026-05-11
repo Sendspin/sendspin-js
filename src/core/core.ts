@@ -213,7 +213,9 @@ export class SendspinCore implements StreamHandler {
       );
       const wsProtocol = url.protocol === "https:" ? "wss:" : "ws:";
       const basePath = url.pathname.replace(/\/$/, "");
-      const wsUrl = `${wsProtocol}//${url.host}${basePath}/sendspin`;
+      const wsUrl = basePath.endsWith("/sendspin")
+        ? `${wsProtocol}//${url.host}${basePath}`
+        : `${wsProtocol}//${url.host}${basePath}/sendspin`;
 
       await this.wsManager.connect(wsUrl, onOpen, onMessage, onError, onClose);
     }
