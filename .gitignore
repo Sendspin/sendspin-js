@@ -1,5 +1,6 @@
 node_modules/
 dist/
+.venv/
 *.log
 .DS_Store
 public/dev/
