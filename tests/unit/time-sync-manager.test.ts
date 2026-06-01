@@ -80,11 +80,11 @@ describe("TimeSyncManager", () => {
       respond(t1, t1 + a, t4 + b);
     }
 
-    // measurement = (a + b) / 2; maxError = max(1000, (a-b)/2)
-    // Candidate = median-by-measurement of the 3 lowest-rtt samples; all
-    // samples are equal so stable sort picks the 2nd sent (t4 = 20*1000).
+    // measurement = (a + b) / 2; maxError = max(1000, (a-b)/2). Every sample
+    // is equivalent so any may be selected — don't pin which t4 wins here
+    // (selection is covered by the next test).
     expect(update).toHaveBeenCalledTimes(1);
-    expect(update).toHaveBeenCalledWith(1500, 1000, 20000);
+    expect(update).toHaveBeenCalledWith(1500, 1000, expect.any(Number));
   });
 
   it("selects the median measurement among the lowest-RTT samples", () => {

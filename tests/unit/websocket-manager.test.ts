@@ -55,6 +55,7 @@ describe("WebSocketManager", () => {
   });
 
   afterEach(() => {
+    mgr.disconnect();
     globalThis.WebSocket = originalWebSocket;
     vi.useRealTimers();
   });
