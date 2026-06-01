@@ -228,13 +228,17 @@ describe("SendspinDecoder", () => {
       expect(chunks[0].samples.length).toBe(2);
       expect(chunks[0].samples[0].length).toBe(960);
 
-      // Check samples are in valid range
+      // The sine has amplitude ~0.5, so the decoded peak must approach it —
+      // catches an all-zeros decoder that the range check alone would pass.
+      let peak = 0;
       for (const ch of chunks[0].samples) {
         for (const s of ch) {
           expect(s).toBeGreaterThanOrEqual(-1.0);
           expect(s).toBeLessThanOrEqual(1.0);
+          peak = Math.max(peak, Math.abs(s));
         }
       }
+      expect(peak).toBeGreaterThan(0.4);
     });
   });
 
@@ -256,12 +260,17 @@ describe("SendspinDecoder", () => {
       expect(chunks[0].samples.length).toBe(2);
       expect(chunks[0].samples[0].length).toBe(960);
 
+      // ~1e9 amplitude over the int32 range decodes to a peak near 0.47 —
+      // catches an all-zeros decoder that the range check alone would pass.
+      let peak = 0;
       for (const ch of chunks[0].samples) {
         for (const s of ch) {
           expect(s).toBeGreaterThanOrEqual(-1.0);
           expect(s).toBeLessThanOrEqual(1.0);
+          peak = Math.max(peak, Math.abs(s));
         }
       }
+      expect(peak).toBeGreaterThan(0.4);
     });
   });
 

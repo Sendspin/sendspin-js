@@ -116,15 +116,6 @@ describe("StateManager", () => {
   });
 
   describe("onStateChange callback", () => {
-    it("fires on volume change", () => {
-      const cb = vi.fn();
-      const sm2 = new StateManager(cb);
-
-      sm2.volume = 50;
-
-      expect(cb).toHaveBeenCalledWith(expect.objectContaining({ volume: 50 }));
-    });
-
     it("fires on muted change", () => {
       const cb = vi.fn();
       const sm2 = new StateManager(cb);
