@@ -138,6 +138,31 @@ describe("SendspinTimeFilter", () => {
     });
   });
 
+  describe("drift compensation", () => {
+    it("applies the drift term to the transform once drift is significant", () => {
+      // Feed an exact linear offset(t) = base + rate*t so the drift estimate
+      // becomes statistically significant and drift compensation switches on.
+      const base = 10000;
+      const rate = 0.01;
+      for (let i = 1; i <= 30; i++) {
+        const t = i * 100000;
+        filter.update(base + rate * t, 200, t);
+      }
+
+      const t1 = 4_000_000;
+      const t2 = 5_000_000;
+      const off1 = filter.computeServerTime(t1) - t1;
+      const off2 = filter.computeServerTime(t2) - t2;
+
+      // With drift active the applied offset grows over time.
+      expect(off2).toBeGreaterThan(off1);
+      // Round-trip stays consistent through the inverse transform.
+      expect(
+        filter.computeClientTime(filter.computeServerTime(t1)),
+      ).toBeCloseTo(t1, -1);
+    });
+  });
+
   describe("adaptive forgetting", () => {
     it("recovers from a large offset jump after sufficient history", () => {
       // Build up history with offset = 10000

@@ -188,6 +188,29 @@ describe("StateManager", () => {
 
       expect(sm.serverState.metadata).toBeUndefined();
     });
+
+    it("merges nested fields without dropping siblings", () => {
+      sm.updateServerState({
+        metadata: { title: "Song A", artist: "Artist A" },
+      });
+
+      sm.updateServerState({ metadata: { artist: "Artist B" } });
+
+      expect(sm.serverState.metadata).toEqual({
+        title: "Song A",
+        artist: "Artist B",
+      });
+    });
+
+    it("clears a nested key with null while keeping siblings", () => {
+      sm.updateServerState({
+        metadata: { title: "Song A", artist: "Artist A" },
+      });
+
+      sm.updateServerState({ metadata: { artist: null } });
+
+      expect(sm.serverState.metadata).toEqual({ title: "Song A" });
+    });
   });
 
   describe("group state", () => {
