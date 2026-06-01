@@ -18,6 +18,10 @@ export class AiosendspinServer {
   private proc: ChildProcess | null = null;
   private rl: Interface | null = null;
   private responseQueue: Array<(line: string) => void> = [];
+  // Responses owed to timed-out reads. The protocol is one line per command,
+  // so a late line belongs to the read that already gave up and must be
+  // dropped rather than handed to the next waiter.
+  private staleLines = 0;
 
   /** Port the server is listening on (available after start()). */
   port = 0;
@@ -34,6 +38,10 @@ export class AiosendspinServer {
     this.rl = createInterface({ input: this.proc.stdout! });
 
     this.rl.on("line", (line: string) => {
+      if (this.staleLines > 0) {
+        this.staleLines--;
+        return;
+      }
       const waiter = this.responseQueue.shift();
       if (waiter) {
         waiter(line);
@@ -70,9 +78,12 @@ export class AiosendspinServer {
   private readLine(timeoutMs: number): Promise<string> {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
-        // Remove ourselves from the queue
+        // Remove ourselves from the queue and discard the eventual late line.
         const idx = this.responseQueue.indexOf(handler);
-        if (idx !== -1) this.responseQueue.splice(idx, 1);
+        if (idx !== -1) {
+          this.responseQueue.splice(idx, 1);
+          this.staleLines++;
+        }
         reject(new Error(`Timed out reading from server (${timeoutMs}ms)`));
       }, timeoutMs);
 

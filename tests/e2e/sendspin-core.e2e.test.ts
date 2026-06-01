@@ -13,7 +13,7 @@
  * - Disconnect (client/goodbye)
  */
 
-import { describe, it, expect, beforeAll, afterAll, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { WebSocket } from "ws";
 import { AiosendspinServer } from "../helpers/aiosendspin-server";
 import { SendspinCore } from "../../src/core/core";
@@ -43,19 +43,21 @@ async function waitFor(
 describe("SendspinCore E2E (aiosendspin)", () => {
   let server: AiosendspinServer;
   let core: SendspinCore | null = null;
+  let externalWs: WebSocket | null = null;
 
-  beforeAll(async () => {
+  // A fresh server per test keeps the client queue and stream state from
+  // bleeding across tests.
+  beforeEach(async () => {
     server = new AiosendspinServer();
     await server.start();
   });
 
-  afterAll(async () => {
-    await server.close();
-  });
-
-  afterEach(() => {
+  afterEach(async () => {
     core?.disconnect();
     core = null;
+    externalWs?.close();
+    externalWs = null;
+    await server.close();
   });
 
   /**
@@ -106,6 +108,7 @@ describe("SendspinCore E2E (aiosendspin)", () => {
 
     it("connects with external WebSocket", async () => {
       const ws = new WebSocket(`ws://127.0.0.1:${server.port}/sendspin`);
+      externalWs = ws;
 
       // Wait for the WebSocket to open before passing it to SendspinCore
       await new Promise<void>((resolve, reject) => {

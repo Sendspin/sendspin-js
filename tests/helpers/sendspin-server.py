@@ -29,9 +29,17 @@ Protocol:
 
 import asyncio
 import math
+import socket
 import struct
 import sys
 from typing import Any
+
+
+def find_free_port() -> int:
+    """Reserve an ephemeral port on loopback and return it."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
 
 from aiosendspin.server import (
     AudioFormat,
@@ -83,7 +91,7 @@ class TestServer:
                 self._client_queue.put_nowait(client_id)
 
     async def start(self) -> int:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         self.server = SendspinServer(
             loop=loop,
             server_id="test-server",
@@ -91,16 +99,15 @@ class TestServer:
         )
         self.server.add_event_listener(self._on_event)
 
-        # Use port 0 for random available port
+        # aiosendspin exposes no public accessor for the bound port, so pick a
+        # free one ourselves and pass it explicitly instead of binding port 0.
+        port = find_free_port()
         await self.server.start_server(
-            port=0,
+            port=port,
             host="127.0.0.1",
             advertise_addresses=["127.0.0.1"],
             discover_clients=False,
         )
-
-        # Extract the port from the running server
-        port = self.server._tcp_site._server.sockets[0].getsockname()[1]
         return port
 
     async def wait_client(self) -> str:
@@ -252,7 +259,9 @@ async def main() -> None:
                 print(f"ERROR unknown command: {cmd}", flush=True)
 
         except Exception as e:
-            print(f"ERROR {e}", flush=True)
+            # Collapse newlines so each response stays a single line for the
+            # line-based reader on the Node side.
+            print(f"ERROR {str(e).replace(chr(10), ' ')}", flush=True)
 
     # Ensure cleanup
     await ts.shutdown()
