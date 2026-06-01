@@ -142,16 +142,10 @@ class TestServer:
         await self.push_stream.commit_audio()
 
     async def stream_clear(self) -> None:
-        assert self.server is not None
-        assert self.active_client_id is not None
-
-        client = self.server.get_client(self.active_client_id)
-        assert client is not None
-
-        group = client.group
-        # Stop and restart the stream to simulate a seek/clear
-        group.stop_stream()
-        self.push_stream = group.start_stream()
+        # Discard buffered audio and emit stream/clear (seek), keeping the
+        # stream alive.
+        assert self.push_stream is not None
+        self.push_stream.clear()
 
     async def stream_end(self) -> None:
         assert self.server is not None

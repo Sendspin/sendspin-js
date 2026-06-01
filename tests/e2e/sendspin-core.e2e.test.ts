@@ -226,6 +226,26 @@ describe("SendspinCore E2E (aiosendspin)", () => {
       }
     });
 
+    it("clears the stream on seek without ending it", async () => {
+      await connectCore();
+
+      const streamStarted = new Promise<void>((resolve) => {
+        core!.onStreamStart = () => resolve();
+      });
+      await server.streamStart();
+      await streamStarted;
+
+      const cleared = new Promise<void>((resolve) => {
+        core!.onStreamClear = () => resolve();
+      });
+
+      await server.streamClear();
+      await cleared;
+
+      // A seek clears buffered audio but keeps the stream playing.
+      expect(core!.isPlaying).toBe(true);
+    });
+
     it("handles stream end", async () => {
       await connectCore();
 
