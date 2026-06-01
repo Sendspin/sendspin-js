@@ -7,6 +7,6 @@ cd "$(dirname "$0")/.."
 
 python3 -m venv .venv
 .venv/bin/pip install --upgrade pip
-.venv/bin/pip install "aiosendspin[server]"
+.venv/bin/pip install "aiosendspin[server]>=6.0,<7"
 
 yarn install --frozen-lockfile
