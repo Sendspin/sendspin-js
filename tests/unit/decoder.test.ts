@@ -308,9 +308,22 @@ describe("SendspinDecoder", () => {
   });
 
   describe("lifecycle", () => {
-    it("clearState resets decoder state", () => {
+    it("decodes a frame after clearState", async () => {
+      const format: StreamFormat = {
+        codec: "pcm",
+        sample_rate: 48000,
+        channels: 2,
+        bit_depth: 16,
+      };
+      const message = buildBinaryMessage(
+        1000000,
+        createPcm16Sine(960, 2).buffer,
+      );
+
       decoder.clearState();
-      // Should not throw and decoder should accept new frames
+      await decoder.handleBinaryMessage(message, format, 0);
+
+      expect(chunks.length).toBe(1);
     });
 
     it("close fully resets decoder", async () => {

@@ -253,28 +253,46 @@ describe("StateManager", () => {
   });
 
   describe("interval management", () => {
-    it("tracks and clears time sync interval", () => {
-      const intervalId = setInterval(() => {}, 1000) as unknown as number;
-      sm.setTimeSyncInterval(intervalId);
-
-      // Should not throw
-      sm.clearTimeSyncInterval();
+    beforeEach(() => {
+      vi.useFakeTimers();
     });
 
-    it("tracks and clears state update interval", () => {
-      const intervalId = setInterval(() => {}, 1000) as unknown as number;
-      sm.setStateUpdateInterval(intervalId);
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("clears the tracked time sync interval", () => {
+      const clearSpy = vi.spyOn(globalThis, "clearTimeout");
+      const id = setInterval(() => {}, 1000) as unknown as number;
+      sm.setTimeSyncInterval(id);
+
+      sm.clearTimeSyncInterval();
+
+      expect(clearSpy).toHaveBeenCalledWith(id);
+    });
+
+    it("clears the tracked state update interval", () => {
+      const clearSpy = vi.spyOn(globalThis, "clearInterval");
+      const id = setInterval(() => {}, 1000) as unknown as number;
+      sm.setStateUpdateInterval(id);
 
       sm.clearStateUpdateInterval();
+
+      expect(clearSpy).toHaveBeenCalledWith(id);
     });
 
-    it("clearAllIntervals clears both", () => {
+    it("clearAllIntervals clears both tracked intervals", () => {
+      const clearTimeoutSpy = vi.spyOn(globalThis, "clearTimeout");
+      const clearIntervalSpy = vi.spyOn(globalThis, "clearInterval");
       const id1 = setInterval(() => {}, 1000) as unknown as number;
       const id2 = setInterval(() => {}, 1000) as unknown as number;
       sm.setTimeSyncInterval(id1);
       sm.setStateUpdateInterval(id2);
 
       sm.clearAllIntervals();
+
+      expect(clearTimeoutSpy).toHaveBeenCalledWith(id1);
+      expect(clearIntervalSpy).toHaveBeenCalledWith(id2);
     });
   });
 });
