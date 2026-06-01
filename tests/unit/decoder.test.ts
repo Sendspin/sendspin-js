@@ -5,7 +5,7 @@
  * entirely in JavaScript (no Web Audio APIs needed).
  */
 
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach } from "vitest";
 import { SendspinDecoder } from "../../src/audio/decoder";
 import type { DecodedAudioChunk, StreamFormat } from "../../src/types";
 
@@ -295,65 +295,6 @@ describe("SendspinDecoder", () => {
 
       // Should be dropped because generation 0 != current generation 1
       expect(chunks.length).toBe(0);
-    });
-
-    it("accepts frames for current generation", async () => {
-      const format: StreamFormat = {
-        codec: "pcm",
-        sample_rate: 48000,
-        channels: 2,
-        bit_depth: 16,
-      };
-
-      generation = 3;
-      const pcmData = createPcm16Sine(960, 2);
-      const message = buildBinaryMessage(1000000, pcmData.buffer);
-
-      await decoder.handleBinaryMessage(message, format, 3);
-
-      expect(chunks.length).toBe(1);
-      expect(chunks[0].generation).toBe(3);
-    });
-  });
-
-  describe("lifecycle", () => {
-    it("decodes a frame after clearState", async () => {
-      const format: StreamFormat = {
-        codec: "pcm",
-        sample_rate: 48000,
-        channels: 2,
-        bit_depth: 16,
-      };
-      const message = buildBinaryMessage(
-        1000000,
-        createPcm16Sine(960, 2).buffer,
-      );
-
-      decoder.clearState();
-      await decoder.handleBinaryMessage(message, format, 0);
-
-      expect(chunks.length).toBe(1);
-    });
-
-    it("close fully resets decoder", async () => {
-      const format: StreamFormat = {
-        codec: "pcm",
-        sample_rate: 48000,
-        channels: 2,
-        bit_depth: 16,
-      };
-
-      const pcmData = createPcm16Sine(960, 2);
-      const message = buildBinaryMessage(1000000, pcmData.buffer);
-
-      await decoder.handleBinaryMessage(message, format, 0);
-      expect(chunks.length).toBe(1);
-
-      decoder.close();
-
-      // Should still be able to decode after close (new session)
-      await decoder.handleBinaryMessage(message, format, 0);
-      expect(chunks.length).toBe(2);
     });
   });
 

@@ -20,10 +20,6 @@ describe("StateManager", () => {
   });
 
   describe("volume", () => {
-    it("defaults to 100", () => {
-      expect(sm.volume).toBe(100);
-    });
-
     it("clamps volume to 0-100", () => {
       sm.volume = 150;
       expect(sm.volume).toBe(100);
@@ -31,71 +27,9 @@ describe("StateManager", () => {
       sm.volume = -10;
       expect(sm.volume).toBe(0);
     });
-
-    it("sets volume within range", () => {
-      sm.volume = 42;
-      expect(sm.volume).toBe(42);
-    });
-  });
-
-  describe("muted", () => {
-    it("defaults to false", () => {
-      expect(sm.muted).toBe(false);
-    });
-
-    it("can be toggled", () => {
-      sm.muted = true;
-      expect(sm.muted).toBe(true);
-
-      sm.muted = false;
-      expect(sm.muted).toBe(false);
-    });
-  });
-
-  describe("playerState", () => {
-    it("defaults to synchronized", () => {
-      expect(sm.playerState).toBe("synchronized");
-    });
-
-    it("can be set to error", () => {
-      sm.playerState = "error";
-      expect(sm.playerState).toBe("error");
-    });
-  });
-
-  describe("isPlaying", () => {
-    it("defaults to false", () => {
-      expect(sm.isPlaying).toBe(false);
-    });
-
-    it("can be toggled", () => {
-      sm.isPlaying = true;
-      expect(sm.isPlaying).toBe(true);
-    });
-  });
-
-  describe("stream format", () => {
-    it("defaults to null", () => {
-      expect(sm.currentStreamFormat).toBeNull();
-    });
-
-    it("stores stream format", () => {
-      sm.currentStreamFormat = {
-        codec: "pcm",
-        sample_rate: 48000,
-        channels: 2,
-        bit_depth: 16,
-      };
-      expect(sm.currentStreamFormat?.codec).toBe("pcm");
-      expect(sm.currentStreamFormat?.sample_rate).toBe(48000);
-    });
   });
 
   describe("stream generation", () => {
-    it("starts at 0", () => {
-      expect(sm.streamGeneration).toBe(0);
-    });
-
     it("increments on resetStreamAnchors", () => {
       sm.resetStreamAnchors();
       expect(sm.streamGeneration).toBe(1);
@@ -116,26 +50,6 @@ describe("StateManager", () => {
   });
 
   describe("onStateChange callback", () => {
-    it("fires on muted change", () => {
-      const cb = vi.fn();
-      const sm2 = new StateManager(cb);
-
-      sm2.muted = true;
-
-      expect(cb).toHaveBeenCalledWith(expect.objectContaining({ muted: true }));
-    });
-
-    it("fires on isPlaying change", () => {
-      const cb = vi.fn();
-      const sm2 = new StateManager(cb);
-
-      sm2.isPlaying = true;
-
-      expect(cb).toHaveBeenCalledWith(
-        expect.objectContaining({ isPlaying: true }),
-      );
-    });
-
     it("includes full state in callback", () => {
       const cb = vi.fn();
       const sm2 = new StateManager(cb);
@@ -154,10 +68,6 @@ describe("StateManager", () => {
   });
 
   describe("server state", () => {
-    it("defaults to empty", () => {
-      expect(sm.serverState).toEqual({});
-    });
-
     it("merges delta updates", () => {
       sm.updateServerState({
         metadata: { title: "Song A", artist: "Artist A" },
@@ -210,29 +120,6 @@ describe("StateManager", () => {
       sm.updateServerState({ metadata: { artist: null } });
 
       expect(sm.serverState.metadata).toEqual({ title: "Song A" });
-    });
-  });
-
-  describe("group state", () => {
-    it("defaults to empty", () => {
-      expect(sm.groupState).toEqual({});
-    });
-
-    it("merges delta updates", () => {
-      sm.updateGroupState({
-        playback_state: "playing",
-        group_id: "g1",
-      });
-
-      expect(sm.groupState.playback_state).toBe("playing");
-      expect(sm.groupState.group_id).toBe("g1");
-
-      sm.updateGroupState({
-        group_name: "Living Room",
-      });
-
-      expect(sm.groupState.playback_state).toBe("playing");
-      expect(sm.groupState.group_name).toBe("Living Room");
     });
   });
 

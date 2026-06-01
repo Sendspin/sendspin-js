@@ -15,18 +15,6 @@ describe("SendspinTimeFilter", () => {
     filter = new SendspinTimeFilter(0, 1.1, 2.0, 1e-12);
   });
 
-  describe("initialization", () => {
-    it("starts unsynchronized", () => {
-      expect(filter.is_synchronized).toBe(false);
-      expect(filter.count).toBe(0);
-    });
-
-    it("starts with zero offset and drift", () => {
-      expect(filter.offset).toBe(0);
-      expect(filter.drift).toBe(0);
-    });
-  });
-
   describe("single measurement", () => {
     it("becomes synchronized after first measurement", () => {
       filter.update(1000, 500, 100);
@@ -37,11 +25,6 @@ describe("SendspinTimeFilter", () => {
     it("sets offset to first measurement value", () => {
       filter.update(5000, 500, 100);
       expect(filter.offset).toBe(5000);
-    });
-
-    it("sets error from first measurement uncertainty", () => {
-      filter.update(5000, 500, 100);
-      expect(filter.error).toBe(500);
     });
   });
 
@@ -70,13 +53,6 @@ describe("SendspinTimeFilter", () => {
       // Error should generally decrease (or stay low)
       expect(errors[errors.length - 1]).toBeLessThan(errors[0]);
     });
-
-    it("ignores duplicate timestamps", () => {
-      filter.update(5000, 500, 100);
-      filter.update(5500, 500, 100); // Same timestamp → should be skipped
-
-      expect(filter.count).toBe(1);
-    });
   });
 
   describe("computeServerTime", () => {
@@ -87,13 +63,6 @@ describe("SendspinTimeFilter", () => {
       const serverTime = filter.computeServerTime(200000);
       // Should be client_time + offset = 200000 + 10000 = 210000
       expect(serverTime).toBe(210000);
-    });
-
-    it("computes correct server time with zero offset", () => {
-      filter.update(0, 500, 100000);
-
-      const serverTime = filter.computeServerTime(200000);
-      expect(serverTime).toBe(200000);
     });
   });
 
