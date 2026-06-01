@@ -346,12 +346,14 @@ export class SendspinCore implements StreamHandler {
       metadata.progress.track_progress +
       (elapsedUs * metadata.progress.playback_speed) / 1_000_000;
 
+    const trackDuration = metadata.progress.track_duration;
     return {
-      positionMs: Math.max(
-        0,
-        Math.min(positionMs, metadata.progress.track_duration),
-      ),
-      durationMs: metadata.progress.track_duration,
+      // track_duration 0 means unbounded (live radio), so floor at 0 only.
+      positionMs:
+        trackDuration === 0
+          ? Math.max(0, positionMs)
+          : Math.max(0, Math.min(positionMs, trackDuration)),
+      durationMs: trackDuration,
       playbackSpeed: metadata.progress.playback_speed / 1000,
     };
   }
