@@ -6,6 +6,7 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { WebSocketManager } from "../../src/core/websocket-manager";
+import type { ClientMessage } from "../../src/types";
 
 class FakeWebSocket {
   static CONNECTING = 0;
@@ -114,6 +115,222 @@ describe("WebSocketManager", () => {
       const p = mgr.adopt(ws);
       ws.fireClose();
       await expect(p).rejects.toThrow(/closed before opening/);
+    });
+  });
+});
+
+class RichFakeWebSocket {
+  static CONNECTING = 0;
+  static OPEN = 1;
+  static CLOSING = 2;
+  static CLOSED = 3;
+  static instances: RichFakeWebSocket[] = [];
+
+  readyState = RichFakeWebSocket.CONNECTING;
+  binaryType = "";
+  onopen: (() => void) | null = null;
+  onmessage: ((event: unknown) => void) | null = null;
+  onerror: ((error: unknown) => void) | null = null;
+  onclose: ((event?: unknown) => void) | null = null;
+
+  sent: string[] = [];
+  closeCalls = 0;
+
+  constructor(public url?: string) {
+    RichFakeWebSocket.instances.push(this);
+  }
+
+  send(data: string): void {
+    this.sent.push(data);
+  }
+
+  close(): void {
+    this.closeCalls++;
+    this.readyState = RichFakeWebSocket.CLOSED;
+  }
+
+  fireOpen(): void {
+    this.readyState = RichFakeWebSocket.OPEN;
+    this.onopen?.();
+  }
+  fireClose(): void {
+    this.readyState = RichFakeWebSocket.CLOSED;
+    this.onclose?.();
+  }
+  fireMessage(data: unknown): void {
+    this.onmessage?.({ data } as unknown);
+  }
+  fireError(err: unknown): void {
+    this.onerror?.(err);
+  }
+}
+
+const sampleMsg: ClientMessage = {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  type: "client/goodbye" as any,
+  payload: { reason: "shutdown" },
+} as ClientMessage;
+
+describe("WebSocketManager extra", () => {
+  let mgr: WebSocketManager;
+  const originalWebSocket = globalThis.WebSocket;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    RichFakeWebSocket.instances = [];
+    // @ts-expect-error fake stands in for the browser global
+    globalThis.WebSocket = RichFakeWebSocket;
+    mgr = new WebSocketManager();
+  });
+
+  afterEach(() => {
+    mgr.disconnect();
+    globalThis.WebSocket = originalWebSocket;
+    vi.useRealTimers();
+  });
+
+  describe("send", () => {
+    it("serializes the message as JSON when the socket is OPEN", async () => {
+      const p = mgr.connect("ws://host/sendspin");
+      RichFakeWebSocket.instances[0].fireOpen();
+      await p;
+
+      mgr.send(sampleMsg);
+      expect(RichFakeWebSocket.instances[0].sent).toEqual([
+        JSON.stringify(sampleMsg),
+      ]);
+    });
+
+    it("drops the message (no send) when the socket is not OPEN", async () => {
+      const p = mgr.connect("ws://host/sendspin");
+      // still CONNECTING — not OPEN
+      mgr.send(sampleMsg);
+      expect(RichFakeWebSocket.instances[0].sent).toEqual([]);
+      RichFakeWebSocket.instances[0].fireOpen();
+      await p;
+    });
+
+    it("does not throw when send is called with no socket", () => {
+      expect(() => mgr.send(sampleMsg)).not.toThrow();
+    });
+  });
+
+  describe("isConnected / getReadyState reflect socket state", () => {
+    it("is connected only while readyState is OPEN", async () => {
+      const p = mgr.connect("ws://host/sendspin");
+      const ws = RichFakeWebSocket.instances[0];
+      expect(mgr.isConnected()).toBe(false);
+      expect(mgr.getReadyState()).toBe(RichFakeWebSocket.CONNECTING);
+
+      ws.fireOpen();
+      await p;
+      expect(mgr.isConnected()).toBe(true);
+      expect(mgr.getReadyState()).toBe(RichFakeWebSocket.OPEN);
+    });
+  });
+
+  describe("message / error handler wiring on connect()", () => {
+    it("forwards incoming messages and errors to the supplied handlers", async () => {
+      const onMessage = vi.fn();
+      const onError = vi.fn();
+      const onClose = vi.fn();
+      const p = mgr.connect(
+        "ws://host/sendspin",
+        undefined,
+        onMessage,
+        onError,
+        onClose,
+      );
+      const ws = RichFakeWebSocket.instances[0];
+      ws.fireOpen();
+      await p;
+
+      ws.fireMessage("hello");
+      expect(onMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ data: "hello" }),
+      );
+
+      ws.fireError(new Error("boom"));
+      expect(onError).toHaveBeenCalled();
+    });
+  });
+
+  describe("disconnect", () => {
+    it("closes the socket, clears it, and reports disconnected", async () => {
+      const p = mgr.connect("ws://host/sendspin");
+      const ws = RichFakeWebSocket.instances[0];
+      ws.fireOpen();
+      await p;
+
+      mgr.disconnect();
+      expect(ws.closeCalls).toBe(1);
+      expect(mgr.isConnected()).toBe(false);
+      expect(mgr.getReadyState()).toBe(RichFakeWebSocket.CLOSED);
+    });
+
+    it("cancels a pending reconnect timer scheduled by an earlier close", async () => {
+      const p = mgr.connect("ws://host/sendspin");
+      RichFakeWebSocket.instances[0].fireOpen();
+      await p;
+
+      // Unexpected close schedules a reconnect.
+      RichFakeWebSocket.instances[0].fireClose();
+      // Disconnect must cancel it so no new socket is created.
+      mgr.disconnect();
+      vi.advanceTimersByTime(60000);
+      expect(RichFakeWebSocket.instances).toHaveLength(1);
+    });
+  });
+
+  describe("adopt open path", () => {
+    it("resolves immediately, fires onOpen, and wires message/error/close", async () => {
+      const onOpen = vi.fn();
+      const onMessage = vi.fn();
+      const onError = vi.fn();
+      const onClose = vi.fn();
+      const ws = new RichFakeWebSocket();
+      ws.readyState = RichFakeWebSocket.OPEN;
+
+      await mgr.adopt(
+        // @ts-expect-error fake WebSocket is API-compatible here
+        ws,
+        onOpen,
+        onMessage,
+        onError,
+        onClose,
+      );
+
+      expect(onOpen).toHaveBeenCalledTimes(1);
+      expect(mgr.isConnected()).toBe(true);
+
+      ws.fireMessage("x");
+      expect(onMessage).toHaveBeenCalled();
+      ws.fireClose();
+      expect(onClose).toHaveBeenCalled();
+    });
+
+    it("resolves after a CONNECTING socket opens", async () => {
+      const onOpen = vi.fn();
+      const ws = new RichFakeWebSocket();
+      ws.readyState = RichFakeWebSocket.CONNECTING;
+      // @ts-expect-error fake WebSocket is API-compatible here
+      const p = mgr.adopt(ws, onOpen);
+      ws.fireOpen();
+      await p;
+      expect(onOpen).toHaveBeenCalledTimes(1);
+      expect(mgr.isConnected()).toBe(true);
+    });
+
+    it("never schedules a reconnect for an adopted socket", async () => {
+      const ws = new RichFakeWebSocket();
+      ws.readyState = RichFakeWebSocket.OPEN;
+      // @ts-expect-error fake WebSocket is API-compatible here
+      await mgr.adopt(ws);
+
+      ws.fireClose();
+      vi.advanceTimersByTime(60000);
+      // Only the adopted socket exists.
+      expect(RichFakeWebSocket.instances).toHaveLength(1);
     });
   });
 });

@@ -183,3 +183,106 @@ describe("SendspinTimeFilter", () => {
     });
   });
 });
+
+describe("SendspinTimeFilter extra", () => {
+  let filter: SendspinTimeFilter;
+
+  beforeEach(() => {
+    filter = new SendspinTimeFilter(0, 1.1, 2.0, 1e-12);
+  });
+
+  describe("getters", () => {
+    it("error and covariance reflect the first measurement variance", () => {
+      filter.update(5000, 400, 100);
+      // covariance = max_error^2 = 160000, error = sqrt = 400.
+      expect(filter.covariance).toBe(160000);
+      expect(filter.error).toBe(400);
+    });
+
+    it("covariance shrinks as consistent measurements accumulate", () => {
+      filter.update(10000, 1000, 100000);
+      const first = filter.covariance;
+      for (let i = 2; i <= 6; i++) {
+        filter.update(10000, 1000, i * 100000);
+      }
+      expect(filter.covariance).toBeLessThan(first);
+    });
+  });
+
+  describe("adaptive forgetting non-trigger", () => {
+    it("does not inflate covariance for a sub-cutoff residual", () => {
+      // Build >100 measurements so the count gate is open, then feed two
+      // measurements: one perturbed within cutoff, one exactly on-model.
+      // A within-cutoff residual must NOT apply the forgetting factor.
+      const max_error = 1000;
+      for (let i = 1; i <= 120; i++) {
+        filter.update(10000, max_error, i * 100000);
+      }
+      // Residual just under cutoff (2 * max_error = 2000). offset≈10000.
+      // Use a perturbation < 2000 so forgetting is not triggered.
+      const before = filter.covariance;
+      filter.update(11500, max_error, 121 * 100000); // residual ~1500 < 2000
+
+      // Without forgetting the covariance update is the ordinary Kalman shrink:
+      // it should stay bounded near the pre-update value, not blow up by 1.21x.
+      expect(filter.covariance).toBeLessThanOrEqual(before * 1.05);
+    });
+
+    it("inflates the estimate path for an over-cutoff residual (control)", () => {
+      const max_error = 1000;
+      for (let i = 1; i <= 120; i++) {
+        filter.update(10000, max_error, i * 100000);
+      }
+      const offsetBefore = filter.offset;
+      // Residual well over cutoff -> forgetting -> larger Kalman gain -> the
+      // offset jumps further toward the new measurement than a non-forgetting
+      // step would. We assert the offset moves a meaningful fraction.
+      filter.update(60000, max_error, 121 * 100000);
+      expect(filter.offset).toBeGreaterThan(offsetBefore);
+    });
+  });
+
+  describe("duplicate-timestamp guard", () => {
+    it("skips a second update at the same timestamp without changing offset", () => {
+      filter.update(5000, 500, 100);
+      const offsetAfterFirst = filter.offset;
+      filter.update(9999, 500, 100); // same time_added -> skipped
+      expect(filter.count).toBe(1);
+      expect(filter.offset).toBe(offsetAfterFirst);
+    });
+
+    it("does not corrupt drift init when a duplicate sits between measurements", () => {
+      filter.update(10000, 500, 100000);
+      filter.update(10000, 500, 100000); // duplicate, skipped
+      filter.update(10100, 500, 200000); // genuine second measurement
+      expect(filter.count).toBe(2);
+      // dt for drift = 200000-100000 = 100000 -> drift ≈ 0.001.
+      expect(filter.drift).toBeCloseTo(0.001, 4);
+    });
+  });
+
+  describe("reset clears drift usage", () => {
+    it("disables drift compensation after reset", () => {
+      // Drive drift to significance.
+      const base = 10000;
+      const rate = 0.01;
+      for (let i = 1; i <= 40; i++) {
+        const t = i * 100000;
+        filter.update(base + rate * t, 200, t);
+      }
+      // With drift active, computeServerTime offset grows with client time.
+      const t1 = 5_000_000;
+      const t2 = 6_000_000;
+      expect(
+        filter.computeServerTime(t2) - t2 - (filter.computeServerTime(t1) - t1),
+      ).not.toBe(0);
+
+      filter.reset();
+
+      // After reset, offset is 0 and drift is not applied: server time == client time.
+      expect(filter.computeServerTime(t1)).toBe(t1);
+      expect(filter.computeServerTime(t2)).toBe(t2);
+      expect(filter.drift).toBe(0);
+    });
+  });
+});
