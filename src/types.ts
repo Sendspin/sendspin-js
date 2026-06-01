@@ -92,6 +92,8 @@ export interface ClientState {
       volume: number;
       muted: boolean;
       static_delay_ms: number;
+      required_lead_time_ms: number;
+      min_buffer_ms: number;
       supported_commands?: string[];
     };
   };
@@ -449,6 +451,22 @@ export interface SendspinCoreConfig {
    * Defaults to a browser/platform-specific heuristic value if not provided.
    */
   syncDelay?: number;
+
+  /**
+   * Minimum startup lead time in milliseconds reported to the server via
+   * client/state (codec init, decode warmup, audio backend buffering, DAC).
+   * Can be updated at runtime via setRequiredLeadTimeMs.
+   * Default: 250.
+   */
+  requiredLeadTimeMs?: number;
+
+  /**
+   * Requested minimum ongoing buffer duration in milliseconds reported to the
+   * server via client/state, to absorb network jitter during playback.
+   * Can be updated at runtime via setMinBufferMs.
+   * Default: 250.
+   */
+  minBufferMs?: number;
 
   /**
    * Use hardware/external volume control instead of software gain.

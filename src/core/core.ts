@@ -81,6 +81,8 @@ export class SendspinCore implements StreamHandler {
         clientName,
         codecs: config.codecs,
         bufferCapacity: config.bufferCapacity,
+        requiredLeadTimeMs: config.requiredLeadTimeMs,
+        minBufferMs: config.minBufferMs,
         useHardwareVolume: config.useHardwareVolume,
         onVolumeCommand: config.onVolumeCommand,
         onDelayCommand: config.onDelayCommand,
@@ -267,6 +269,18 @@ export class SendspinCore implements StreamHandler {
     this._syncDelayMs = clampSyncDelayMs(delayMs);
     this._onSyncDelayChange?.(this._syncDelayMs);
     this.protocolHandler.sendStateUpdate();
+  }
+
+  // ========================================
+  // Buffer timing
+  // ========================================
+
+  setRequiredLeadTimeMs(leadTimeMs: number): void {
+    this.protocolHandler.setRequiredLeadTimeMs(leadTimeMs);
+  }
+
+  setMinBufferMs(minBufferMs: number): void {
+    this.protocolHandler.setMinBufferMs(minBufferMs);
   }
 
   // ========================================

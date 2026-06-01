@@ -28,10 +28,15 @@ import { clampSyncDelayMs } from "../sync-delay";
 // Constants
 const STATE_UPDATE_INTERVAL = 5000; // 5 seconds
 
+const DEFAULT_REQUIRED_LEAD_TIME_MS = 250;
+const DEFAULT_MIN_BUFFER_MS = 250;
+
 export interface ProtocolHandlerConfig {
   clientName?: string;
   codecs?: Codec[];
   bufferCapacity?: number;
+  requiredLeadTimeMs?: number;
+  minBufferMs?: number;
   useHardwareVolume?: boolean;
   onVolumeCommand?: (volume: number, muted: boolean) => void;
   onDelayCommand?: (delayMs: number) => void;
@@ -42,6 +47,8 @@ export class ProtocolHandler {
   private clientName: string;
   private codecs: Codec[];
   private bufferCapacity: number;
+  private requiredLeadTimeMs: number;
+  private minBufferMs: number;
   private useHardwareVolume: boolean;
   private onVolumeCommand?: (volume: number, muted: boolean) => void;
   private onDelayCommand?: (delayMs: number) => void;
@@ -59,6 +66,9 @@ export class ProtocolHandler {
     this.clientName = config.clientName ?? "Sendspin Player";
     this.codecs = config.codecs ?? ["opus", "flac", "pcm"];
     this.bufferCapacity = config.bufferCapacity ?? 1024 * 1024 * 5; // 5MB default
+    this.requiredLeadTimeMs =
+      config.requiredLeadTimeMs ?? DEFAULT_REQUIRED_LEAD_TIME_MS;
+    this.minBufferMs = config.minBufferMs ?? DEFAULT_MIN_BUFFER_MS;
     this.useHardwareVolume = config.useHardwareVolume ?? false;
     this.onVolumeCommand = config.onVolumeCommand;
     this.onDelayCommand = config.onDelayCommand;
@@ -284,6 +294,16 @@ export class ProtocolHandler {
     this.wsManager.send(hello);
   }
 
+  setRequiredLeadTimeMs(leadTimeMs: number): void {
+    this.requiredLeadTimeMs = leadTimeMs;
+    this.sendStateUpdate();
+  }
+
+  setMinBufferMs(minBufferMs: number): void {
+    this.minBufferMs = minBufferMs;
+    this.sendStateUpdate();
+  }
+
   // Send state update
   // When skipHardwareRead is true, use stateManager values instead of reading from hardware.
   // This avoids race conditions when responding to volume commands.
@@ -307,6 +327,8 @@ export class ProtocolHandler {
           volume,
           muted,
           static_delay_ms: staticDelayMs,
+          required_lead_time_ms: this.requiredLeadTimeMs,
+          min_buffer_ms: this.minBufferMs,
           supported_commands: ["set_static_delay"],
         },
       },

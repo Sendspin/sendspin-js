@@ -263,6 +263,24 @@ export class SendspinPlayer {
   }
 
   /**
+   * Update the reported startup lead time at runtime (ms). Reported to the
+   * server via client/state. Debounce calls to avoid reacting to transient
+   * fluctuations.
+   */
+  setRequiredLeadTimeMs(leadTimeMs: number): void {
+    this.core.setRequiredLeadTimeMs(leadTimeMs);
+  }
+
+  /**
+   * Update the reported minimum ongoing buffer duration at runtime (ms).
+   * Reported to the server via client/state. Debounce calls to avoid reacting
+   * to transient fluctuations.
+   */
+  setMinBufferMs(minBufferMs: number): void {
+    this.core.setMinBufferMs(minBufferMs);
+  }
+
+  /**
    * Set the sync correction mode at runtime.
    */
   setCorrectionMode(mode: CorrectionMode): void {
