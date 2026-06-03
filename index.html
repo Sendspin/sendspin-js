@@ -242,6 +242,45 @@
             >
           </div>
           <div class="form-group">
+            <label for="required-lead-time">Required Lead Time (ms)</label>
+            <div class="sync-delay-row">
+              <input
+                type="number"
+                id="required-lead-time"
+                value="250"
+                min="0"
+                max="10000"
+                step="50"
+              />
+              <button id="apply-required-lead-time" class="btn btn-secondary">
+                Apply
+              </button>
+            </div>
+            <small
+              >Startup warmup reported to the server (codec init, decode,
+              DAC)</small
+            >
+          </div>
+          <div class="form-group">
+            <label for="min-buffer">Min Buffer (ms)</label>
+            <div class="sync-delay-row">
+              <input
+                type="number"
+                id="min-buffer"
+                value="250"
+                min="0"
+                max="10000"
+                step="50"
+              />
+              <button id="apply-min-buffer" class="btn btn-secondary">
+                Apply
+              </button>
+            </div>
+            <small
+              >Ongoing jitter buffer reported to the server</small
+            >
+          </div>
+          <div class="form-group">
             <label for="correction-mode">Correction Mode</label>
             <select id="correction-mode">
               <option value="sync">Sync (default)</option>

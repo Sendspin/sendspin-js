@@ -23,6 +23,8 @@ const STORAGE_KEYS = {
   VOLUME: "sendspin-volume",
   MUTED: "sendspin-muted",
   SYNC_DELAY: "sendspin-sync-delay",
+  REQUIRED_LEAD_TIME: "sendspin-required-lead-time",
+  MIN_BUFFER: "sendspin-min-buffer",
   CORRECTION_MODE: "sendspin-correction-mode",
   RESYNC_THRESHOLD: "sendspin-resync-threshold",
   DEADBAND_THRESHOLD: "sendspin-deadband-threshold",
@@ -40,6 +42,12 @@ const muteBtn = document.getElementById("mute-btn");
 const muteIcon = document.getElementById("mute-icon");
 const syncDelayInput = document.getElementById("sync-delay");
 const applySyncDelayBtn = document.getElementById("apply-sync-delay");
+const requiredLeadTimeInput = document.getElementById("required-lead-time");
+const applyRequiredLeadTimeBtn = document.getElementById(
+  "apply-required-lead-time",
+);
+const minBufferInput = document.getElementById("min-buffer");
+const applyMinBufferBtn = document.getElementById("apply-min-buffer");
 const correctionModeSelect = document.getElementById("correction-mode");
 const resyncThresholdInput = document.getElementById("resync-threshold");
 const deadbandThresholdInput = document.getElementById("deadband-threshold");
@@ -424,6 +432,19 @@ function loadSettings() {
     syncDelayInput.value = sanitizeSyncDelay(parseInt(savedSyncDelay, 10));
   }
 
+  const savedLeadTime = localStorage.getItem(STORAGE_KEYS.REQUIRED_LEAD_TIME);
+  if (savedLeadTime !== null) {
+    requiredLeadTimeInput.value = sanitizeBufferMs(
+      parseInt(savedLeadTime, 10),
+      250,
+    );
+  }
+
+  const savedMinBuffer = localStorage.getItem(STORAGE_KEYS.MIN_BUFFER);
+  if (savedMinBuffer !== null) {
+    minBufferInput.value = sanitizeBufferMs(parseInt(savedMinBuffer, 10), 250);
+  }
+
   const savedCorrectionMode = localStorage.getItem(
     STORAGE_KEYS.CORRECTION_MODE,
   );
@@ -472,6 +493,13 @@ function sanitizeSyncDelay(delay) {
     return 0;
   }
   return Math.max(0, Math.min(5000, Math.round(delay)));
+}
+
+function sanitizeBufferMs(value, fallback) {
+  if (!Number.isFinite(value)) {
+    return fallback;
+  }
+  return Math.max(0, Math.min(10000, Math.round(value)));
 }
 
 /**
@@ -560,11 +588,22 @@ async function connect() {
 
     const correctionThresholds = buildCorrectionThresholds(savedCorrectionMode);
 
+    const requiredLeadTimeMs = sanitizeBufferMs(
+      parseInt(requiredLeadTimeInput.value, 10),
+      250,
+    );
+    const minBufferMs = sanitizeBufferMs(
+      parseInt(minBufferInput.value, 10),
+      250,
+    );
+
     player = new SendspinPlayer({
       playerId: getPlayerId(),
       baseUrl: serverUrl,
       clientName: "Sendspin Sample Player",
       syncDelay: sanitizedSyncDelay,
+      requiredLeadTimeMs,
+      minBufferMs,
       correctionMode: savedCorrectionMode,
       correctionThresholds,
       reconnect: {
@@ -691,6 +730,31 @@ function applySyncDelay() {
 }
 
 /**
+ * Apply required lead time
+ */
+function applyRequiredLeadTime() {
+  const leadTime = sanitizeBufferMs(
+    parseInt(requiredLeadTimeInput.value, 10),
+    250,
+  );
+  requiredLeadTimeInput.value = leadTime;
+  localStorage.setItem(STORAGE_KEYS.REQUIRED_LEAD_TIME, leadTime.toString());
+  player?.setRequiredLeadTimeMs(leadTime);
+  showToast(`Required lead time set to ${leadTime}ms`, "success");
+}
+
+/**
+ * Apply min buffer
+ */
+function applyMinBuffer() {
+  const minBuffer = sanitizeBufferMs(parseInt(minBufferInput.value, 10), 250);
+  minBufferInput.value = minBuffer;
+  localStorage.setItem(STORAGE_KEYS.MIN_BUFFER, minBuffer.toString());
+  player?.setMinBufferMs(minBuffer);
+  showToast(`Min buffer set to ${minBuffer}ms`, "success");
+}
+
+/**
  * Apply correction mode
  */
 function applyCorrectionMode() {
@@ -732,6 +796,8 @@ function init() {
   volumeSlider.addEventListener("input", updateVolume);
   muteBtn.addEventListener("click", toggleMute);
   applySyncDelayBtn.addEventListener("click", applySyncDelay);
+  applyRequiredLeadTimeBtn.addEventListener("click", applyRequiredLeadTime);
+  applyMinBufferBtn.addEventListener("click", applyMinBuffer);
   correctionModeSelect.addEventListener("change", applyCorrectionMode);
   resyncThresholdInput?.addEventListener("change", () => {
     localStorage.setItem(
@@ -774,6 +840,18 @@ function init() {
   syncDelayInput.addEventListener("keydown", (e) => {
     if (e.key === "Enter") {
       applySyncDelay();
+    }
+  });
+
+  requiredLeadTimeInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      applyRequiredLeadTime();
+    }
+  });
+
+  minBufferInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      applyMinBuffer();
     }
   });
 
