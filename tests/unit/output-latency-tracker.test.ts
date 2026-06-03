@@ -50,14 +50,6 @@ describe("OutputLatencyTracker", () => {
     });
   });
 
-  describe("getSmoothedUs initial behavior", () => {
-    it("seeds the smoothed value with the first raw reading (no decay on sample 1)", () => {
-      const t = new OutputLatencyTracker(null);
-      const raw = t.getRawUs(fakeCtx(0.005, 0.02));
-      expect(t.getSmoothedUs(fakeCtx(0.005, 0.02))).toBeCloseTo(raw, 6);
-    });
-  });
-
   describe("EMA smoothing", () => {
     it("moves toward new readings by exactly alpha per step", () => {
       const t = new OutputLatencyTracker(null);

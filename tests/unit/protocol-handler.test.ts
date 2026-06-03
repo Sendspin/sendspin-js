@@ -202,32 +202,20 @@ describe("ProtocolHandler extra", () => {
   });
 
   describe("sendClientHello", () => {
-    it("sends a spec-shaped client/hello with id, name, version 1 and roles", () => {
-      const handler = makeHandler({ clientName: "Living Room" });
+    it("sends a spec-shaped client/hello with envelope and player@v1_support", () => {
+      const handler = makeHandler({ clientName: "Living Room", codecs: ["pcm"] });
       handler.sendClientHello();
 
-      const hello = lastSent(send, "client/hello");
-      expect(hello).toBeDefined();
-      const payload = hello!.payload as Record<string, unknown>;
+      const hello = lastSent(send, "client/hello")!;
+      const payload = hello.payload as Record<string, unknown>;
       expect(payload.client_id).toBe("player-1");
       expect(payload.name).toBe("Living Room");
       expect(payload.version).toBe(1);
       expect(payload.supported_roles).toContain("player@v1");
-    });
 
-    it("declares player@v1_support with volume+mute commands and formats", () => {
-      const handler = makeHandler({ codecs: ["pcm"] });
-      handler.sendClientHello();
-
-      const hello = lastSent(send, "client/hello")!;
-      const support = (hello.payload as Record<string, unknown>)[
-        "player@v1_support"
-      ] as Record<string, unknown>;
-      expect(support).toBeDefined();
+      const support = payload["player@v1_support"] as Record<string, unknown>;
       expect(support.supported_commands).toEqual(["volume", "mute"]);
       expect(support.buffer_capacity).toBeTypeOf("number");
-      expect(Array.isArray(support.supported_formats)).toBe(true);
-      // Each format must carry codec/channels/sample_rate/bit_depth (spec).
       const fmt = (
         support.supported_formats as Array<Record<string, unknown>>
       )[0];

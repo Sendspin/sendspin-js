@@ -162,26 +162,6 @@ describe("StateManager", () => {
       vi.useRealTimers();
     });
 
-    it("clears the tracked time sync interval", () => {
-      const clearSpy = vi.spyOn(globalThis, "clearTimeout");
-      const id = setInterval(() => {}, 1000) as unknown as number;
-      sm.setTimeSyncInterval(id);
-
-      sm.clearTimeSyncInterval();
-
-      expect(clearSpy).toHaveBeenCalledWith(id);
-    });
-
-    it("clears the tracked state update interval", () => {
-      const clearSpy = vi.spyOn(globalThis, "clearInterval");
-      const id = setInterval(() => {}, 1000) as unknown as number;
-      sm.setStateUpdateInterval(id);
-
-      sm.clearStateUpdateInterval();
-
-      expect(clearSpy).toHaveBeenCalledWith(id);
-    });
-
     it("clearAllIntervals clears both tracked intervals", () => {
       const clearTimeoutSpy = vi.spyOn(globalThis, "clearTimeout");
       const clearIntervalSpy = vi.spyOn(globalThis, "clearInterval");

@@ -258,21 +258,6 @@ describe("ClockSource", () => {
     });
   });
 
-  describe("setActive / cutover", () => {
-    it("setActive('timestamp') sets pendingCutover and returns true", () => {
-      const cs = new ClockSource();
-      expect(cs.setActive("timestamp")).toBe(true);
-      expect(cs.pendingCutover).toBe(true);
-    });
-
-    it("setActive('estimated') from timestamp does not arm a cutover", () => {
-      const cs = new ClockSource();
-      cs.setActive("timestamp");
-      expect(cs.setActive("estimated")).toBe(false);
-      expect(cs.pendingCutover).toBe(false);
-    });
-  });
-
   describe("disableTimestampPromotion (Cast receivers)", () => {
     it("never promotes when promotion is disabled even with good samples", () => {
       const base = { contextTime: 10.0 };

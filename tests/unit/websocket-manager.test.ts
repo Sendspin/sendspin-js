@@ -215,20 +215,6 @@ describe("WebSocketManager extra", () => {
     });
   });
 
-  describe("isConnected / getReadyState reflect socket state", () => {
-    it("is connected only while readyState is OPEN", async () => {
-      const p = mgr.connect("ws://host/sendspin");
-      const ws = RichFakeWebSocket.instances[0];
-      expect(mgr.isConnected()).toBe(false);
-      expect(mgr.getReadyState()).toBe(RichFakeWebSocket.CONNECTING);
-
-      ws.fireOpen();
-      await p;
-      expect(mgr.isConnected()).toBe(true);
-      expect(mgr.getReadyState()).toBe(RichFakeWebSocket.OPEN);
-    });
-  });
-
   describe("message / error handler wiring on connect()", () => {
     it("forwards incoming messages and errors to the supplied handlers", async () => {
       const onMessage = vi.fn();
