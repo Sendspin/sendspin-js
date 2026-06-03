@@ -117,9 +117,8 @@ export class RecorrectionMonitor {
     }
 
     const jumpDeltaMs = rawSyncErrorMs - prev;
-    const jumpSign = Math.sign(rawSyncErrorMs);
-    const isJumpDetected =
-      Math.abs(jumpDeltaMs) >= RECORRECTION_TRANSIENT_JUMP_MS && jumpSign !== 0;
+    const jumpSign = Math.sign(jumpDeltaMs);
+    const isJumpDetected = Math.abs(jumpDeltaMs) >= RECORRECTION_TRANSIENT_JUMP_MS;
     if (!isJumpDetected) {
       this.pendingJumpSign = null;
       this.pendingJumpAtMs = null;
