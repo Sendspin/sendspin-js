@@ -34,13 +34,6 @@ import struct
 import sys
 from typing import Any
 
-
-def find_free_port() -> int:
-    """Reserve an ephemeral port on loopback and return it."""
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
-
 from aiosendspin.server import (
     AudioFormat,
     ClientAddedEvent,
@@ -48,6 +41,13 @@ from aiosendspin.server import (
     SendspinEvent,
     SendspinServer,
 )
+
+
+def find_free_port() -> int:
+    """Reserve an ephemeral port on loopback and return it."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
 
 
 def generate_sine_pcm(

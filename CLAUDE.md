@@ -51,24 +51,10 @@ Then browse to http://localhost:6001
 
 ## Testing
 
-Unit tests live in `tests/unit/`, E2E tests in `tests/e2e/`. The E2E suite runs
-against a real aiosendspin server spawned from a Python virtualenv at `.venv`.
-
-Bootstrap the environment once (creates `.venv`, installs aiosendspin and Node deps):
-
-```bash
-./scripts/setup.sh
-```
-
-Then:
-
-```bash
-yarn test          # unit + E2E (what CI runs)
-```
-
-Run one suite with a path: `npx vitest run tests/unit`. The E2E server wrapper
-(`tests/helpers/aiosendspin-server.ts`) resolves Python at `<repo>/.venv/bin/python`,
-so the venv must live at the repo root.
+Tests in `tests/unit/` and `tests/e2e/`. E2E spawns a real aiosendspin server
+from `.venv` at the repo root (path is hardcoded in the helper). Run
+`./scripts/setup.sh` once to bootstrap, then `yarn test`. One suite:
+`npx vitest run tests/unit`.
 
 ## Key SDK Features and Configuration
 
