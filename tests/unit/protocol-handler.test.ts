@@ -203,7 +203,10 @@ describe("ProtocolHandler extra", () => {
 
   describe("sendClientHello", () => {
     it("sends a spec-shaped client/hello with envelope and player@v1_support", () => {
-      const handler = makeHandler({ clientName: "Living Room", codecs: ["pcm"] });
+      const handler = makeHandler({
+        clientName: "Living Room",
+        codecs: ["pcm"],
+      });
       handler.sendClientHello();
 
       const hello = lastSent(send, "client/hello")!;
