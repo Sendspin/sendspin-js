@@ -101,7 +101,7 @@ export class AiosendspinServer {
    * Returns the client ID.
    */
   async waitForClient(): Promise<string> {
-    const response = await this.sendCommand("WAIT_CLIENT", 15000);
+    const response = await this.sendCommand("WAIT_CLIENT", 10000);
     const match = response.match(/^CLIENT_CONNECTED (.+)$/);
     if (!match) {
       throw new Error(`Expected CLIENT_CONNECTED <id>, got: ${response}`);
@@ -181,18 +181,24 @@ export class AiosendspinServer {
     this.rl?.close();
     this.rl = null;
 
-    // Give it a moment, then force kill if needed
+    // Send SIGTERM, escalate to SIGKILL after 3s. Recheck exitCode after
+    // attaching the listener so a race with a synchronous exit short-circuits.
     if (this.proc && this.proc.exitCode === null) {
       this.proc.kill("SIGTERM");
+      const proc = this.proc;
       await new Promise<void>((resolve) => {
         const timer = setTimeout(() => {
-          this.proc?.kill("SIGKILL");
+          proc.kill("SIGKILL");
           resolve();
         }, 3000);
-        this.proc!.on("exit", () => {
+        proc.on("exit", () => {
           clearTimeout(timer);
           resolve();
         });
+        if (proc.exitCode !== null) {
+          clearTimeout(timer);
+          resolve();
+        }
       });
     }
 
