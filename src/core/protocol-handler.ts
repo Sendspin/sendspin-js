@@ -31,6 +31,12 @@ const STATE_UPDATE_INTERVAL = 5000; // 5 seconds
 const DEFAULT_REQUIRED_LEAD_TIME_MS = 250;
 const DEFAULT_MIN_BUFFER_MS = 250;
 
+function assertBufferMs(value: number, name: string): void {
+  if (!isFinite(value) || value < 0) {
+    throw new RangeError(`${name} must be a non-negative finite number`);
+  }
+}
+
 export interface ProtocolHandlerConfig {
   clientName?: string;
   codecs?: Codec[];
@@ -68,7 +74,9 @@ export class ProtocolHandler {
     this.bufferCapacity = config.bufferCapacity ?? 1024 * 1024 * 5; // 5MB default
     this.requiredLeadTimeMs =
       config.requiredLeadTimeMs ?? DEFAULT_REQUIRED_LEAD_TIME_MS;
+    assertBufferMs(this.requiredLeadTimeMs, "requiredLeadTimeMs");
     this.minBufferMs = config.minBufferMs ?? DEFAULT_MIN_BUFFER_MS;
+    assertBufferMs(this.minBufferMs, "minBufferMs");
     this.useHardwareVolume = config.useHardwareVolume ?? false;
     this.onVolumeCommand = config.onVolumeCommand;
     this.onDelayCommand = config.onDelayCommand;
@@ -295,11 +303,13 @@ export class ProtocolHandler {
   }
 
   setRequiredLeadTimeMs(leadTimeMs: number): void {
+    assertBufferMs(leadTimeMs, "requiredLeadTimeMs");
     this.requiredLeadTimeMs = leadTimeMs;
     this.sendStateUpdate();
   }
 
   setMinBufferMs(minBufferMs: number): void {
+    assertBufferMs(minBufferMs, "minBufferMs");
     this.minBufferMs = minBufferMs;
     this.sendStateUpdate();
   }

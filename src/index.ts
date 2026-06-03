@@ -107,6 +107,8 @@ export class SendspinPlayer {
         config.bufferCapacity ??
         (outputMode === "media-element" ? 1024 * 1024 * 5 : 1024 * 1024 * 1.5),
       syncDelay,
+      requiredLeadTimeMs: config.requiredLeadTimeMs,
+      minBufferMs: config.minBufferMs,
       useHardwareVolume: config.useHardwareVolume,
       onVolumeCommand: config.onVolumeCommand,
       onDelayCommand: config.onDelayCommand,
@@ -265,7 +267,7 @@ export class SendspinPlayer {
   /**
    * Update the reported startup lead time at runtime (ms). Reported to the
    * server via client/state. Debounce calls to avoid reacting to transient
-   * fluctuations.
+   * fluctuations. Throws RangeError if not a non-negative finite number.
    */
   setRequiredLeadTimeMs(leadTimeMs: number): void {
     this.core.setRequiredLeadTimeMs(leadTimeMs);
@@ -274,7 +276,8 @@ export class SendspinPlayer {
   /**
    * Update the reported minimum ongoing buffer duration at runtime (ms).
    * Reported to the server via client/state. Debounce calls to avoid reacting
-   * to transient fluctuations.
+   * to transient fluctuations. Throws RangeError if not a non-negative finite
+   * number.
    */
   setMinBufferMs(minBufferMs: number): void {
     this.core.setMinBufferMs(minBufferMs);
