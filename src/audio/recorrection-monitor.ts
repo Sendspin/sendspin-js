@@ -132,9 +132,8 @@ export class RecorrectionMonitor {
       nowMs - this.pendingJumpAtMs <= RECORRECTION_TRANSIENT_CONFIRM_WINDOW_MS;
     this.pendingJumpSign = jumpSign;
     this.pendingJumpAtMs = nowMs;
+    // Keep the pending jump so a sustained same-sign run stays confirmed.
     if (isConfirmed) {
-      this.pendingJumpSign = null;
-      this.pendingJumpAtMs = null;
       return false;
     }
 
@@ -157,7 +156,8 @@ export class RecorrectionMonitor {
       return false;
     }
     if (isTransient) {
-      this.clearBreachState();
+      // Reset only the breach timer, keep pending-jump state to confirm next check.
+      this.breachStartedAtMs = null;
       return false;
     }
     if (this.breachStartedAtMs === null) {
