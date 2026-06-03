@@ -125,6 +125,29 @@ const player = new SendspinPlayer({
 });
 ```
 
+### Buffer timing
+
+Report the startup lead time and ongoing jitter buffer the player needs to the
+server via `client/state`. Lower values mean lower latency at the risk of
+underruns. Defaults are `requiredLeadTimeMs: 250` and `minBufferMs: 250`.
+
+```typescript
+const player = new SendspinPlayer({
+  baseUrl: 'http://your-server:8095',
+  requiredLeadTimeMs: 250,  // startup warmup (codec init, decode, DAC)
+  minBufferMs: 250,         // ongoing buffer to absorb network jitter
+});
+```
+
+Both can be updated at runtime, e.g. after measuring real lead time post-warmup
+or on a link-type change. Debounce updates so transient fluctuations don't churn
+server-side timing.
+
+```typescript
+player.setRequiredLeadTimeMs(300);
+player.setMinBufferMs(1500);
+```
+
 ### Core + scheduler as separate layers
 
 Apps that need the decoded PCM stream (e.g. visualizers) can use
