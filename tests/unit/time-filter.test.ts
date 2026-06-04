@@ -211,11 +211,21 @@ describe("SendspinTimeFilter extra", () => {
     });
   });
 
-  describe("duplicate-timestamp guard", () => {
+  describe("non-monotonic-timestamp guard", () => {
     it("skips a second update at the same timestamp without changing offset", () => {
       filter.update(5000, 500, 100);
       const offsetAfterFirst = filter.offset;
       filter.update(9999, 500, 100); // same time_added -> skipped
+      expect(filter.count).toBe(1);
+      expect(filter.offset).toBe(offsetAfterFirst);
+    });
+
+    it("skips an update with a backward time_added", () => {
+      filter.update(5000, 500, 200000);
+      const offsetAfterFirst = filter.offset;
+      // time_added moves backward (e.g. out-of-order packet on UDP transport).
+      // Accepting it would yield a negative dt and corrupt the predict step.
+      filter.update(9999, 500, 100000);
       expect(filter.count).toBe(1);
       expect(filter.offset).toBe(offsetAfterFirst);
     });

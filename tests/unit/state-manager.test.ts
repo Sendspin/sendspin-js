@@ -151,6 +151,19 @@ describe("StateManager", () => {
       expect(sm.serverState).toEqual({});
       expect(sm.groupState).toEqual({});
     });
+
+    it("preserves streamGeneration across reset", () => {
+      // Generation must keep increasing so late chunks from a previous stream
+      // can never match the current generation after a reconnect.
+      sm.resetStreamAnchors();
+      sm.resetStreamAnchors();
+      const generationBefore = sm.streamGeneration;
+      expect(generationBefore).toBeGreaterThan(0);
+
+      sm.reset();
+
+      expect(sm.streamGeneration).toBe(generationBefore);
+    });
   });
 
   describe("interval management", () => {

@@ -62,16 +62,18 @@ describe("WebSocketManager", () => {
   });
 
   describe("auto-reconnect", () => {
-    it("reconnects 5s after an unexpected close", async () => {
+    it("reconnects after the configured base delay on unexpected close", async () => {
       const p = mgr.connect("ws://host/sendspin");
       FakeWebSocket.instances[0].fireOpen();
       await p;
       expect(FakeWebSocket.instances).toHaveLength(1);
 
       FakeWebSocket.instances[0].fireClose();
+      // No reconnect before the base delay elapses (default 1000ms).
+      vi.advanceTimersByTime(999);
       expect(FakeWebSocket.instances).toHaveLength(1);
 
-      vi.advanceTimersByTime(5000);
+      vi.advanceTimersByTime(1);
       expect(FakeWebSocket.instances).toHaveLength(2);
     });
 
