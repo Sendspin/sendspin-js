@@ -4,7 +4,7 @@ on:
   release:
     types: [published]
 env:
-  NODE_VERSION: "20"
+  NODE_VERSION: "24"
 
 jobs:
   build:
@@ -40,7 +40,7 @@ jobs:
       - name: Install dependencies
         run: yarn install --frozen-lockfile
       - name: Set package version from tag
-        run: npm version ${{ steps.vars.outputs.tag }} --no-git-tag-version
+        run: npm version ${{ steps.vars.outputs.tag }} --no-git-tag-version --allow-same-version
       - name: Build package
         run: yarn build
 
@@ -77,7 +77,14 @@ jobs:
         run: npm install -g npm@latest
 
       - name: Set package version from tag
-        run: npm version ${{ needs.build.outputs.version }} --no-git-tag-version
+        run: npm version ${{ needs.build.outputs.version }} --no-git-tag-version --allow-same-version
 
       - name: Publish release to npm
-        run: npm publish --access public --provenance
+        run: |
+          VERSION="${{ needs.build.outputs.version }}"
+          if [[ "$VERSION" =~ ^2\. ]]; then
+            echo "Publishing 2.x release with dist-tag 'legacy'"
+            npm publish --access public --provenance --tag legacy
+          else
+            npm publish --access public --provenance
+          fi

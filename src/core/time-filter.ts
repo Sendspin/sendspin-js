@@ -84,8 +84,9 @@ export class SendspinTimeFilter {
    * @param time_added - Client timestamp when this measurement was taken in microseconds
    */
   update(measurement: number, max_error: number, time_added: number): void {
-    if (time_added === this._last_update) {
-      // Skip duplicate timestamps to avoid division by zero in drift calculation
+    if (time_added <= this._last_update) {
+      // Skip non-monotonic timestamps. dt == 0 divides by zero in the drift
+      // calc, dt < 0 corrupts the predict step.
       return;
     }
 
@@ -267,6 +268,7 @@ export class SendspinTimeFilter {
    */
   reset(): void {
     this._count = 0;
+    this._last_update = 0;
     this._offset = 0.0;
     this._drift = 0.0;
     this._offset_covariance = Infinity;

@@ -23,6 +23,7 @@ export class RecorrectionMonitor {
   private prevRawSyncErrorMs: number | null = null;
   private pendingJumpSign: number | null = null;
   private pendingJumpAtMs: number | null = null;
+  private transientStartedAtMs: number | null = null;
   private _hardResyncGraceUntilMs: number | null = null;
   private _lastHardResyncAtMs: number = -Infinity;
   /** After a recorrection, scheduling must not start before this time. */
@@ -63,6 +64,7 @@ export class RecorrectionMonitor {
     this.breachStartedAtMs = null;
     this.pendingJumpSign = null;
     this.pendingJumpAtMs = null;
+    this.transientStartedAtMs = null;
   }
 
   resetCheckState(): void {
@@ -117,9 +119,9 @@ export class RecorrectionMonitor {
     }
 
     const jumpDeltaMs = rawSyncErrorMs - prev;
-    const jumpSign = Math.sign(rawSyncErrorMs);
+    const jumpSign = Math.sign(jumpDeltaMs);
     const isJumpDetected =
-      Math.abs(jumpDeltaMs) >= RECORRECTION_TRANSIENT_JUMP_MS && jumpSign !== 0;
+      Math.abs(jumpDeltaMs) >= RECORRECTION_TRANSIENT_JUMP_MS;
     if (!isJumpDetected) {
       this.pendingJumpSign = null;
       this.pendingJumpAtMs = null;
@@ -132,9 +134,8 @@ export class RecorrectionMonitor {
       nowMs - this.pendingJumpAtMs <= RECORRECTION_TRANSIENT_CONFIRM_WINDOW_MS;
     this.pendingJumpSign = jumpSign;
     this.pendingJumpAtMs = nowMs;
+    // Keep the pending jump so a sustained same-sign run stays confirmed.
     if (isConfirmed) {
-      this.pendingJumpSign = null;
-      this.pendingJumpAtMs = null;
       return false;
     }
 
@@ -157,8 +158,21 @@ export class RecorrectionMonitor {
       return false;
     }
     if (isTransient) {
-      this.clearBreachState();
-      return false;
+      // Jitter that keeps suppressing for SUSTAIN_MS while smoothed stays high
+      // is sustained drift, not a glitch. Stop treating it as transient.
+      if (this.transientStartedAtMs === null) {
+        this.transientStartedAtMs = nowMs;
+      }
+      if (nowMs - this.transientStartedAtMs < RECORRECTION_SUSTAIN_MS) {
+        this.breachStartedAtMs = null;
+        return false;
+      }
+      // Mature on the same budget as clean drift by counting from suppression start.
+      if (this.breachStartedAtMs === null) {
+        this.breachStartedAtMs = this.transientStartedAtMs;
+      }
+    } else {
+      this.transientStartedAtMs = null;
     }
     if (this.breachStartedAtMs === null) {
       this.breachStartedAtMs = nowMs;

@@ -69,7 +69,7 @@ export class SendspinCore implements StreamHandler {
       () => this.stateManager.streamGeneration,
     );
 
-    this.wsManager = new WebSocketManager();
+    this.wsManager = new WebSocketManager(config.reconnect);
 
     this.protocolHandler = new ProtocolHandler(
       playerId,
@@ -81,6 +81,8 @@ export class SendspinCore implements StreamHandler {
         clientName,
         codecs: config.codecs,
         bufferCapacity: config.bufferCapacity,
+        requiredLeadTimeMs: config.requiredLeadTimeMs,
+        minBufferMs: config.minBufferMs,
         useHardwareVolume: config.useHardwareVolume,
         onVolumeCommand: config.onVolumeCommand,
         onDelayCommand: config.onDelayCommand,
@@ -213,7 +215,9 @@ export class SendspinCore implements StreamHandler {
       );
       const wsProtocol = url.protocol === "https:" ? "wss:" : "ws:";
       const basePath = url.pathname.replace(/\/$/, "");
-      const wsUrl = `${wsProtocol}//${url.host}${basePath}/sendspin`;
+      const wsUrl = basePath.endsWith("/sendspin")
+        ? `${wsProtocol}//${url.host}${basePath}`
+        : `${wsProtocol}//${url.host}${basePath}/sendspin`;
 
       await this.wsManager.connect(wsUrl, onOpen, onMessage, onError, onClose);
     }
@@ -265,6 +269,18 @@ export class SendspinCore implements StreamHandler {
     this._syncDelayMs = clampSyncDelayMs(delayMs);
     this._onSyncDelayChange?.(this._syncDelayMs);
     this.protocolHandler.sendStateUpdate();
+  }
+
+  // ========================================
+  // Buffer timing
+  // ========================================
+
+  setRequiredLeadTimeMs(leadTimeMs: number): void {
+    this.protocolHandler.setRequiredLeadTimeMs(leadTimeMs);
+  }
+
+  setMinBufferMs(minBufferMs: number): void {
+    this.protocolHandler.setMinBufferMs(minBufferMs);
   }
 
   // ========================================
@@ -344,12 +360,14 @@ export class SendspinCore implements StreamHandler {
       metadata.progress.track_progress +
       (elapsedUs * metadata.progress.playback_speed) / 1_000_000;
 
+    const trackDuration = metadata.progress.track_duration;
     return {
-      positionMs: Math.max(
-        0,
-        Math.min(positionMs, metadata.progress.track_duration),
-      ),
-      durationMs: metadata.progress.track_duration,
+      // track_duration 0 means unbounded (live radio), so floor at 0 only.
+      positionMs:
+        trackDuration === 0
+          ? Math.max(0, positionMs)
+          : Math.max(0, Math.min(positionMs, trackDuration)),
+      durationMs: trackDuration,
       playbackSpeed: metadata.progress.playback_speed / 1000,
     };
   }

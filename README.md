@@ -84,6 +84,29 @@ const player = new SendspinPlayer({
 await player.connect();
 ```
 
+### Reconnect behavior
+
+Built-in auto-reconnect uses exponential backoff (1s → 15s, unlimited
+attempts). Override the bounds, cap the retry count, or hook callbacks to
+drive UI and fatal-error paths via `reconnect`.
+
+```typescript
+const player = new SendspinPlayer({
+  baseUrl: 'http://your-server:8095',
+  reconnect: {
+    baseDelayMs: 1000,
+    maxDelayMs: 15000,
+    maxAttempts: 7,
+    onReconnecting: (attempt) => console.log(`Reconnecting (attempt ${attempt})`),
+    onReconnected: () => console.log('Reconnected'),
+    onExhausted: () => console.log('Giving up'),
+  },
+});
+```
+
+Reconnection only applies to connections opened via `baseUrl`; adopted
+sockets (`webSocket`) never auto-reconnect.
+
 ### Tuning correction thresholds
 
 Override the per-mode thresholds that control when/how the scheduler corrects
@@ -100,6 +123,29 @@ const player = new SendspinPlayer({
     },
   },
 });
+```
+
+### Buffer timing
+
+Report the startup lead time and ongoing jitter buffer the player needs to the
+server via `client/state`. Lower values mean lower latency at the risk of
+underruns. Defaults are `requiredLeadTimeMs: 250` and `minBufferMs: 250`.
+
+```typescript
+const player = new SendspinPlayer({
+  baseUrl: 'http://your-server:8095',
+  requiredLeadTimeMs: 250,  // startup warmup (codec init, decode, DAC)
+  minBufferMs: 250,         // ongoing buffer to absorb network jitter
+});
+```
+
+Both can be updated at runtime, e.g. after measuring real lead time post-warmup
+or on a link-type change. Debounce updates so transient fluctuations don't churn
+server-side timing.
+
+```typescript
+player.setRequiredLeadTimeMs(300);
+player.setMinBufferMs(1500);
 ```
 
 ### Core + scheduler as separate layers
