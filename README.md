@@ -177,3 +177,22 @@ yarn dev-server
 ```
 
 Then browse to http://localhost:6001
+
+## Testing
+
+The E2E tests run against a real [aiosendspin](https://pypi.org/project/aiosendspin/)
+server, so they need a Python virtualenv at `.venv`. Bootstrap it once:
+
+```
+./scripts/setup.sh
+```
+
+Then:
+
+```
+yarn test         # unit + E2E
+yarn test:watch   # watch mode
+```
+
+To run a single suite, pass the path: `npx vitest run tests/unit` or
+`npx vitest run tests/e2e`.
