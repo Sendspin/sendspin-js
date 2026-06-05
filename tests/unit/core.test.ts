@@ -6,7 +6,20 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { SendspinCore } from "../../src/core/core";
-import type { StreamFormat } from "../../src/types";
+import type { SendspinStorage, StreamFormat } from "../../src/types";
+
+function makeStorage(): SendspinStorage & { data: Map<string, string> } {
+  const data = new Map<string, string>();
+  return {
+    data,
+    getItem: (k) => (data.has(k) ? data.get(k)! : null),
+    setItem: (k, v) => {
+      data.set(k, v);
+    },
+  };
+}
+
+const STATIC_DELAY_KEY = "sendspin-static-delay-ms";
 
 const PCM_FORMAT: StreamFormat = {
   codec: "pcm",
@@ -337,6 +350,59 @@ describe("SendspinCore.setSyncDelay", () => {
       syncDelay: 8000,
     });
     expect(c2.getSyncDelayMs()).toBe(5000);
+  });
+});
+
+describe("SendspinCore static delay persistence", () => {
+  it("persists a server-commanded delay change to storage", () => {
+    const storage = makeStorage();
+    const core = new SendspinCore({
+      baseUrl: "http://h",
+      playerId: "p",
+      storage,
+    });
+
+    core.handleSyncDelayChange(123);
+
+    expect(storage.data.get(STATIC_DELAY_KEY)).toBe("123");
+  });
+
+  it("restores a persisted delay on a fresh core with the same storage", () => {
+    const storage = makeStorage();
+    storage.data.set(STATIC_DELAY_KEY, "321");
+
+    const core = new SendspinCore({
+      baseUrl: "http://h",
+      playerId: "p",
+      storage,
+    });
+
+    expect(core.getSyncDelayMs()).toBe(321);
+  });
+
+  it("lets an explicit config.syncDelay override the persisted value", () => {
+    const storage = makeStorage();
+    storage.data.set(STATIC_DELAY_KEY, "321");
+
+    const core = new SendspinCore({
+      baseUrl: "http://h",
+      playerId: "p",
+      syncDelay: 100,
+      storage,
+    });
+
+    expect(core.getSyncDelayMs()).toBe(100);
+  });
+
+  it("does not throw or persist when storage is disabled", () => {
+    const core = new SendspinCore({
+      baseUrl: "http://h",
+      playerId: "p",
+      storage: null,
+    });
+
+    expect(() => core.handleSyncDelayChange(123)).not.toThrow();
+    expect(core.getSyncDelayMs()).toBe(123);
   });
 });
 
