@@ -234,9 +234,9 @@ export class SendspinPlayer {
 
   /**
    * Disconnect from Sendspin server
-   * @param reason - Optional reason for disconnecting (default: 'shutdown')
+   * @param reason - Optional reason for disconnecting (default: 'restart')
    */
-  disconnect(reason: GoodbyeReason = "shutdown"): void {
+  disconnect(reason: GoodbyeReason = "restart"): void {
     this.cancelPendingDisconnectPlaybackReset();
     this.suppressDisconnectPlaybackReset = true;
 
