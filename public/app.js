@@ -22,7 +22,8 @@ const STORAGE_KEYS = {
   PLAYER_ID: "sendspin-player-id",
   VOLUME: "sendspin-volume",
   MUTED: "sendspin-muted",
-  SYNC_DELAY: "sendspin-sync-delay",
+  // Shared with the SDK, which persists the static delay under this key.
+  SYNC_DELAY: "sendspin-static-delay-ms",
   REQUIRED_LEAD_TIME: "sendspin-required-lead-time",
   MIN_BUFFER: "sendspin-min-buffer",
   CORRECTION_MODE: "sendspin-correction-mode",
@@ -578,11 +579,6 @@ async function connect() {
       localStorage.getItem(STORAGE_KEYS.VOLUME) || "80",
       10,
     );
-    const savedSyncDelay = parseInt(
-      localStorage.getItem(STORAGE_KEYS.SYNC_DELAY) || "0",
-      10,
-    );
-    const sanitizedSyncDelay = sanitizeSyncDelay(savedSyncDelay);
     const savedCorrectionMode =
       localStorage.getItem(STORAGE_KEYS.CORRECTION_MODE) || "sync";
 
@@ -601,7 +597,6 @@ async function connect() {
       playerId: getPlayerId(),
       baseUrl: serverUrl,
       clientName: "Sendspin Sample Player",
-      syncDelay: sanitizedSyncDelay,
       requiredLeadTimeMs,
       minBufferMs,
       correctionMode: savedCorrectionMode,
@@ -611,6 +606,10 @@ async function connect() {
           showToast(`Reconnecting (attempt ${attempt})`, "info"),
         onReconnected: () => showToast("Reconnected", "success"),
         onExhausted: () => showToast("Reconnect failed", "error"),
+      },
+      onDelayCommand: (delayMs) => {
+        syncDelayInput.value = delayMs;
+        showToast(`Server set sync delay to ${delayMs}ms`, "info");
       },
       onStateChange,
     });
@@ -724,8 +723,12 @@ function toggleMute() {
 function applySyncDelay() {
   const delay = sanitizeSyncDelay(parseInt(syncDelayInput.value, 10));
   syncDelayInput.value = delay;
-  saveSyncDelay(delay);
-  player.setSyncDelay(delay);
+  if (player) {
+    player.setSyncDelay(delay);
+  } else {
+    // No player yet, so seed the SDK's key for the next connect.
+    saveSyncDelay(delay);
+  }
   showToast(`Sync delay set to ${delay}ms`, "success");
 }
 

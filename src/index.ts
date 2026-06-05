@@ -94,9 +94,15 @@ export class SendspinPlayer {
       );
     }
 
-    const syncDelay = config.syncDelay ?? getDefaultSyncDelay();
+    let storage: SendspinStorage | null = null;
+    if (config.storage !== undefined) {
+      storage = config.storage;
+    } else if (typeof localStorage !== "undefined") {
+      storage = localStorage;
+    }
 
-    // Create core (protocol + decoding)
+    // Create core (protocol + decoding). It resolves the effective initial
+    // delay, so read it back below for the scheduler's starting value.
     this.core = new SendspinCore({
       playerId: config.playerId,
       baseUrl: config.baseUrl,
@@ -106,7 +112,9 @@ export class SendspinPlayer {
       bufferCapacity:
         config.bufferCapacity ??
         (outputMode === "media-element" ? 1024 * 1024 * 5 : 1024 * 1024 * 1.5),
-      syncDelay,
+      syncDelay: config.syncDelay,
+      defaultSyncDelay: getDefaultSyncDelay(),
+      storage,
       requiredLeadTimeMs: config.requiredLeadTimeMs,
       minBufferMs: config.minBufferMs,
       useHardwareVolume: config.useHardwareVolume,
@@ -117,14 +125,9 @@ export class SendspinPlayer {
       onStateChange: config.onStateChange,
     });
 
-    // Create scheduler (Web Audio playback)
-    let storage: SendspinStorage | null = null;
-    if (config.storage !== undefined) {
-      storage = config.storage;
-    } else if (typeof localStorage !== "undefined") {
-      storage = localStorage;
-    }
+    const syncDelay = this.core.getSyncDelayMs();
 
+    // Create scheduler (Web Audio playback)
     this.scheduler = new AudioScheduler({
       stateManager: this.core._stateManager,
       timeFilter: this.core._timeFilter,
