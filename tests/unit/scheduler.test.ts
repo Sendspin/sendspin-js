@@ -70,7 +70,12 @@ class FakeBufferSource {
 }
 
 class FakeGainNode {
-  gain = { value: 1.0 };
+  gain = {
+    value: 1.0,
+    setTargetAtTime(target: number, _startTime: number, _timeConstant: number) {
+      this.value = target;
+    },
+  };
   connect() {}
 }
 
@@ -513,15 +518,29 @@ describe("AudioScheduler empty / no-context edge cases", () => {
 });
 
 describe("AudioScheduler volume", () => {
-  it("maps volume 0-100 to gain 0-1 and applies mute", () => {
+  it("applies the perceptual (volume/100)^1.5 curve to gain", () => {
     const h = setup();
+    const gain = (h.scheduler as any).gainNode;
+
     h.state.volume = 50;
     h.scheduler.updateVolume();
-    const gain = (h.ctx as any) && (h.scheduler as any).gainNode;
-    expect(gain.gain.value).toBeCloseTo(0.5, 6);
+    expect(gain.gain.value).toBeCloseTo(Math.pow(0.5, 1.5), 6);
 
+    h.state.volume = 100;
+    h.scheduler.updateVolume();
+    expect(gain.gain.value).toBeCloseTo(1.0, 6);
+
+    h.state.volume = 0;
+    h.scheduler.updateVolume();
+    expect(gain.gain.value).toBeCloseTo(0, 6);
+  });
+
+  it("maps muted to gain 0 regardless of volume", () => {
+    const h = setup();
+    h.state.volume = 80;
     h.state.muted = true;
     h.scheduler.updateVolume();
+    const gain = (h.scheduler as any).gainNode;
     expect(gain.gain.value).toBe(0);
   });
 
