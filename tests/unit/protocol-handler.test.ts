@@ -342,6 +342,66 @@ describe("ProtocolHandler extra", () => {
     });
   });
 
+  describe("delta client/state (spec: full then changed-only)", () => {
+    const serverHello = () =>
+      msgEvent(JSON.stringify({ type: "server/hello", payload: {} }));
+
+    it("sends the full player payload on the first state after connect", () => {
+      const handler = makeHandler();
+      handler.sendClientHello();
+      handler.handleMessage(serverHello());
+
+      const player = (
+        lastSent(send, "client/state")!.payload as Record<string, unknown>
+      ).player as Record<string, unknown>;
+      expect(player).toMatchObject({
+        state: "synchronized",
+        volume: expect.any(Number),
+        muted: expect.any(Boolean),
+        static_delay_ms: expect.any(Number),
+        required_lead_time_ms: expect.any(Number),
+        min_buffer_ms: expect.any(Number),
+        supported_commands: ["set_static_delay"],
+      });
+    });
+
+    it("sends only the changed field on the next update", () => {
+      const handler = makeHandler();
+      handler.sendClientHello();
+      handler.handleMessage(serverHello());
+      send.mockClear();
+
+      stateManager.volume = 42;
+      handler.sendStateUpdate();
+
+      const player = (
+        lastSent(send, "client/state")!.payload as Record<string, unknown>
+      ).player as Record<string, unknown>;
+      expect(Object.keys(player)).toEqual(["volume"]);
+      expect(player.volume).toBe(42);
+    });
+
+    it("resets to a full payload after a reconnect", () => {
+      const handler = makeHandler();
+      handler.sendClientHello();
+      handler.handleMessage(serverHello());
+      stateManager.volume = 42;
+      handler.sendStateUpdate();
+      send.mockClear();
+
+      // Reconnect: a fresh server has no prior state to merge into.
+      handler.sendClientHello();
+      handler.sendStateUpdate();
+
+      const player = (
+        lastSent(send, "client/state")!.payload as Record<string, unknown>
+      ).player as Record<string, unknown>;
+      expect(player.supported_commands).toEqual(["set_static_delay"]);
+      expect(player.required_lead_time_ms).toBeTypeOf("number");
+      expect(player.min_buffer_ms).toBeTypeOf("number");
+    });
+  });
+
   describe("handleServerCommand volume / mute (spec server/command player object)", () => {
     const cmd = (player: Record<string, unknown>) =>
       msgEvent(JSON.stringify({ type: "server/command", payload: { player } }));
