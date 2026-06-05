@@ -72,7 +72,7 @@ class FakeBufferSource {
 class FakeGainNode {
   gain = {
     value: 1.0,
-    setTargetAtTime(target: number) {
+    setTargetAtTime(target: number, _startTime: number, _timeConstant: number) {
       this.value = target;
     },
   };
