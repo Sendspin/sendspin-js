@@ -425,6 +425,29 @@ describe("SendspinCore.disconnect ordering and idempotency", () => {
     expect(send).not.toHaveBeenCalled();
   });
 
+  it("defaults the goodbye reason to restart, but forwards an explicit reason", () => {
+    const core = new SendspinCore({ baseUrl: "http://h", playerId: "p" });
+    const send = spySend(core);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (core as any).wsManager.isConnected = () => true;
+
+    core.disconnect();
+    expect(send).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        type: "client/goodbye",
+        payload: { reason: "restart" },
+      }),
+    );
+
+    core.disconnect("shutdown");
+    expect(send).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        type: "client/goodbye",
+        payload: { reason: "shutdown" },
+      }),
+    );
+  });
+
   it("fires onConnectionClose only via the close handler, not on disconnect()", () => {
     const core = new SendspinCore({ baseUrl: "http://h", playerId: "p" });
     const cb = vi.fn();
