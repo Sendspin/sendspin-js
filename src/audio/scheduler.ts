@@ -51,6 +51,12 @@ const SCHEDULE_REFILL_THRESHOLD_FRACTION = 0.5;
 const SCHEDULE_REFILL_MIN_THRESHOLD_SEC = 0.1;
 const SCHEDULE_REFILL_MAX_THRESHOLD_SEC = 5;
 
+const VOLUME_RAMP_TIME_CONSTANT_SEC = 0.015;
+
+export function perceptualGain(volume: number): number {
+  return Math.pow(volume / 100, 1.5);
+}
+
 export interface AudioSchedulerOptions {
   stateManager: StateManager;
   timeFilter: SendspinTimeFilter;
@@ -634,9 +640,18 @@ export class AudioScheduler {
       this.gainNode.gain.value = 1.0;
       return;
     }
-    this.gainNode.gain.value = this.stateManager.muted
+    const target = this.stateManager.muted
       ? 0
-      : this.stateManager.volume / 100;
+      : perceptualGain(this.stateManager.volume);
+    if (this.audioContext) {
+      this.gainNode.gain.setTargetAtTime(
+        target,
+        this.audioContext.currentTime,
+        VOLUME_RAMP_TIME_CONSTANT_SEC,
+      );
+    } else {
+      this.gainNode.gain.value = target;
+    }
   }
 
   measureBufferedPlaybackRunwaySec(): number {
