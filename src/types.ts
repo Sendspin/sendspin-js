@@ -442,7 +442,8 @@ export interface SendspinCoreConfig {
    * Positive values make playback earlier to compensate for downstream device latency.
    * Allowed range: 0-5000.
    * Runtime update behavior depends on the active correction mode settings.
-   * Defaults to a browser/platform-specific heuristic value if not provided.
+   * Falls back to a persisted value, then `defaultSyncDelay`, then 0.
+   * SendspinPlayer supplies a browser/platform-specific heuristic as that default.
    *
    * Server-commanded delays (set_static_delay) are persisted via `storage` and
    * restored on the next connect. Passing `syncDelay` explicitly overrides any
@@ -459,7 +460,8 @@ export interface SendspinCoreConfig {
 
   /**
    * Storage for persisting SDK state (cached output latency and the
-   * server-commanded static delay). Defaults to localStorage. Pass null to
+   * server-commanded static delay). SendspinCore persists only when this is
+   * provided. SendspinPlayer defaults it to localStorage. Pass null to
    * disable persistence.
    */
   storage?: SendspinStorage | null;
