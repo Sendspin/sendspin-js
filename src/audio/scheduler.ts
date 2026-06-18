@@ -861,9 +861,9 @@ export class AudioScheduler {
         scheduleTime = playbackTime - syncDelaySec;
         const minScheduleTimeSec = this.recorrectionMonitor.minScheduleTimeSec;
         if (minScheduleTimeSec !== null) {
-          // After a cutover, drop backlog that ends before the kept tail rather
-          // than clamping it forward, so the snap claws back accumulated lateness.
-          if (scheduleTime + chunk.buffer.duration < minScheduleTimeSec) {
+          // After a cutover, drop backlog that ends at or before the kept tail
+          // rather than clamping it forward, so the snap claws back lateness.
+          if (scheduleTime + chunk.buffer.duration <= minScheduleTimeSec) {
             continue;
           }
           scheduleTime = Math.max(scheduleTime, minScheduleTimeSec);
