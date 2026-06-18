@@ -39,7 +39,12 @@ for (let f = 0; f < SAMPLE_CORRECTION_FADE_LEN; f++) {
     ((SAMPLE_CORRECTION_FADE_LEN - f) / (SAMPLE_CORRECTION_FADE_LEN + 1)) *
     SAMPLE_CORRECTION_FADE_STRENGTH;
 }
-const SYNC_ERROR_ALPHA = 0.1;
+// Playback-rate correction tiers, both within the ±0.5% spec cap (inaudible).
+const RATE_CORRECTION_SOFT = 0.003;
+const RATE_CORRECTION_FIRM = 0.005;
+
+// EMA weight for the sync error. Lower smooths clock noise but slows drift response. Exported only for tests.
+export const SYNC_ERROR_ALPHA = 0.05;
 const SCHEDULE_HEADROOM_SEC = 0.2;
 const SCHEDULE_HORIZON_PRECISE_SEC = 20;
 const SCHEDULE_HORIZON_GOOD_SEC = 8;
@@ -856,6 +861,11 @@ export class AudioScheduler {
         scheduleTime = playbackTime - syncDelaySec;
         const minScheduleTimeSec = this.recorrectionMonitor.minScheduleTimeSec;
         if (minScheduleTimeSec !== null) {
+          // After a cutover, drop backlog that ends at or before the kept tail
+          // rather than clamping it forward, so the snap claws back lateness.
+          if (scheduleTime + chunk.buffer.duration <= minScheduleTimeSec) {
+            continue;
+          }
           scheduleTime = Math.max(scheduleTime, minScheduleTimeSec);
           playbackTime = scheduleTime + syncDelaySec;
         }
@@ -896,8 +906,8 @@ export class AudioScheduler {
             scheduleTime = this.nextScheduleTime;
             playbackRate = Number.isFinite(thresholds.rate2AboveMs)
               ? correctionErrorMs > 0
-                ? 1.02
-                : 0.98
+                ? 1 + RATE_CORRECTION_FIRM
+                : 1 - RATE_CORRECTION_FIRM
               : 1.0;
             this.currentCorrectionMethod =
               playbackRate === 1.0 ? "none" : "rate";
@@ -928,16 +938,16 @@ export class AudioScheduler {
             if (correctionErrorMs > 0) {
               playbackRate =
                 absErrorMs >= thresholds.rate2AboveMs
-                  ? 1.02
+                  ? 1 + RATE_CORRECTION_FIRM
                   : absErrorMs >= thresholds.rate1AboveMs
-                    ? 1.01
+                    ? 1 + RATE_CORRECTION_SOFT
                     : 1.0;
             } else {
               playbackRate =
                 absErrorMs >= thresholds.rate2AboveMs
-                  ? 0.98
+                  ? 1 - RATE_CORRECTION_FIRM
                   : absErrorMs >= thresholds.rate1AboveMs
-                    ? 0.99
+                    ? 1 - RATE_CORRECTION_SOFT
                     : 1.0;
             }
             this.currentCorrectionMethod =

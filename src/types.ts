@@ -252,7 +252,7 @@ export type Codec = "pcm" | "opus" | "flac";
 
 /**
  * Audio sync correction mode:
- * - "sync": Multi-device sync, may use pitch-changing playback-rate adjustments for faster convergence.
+ * - "sync": Multi-device sync, may use small playback-rate adjustments (capped at ±0.5%, inaudible) for faster convergence.
  * - "quality": No rate changes; uses sample fixes and tighter resyncs, so you get fewer adjustments but occasional jumps. Starts out of sync until the clock converges. Not recommended for bad networks.
  * - "quality-local": Avoids playback-rate changes; may drift vs. group sync and only resyncs as a last resort.
  */
@@ -265,9 +265,9 @@ export type CorrectionMode = "sync" | "quality" | "quality-local";
 export interface CorrectionThresholds {
   /** Hard resync when sync error exceeds this (ms) */
   resyncAboveMs: number;
-  /** Use ±2% playback rate when error exceeds this (ms). Infinity = disabled. */
+  /** Use the firm (±0.5%) playback-rate tier when error exceeds this (ms). Infinity = disabled. */
   rate2AboveMs: number;
-  /** Use ±1% playback rate when error exceeds this (ms). Infinity = disabled. */
+  /** Use the soft (±0.3%) playback-rate tier when error exceeds this (ms). Infinity = disabled. */
   rate1AboveMs: number;
   /** Use sample insertion/deletion when error is below this (ms). 0 = disabled. */
   samplesBelowMs: number;
@@ -295,10 +295,9 @@ export interface SendspinPlayerConfig extends SendspinCoreConfig {
 
   /**
    * Sync correction mode:
-   * - "sync" (default): Corrects out of sync playback using all methods and may use pitch-changing
-   *   playback-rate adjustments for faster convergence.
-   *   Best for multi-device sync but may cause audible pitch shifts, especially just
-   *   after starting of playback.
+   * - "sync" (default): Corrects out of sync playback using all methods, including small
+   *   playback-rate adjustments capped at ±0.5% (inaudible) for faster convergence.
+   *   Best for multi-device sync.
    * - "quality": No playback-rate changes; uses sample fixes and tighter resyncs, so expect fewer adjustments but occasional jumps. Starts out of sync until the clock converges. Not recommended for bad networks.
    * - "quality-local": Avoids playback-rate changes; may drift vs. other players and only resyncs
    *   as a last resort.
