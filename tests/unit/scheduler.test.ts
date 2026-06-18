@@ -15,7 +15,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { AudioScheduler } from "../../src/audio/scheduler";
+import { AudioScheduler, SYNC_ERROR_ALPHA } from "../../src/audio/scheduler";
 import { StateManager } from "../../src/core/state-manager";
 import type { DecodedAudioChunk, StreamFormat } from "../../src/types";
 
@@ -353,12 +353,18 @@ describe("AudioScheduler consecutive-chunk continuity", () => {
 });
 
 describe("AudioScheduler drift correction (sync mode)", () => {
-  // The correction branch keys off the EMA-smoothed error (alpha 0.1), seeded
-  // from 0 after the first chunk. So a single correction chunk with raw error R
-  // produces smoothedError = 0.1 * R. We size each offset so 0.1*R lands in the
-  // target band. The first chunk establishes nextPlaybackTime at offset 0; the
-  // offset is then applied for one contiguous second chunk (gap 100ms < 0.1s
-  // threshold, so the in-sync correction branch — not the gap branch — runs).
+  // The correction branch keys off the EMA-smoothed error, seeded from 0 after
+  // the first chunk. So a single correction chunk with raw error R produces
+  // smoothedError = SYNC_ERROR_ALPHA * R. offsetForSmoothedMs sizes the raw
+  // offset to land a target smoothed error in the desired band, independent of
+  // the alpha value. The first chunk establishes nextPlaybackTime at offset 0.
+  // The offset is then applied for one contiguous second chunk (gap 100ms <
+  // 0.1s threshold, so the in-sync correction branch runs, not the gap branch).
+
+  // Raw clientOffset (µs) that yields the given smoothed error (ms) after one chunk.
+  function offsetForSmoothedMs(ms: number): number {
+    return Math.round((ms / SYNC_ERROR_ALPHA) * 1000);
+  }
 
   function primeFirstChunk(h: Harness, base: number) {
     h.scheduler.handleDecodedChunk(makeChunk(base, 0));
@@ -385,8 +391,8 @@ describe("AudioScheduler drift correction (sync mode)", () => {
     const h = setup();
     const base = nowUs();
     primeFirstChunk(h, base);
-    // raw 20ms -> smoothed 2ms, in (deadband 1, samplesBelow 8).
-    correctOnce(h, base, 20_000);
+    // smoothed 2ms, in (deadband 1, samplesBelow 8).
+    correctOnce(h, base, offsetForSmoothedMs(2));
     expect(h.scheduler.syncInfo.correctionMethod).toBe("samples");
     expect([1, -1]).toContain(h.scheduler.syncInfo.samplesAdjusted);
   });
@@ -395,11 +401,23 @@ describe("AudioScheduler drift correction (sync mode)", () => {
     const h = setup();
     const base = nowUs();
     primeFirstChunk(h, base);
-    // raw 300ms -> smoothed 30ms, in (samplesBelow 8, resyncAbove 200).
-    correctOnce(h, base, 300_000);
+    // smoothed 30ms, in (samplesBelow 8, resyncAbove 200).
+    correctOnce(h, base, offsetForSmoothedMs(30));
     expect(h.scheduler.syncInfo.correctionMethod).toBe("rate");
-    expect([0.98, 0.99, 1.01, 1.02]).toContain(
+    expect([0.995, 0.997, 1.003, 1.005]).toContain(
       h.scheduler.syncInfo.playbackRate,
+    );
+  });
+
+  it("keeps the firm rate tier within the ±0.5% spec cap for large sub-resync errors", () => {
+    const h = setup();
+    const base = nowUs();
+    primeFirstChunk(h, base);
+    // smoothed 50ms, above rate2AboveMs (35) and below resync (200).
+    correctOnce(h, base, offsetForSmoothedMs(50));
+    expect(h.scheduler.syncInfo.correctionMethod).toBe("rate");
+    expect(Math.abs(h.scheduler.syncInfo.playbackRate - 1)).toBeLessThanOrEqual(
+      0.005 + 1e-9,
     );
   });
 
@@ -413,9 +431,9 @@ describe("AudioScheduler drift correction (sync mode)", () => {
     // server timestamps contiguous (gap 100ms) so the in-sync resync branch
     // runs, not the gap branch.
     nowMsValue += 2000;
-    // raw error must still clear resyncAbove after smoothing: raw 2500ms ->
-    // smoothed 250ms. (nowUs advanced 2s, so add 2s to the offset to keep raw.)
-    h.tf.clientOffsetUs = 2_000_000 + 2_500_000;
+    // Drive smoothed error to 250ms (> resyncAbove 200). nowUs advanced 2s, so
+    // add 2s to the offset to keep the raw error at the intended magnitude.
+    h.tf.clientOffsetUs = 2_000_000 + offsetForSmoothedMs(250);
     h.scheduler.handleDecodedChunk(makeChunk(base + 100_000, 0));
     h.scheduler.processAudioQueue();
     expect(h.scheduler.syncInfo.correctionMethod).toBe("resync");
@@ -434,6 +452,29 @@ describe("AudioScheduler server-timestamp gap handling", () => {
     h.scheduler.handleDecodedChunk(makeChunk(base + 5_000_000, 0));
     h.scheduler.processAudioQueue();
     expect(h.scheduler.syncInfo.correctionMethod).toBe("resync");
+  });
+});
+
+describe("AudioScheduler cutover backlog handling", () => {
+  it("drops late backlog on a cutover instead of clamping it forward", () => {
+    const h = setup();
+    const base = nowUs();
+    // Schedule 5 contiguous 100ms chunks so several sources are pending.
+    for (let i = 0; i < 5; i++) {
+      h.scheduler.handleDecodedChunk(makeChunk(base + i * 100_000, 0));
+    }
+    h.scheduler.processAudioQueue();
+    expect(h.ctx.startedSources.length).toBeGreaterThanOrEqual(2);
+
+    // A filter correction shifts the mapping so all buffered audio is now ~2s late.
+    h.tf.clientOffsetUs = -2_000_000;
+    const startedBeforeCutover = h.ctx.startedSources.length;
+
+    // A runtime sync-delay change triggers a guarded cutover (sync mode).
+    h.scheduler.setSyncDelay(10);
+
+    // The late backlog is dropped, not re-scheduled at clamped-forward times.
+    expect(h.ctx.startedSources.length - startedBeforeCutover).toBe(0);
   });
 });
 
