@@ -56,6 +56,24 @@ function inject(ws: MockWS, data: string | ArrayBuffer): void {
   ws.onmessage?.({ data } as MessageEvent);
 }
 
+/** Encrypt a control message server->client and deliver it as a binary frame. */
+function serverSend(ws: MockWS, session: NoiseSession, obj: object): void {
+  const pt = concat(Uint8Array.of(0), utf8.encode(JSON.stringify(obj)));
+  inject(ws, abuf(session.encrypt(pt)));
+}
+
+/** Decrypt every binary frame the client sent, in order, returning the types. */
+function clientControlTypes(ws: MockWS, session: NoiseSession): string[] {
+  const types: string[] = [];
+  for (const f of ws.sent) {
+    if (f instanceof Uint8Array) {
+      const pt = session.decrypt(f).subarray(1);
+      types.push(JSON.parse(new TextDecoder().decode(pt)).type);
+    }
+  }
+  return types;
+}
+
 /** Drive the server side (initiator) of KKpsk2 to transport mode. */
 function completeHandshake(ws: MockWS): NoiseSession {
   const clientInitStr = ws.sent[0] as string;
@@ -139,6 +157,38 @@ describe("SendspinCore encryption wiring", () => {
       ),
     );
     expect(clientHello.type).toBe("client/hello");
+  });
+
+  it("re-runs server/activate after a socket close (reconnect activation reset)", async () => {
+    const ws = new MockWS();
+    const core = new SendspinCore({
+      webSocket: ws as unknown as WebSocket,
+      storage: memStorage(),
+    });
+    await core.connect();
+    const session = completeHandshake(ws);
+
+    serverSend(ws, session, { type: "server/hello", payload: {} });
+    serverSend(ws, session, {
+      type: "server/activate",
+      payload: { activities: ["playback"] },
+    });
+
+    // Socket close -> onTransportClose -> resetActivation (session stays intact).
+    ws.onclose?.();
+
+    // A second activate must re-run (guard was reset), sending client/state again.
+    serverSend(ws, session, {
+      type: "server/activate",
+      payload: { activities: ["playback"] },
+    });
+
+    const states = clientControlTypes(ws, session).filter(
+      (t) => t === "client/state",
+    );
+    expect(states).toHaveLength(2);
+
+    core.disconnect(); // clear the periodic state/time-sync intervals
   });
 
   it("exposes a 43-char pairingPsk that rotates", () => {

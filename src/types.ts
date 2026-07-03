@@ -473,9 +473,6 @@ export interface ReconnectConfig {
  * Configuration for SendspinCore (protocol + decoding, no playback).
  */
 export interface SendspinCoreConfig {
-  /** Unique player identifier. Auto-generated if not provided. */
-  playerId?: string;
-
   /**
    * Base URL of the Sendspin server (e.g., "http://192.168.1.100:8095").
    * Required unless webSocket is provided.

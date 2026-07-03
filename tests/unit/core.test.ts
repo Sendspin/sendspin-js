@@ -61,7 +61,7 @@ describe("SendspinCore (offline)", () => {
   let core: SendspinCore;
 
   beforeEach(() => {
-    core = new SendspinCore({ baseUrl: "http://127.0.0.1:9", playerId: "p" });
+    core = new SendspinCore({ baseUrl: "http://127.0.0.1:9" });
   });
 
   describe("sendCommand guard", () => {
@@ -120,7 +120,7 @@ describe("SendspinCore.trackProgress", () => {
   let nowMs: number;
 
   beforeEach(() => {
-    core = new SendspinCore({ baseUrl: "http://127.0.0.1:9", playerId: "p" });
+    core = new SendspinCore({ baseUrl: "http://127.0.0.1:9" });
     nowMs = 1000;
     vi.spyOn(performance, "now").mockImplementation(() => nowMs);
   });
@@ -221,7 +221,7 @@ describe("SendspinCore.getCurrentServerTimeUs", () => {
   afterEach(() => vi.restoreAllMocks());
 
   it("floors performance.now()*1000 and applies the filter offset", () => {
-    const core = new SendspinCore({ baseUrl: "http://h", playerId: "p" });
+    const core = new SendspinCore({ baseUrl: "http://h" });
     // Seed a known offset on the real time filter via one measurement.
     // First measurement sets offset = measurement directly.
     core._timeFilter.update(7000, 500, 1_000_000);
@@ -266,7 +266,7 @@ describe("SendspinCore URL building", () => {
   });
 
   const urlFor = (baseUrl: string): string => {
-    const core = new SendspinCore({ baseUrl, playerId: "p" });
+    const core = new SendspinCore({ baseUrl });
     void core.connect(); // fire-and-forget; promise never resolves with FakeWS
     return captured[captured.length - 1];
   };
@@ -290,7 +290,7 @@ describe("SendspinCore command + state forwarding", () => {
   let core: SendspinCore;
 
   beforeEach(() => {
-    core = new SendspinCore({ baseUrl: "http://h", playerId: "p" });
+    core = new SendspinCore({ baseUrl: "http://h" });
   });
 
   it("forwards a controller command with command name and params merged", () => {
@@ -335,7 +335,7 @@ describe("SendspinCore.setSyncDelay", () => {
   let core: SendspinCore;
 
   beforeEach(() => {
-    core = new SendspinCore({ baseUrl: "http://h", playerId: "p" });
+    core = new SendspinCore({ baseUrl: "http://h" });
   });
 
   it("clamps the delay, updates getSyncDelayMs, fires callback, and sends state", () => {
@@ -354,7 +354,6 @@ describe("SendspinCore.setSyncDelay", () => {
   it("seeds the initial sync delay from config (clamped)", () => {
     const c2 = new SendspinCore({
       baseUrl: "http://h",
-      playerId: "p",
       syncDelay: 8000,
     });
     expect(c2.getSyncDelayMs()).toBe(5000);
@@ -366,7 +365,6 @@ describe("SendspinCore static delay persistence", () => {
     const storage = makeStorage();
     const core = new SendspinCore({
       baseUrl: "http://h",
-      playerId: "p",
       storage,
     });
 
@@ -381,7 +379,6 @@ describe("SendspinCore static delay persistence", () => {
 
     const core = new SendspinCore({
       baseUrl: "http://h",
-      playerId: "p",
       storage,
     });
 
@@ -394,7 +391,6 @@ describe("SendspinCore static delay persistence", () => {
 
     const core = new SendspinCore({
       baseUrl: "http://h",
-      playerId: "p",
       syncDelay: 100,
       storage,
     });
@@ -405,7 +401,6 @@ describe("SendspinCore static delay persistence", () => {
   it("does not throw or persist when storage is disabled", () => {
     const core = new SendspinCore({
       baseUrl: "http://h",
-      playerId: "p",
       storage: null,
     });
 
@@ -416,7 +411,7 @@ describe("SendspinCore static delay persistence", () => {
 
 describe("SendspinCore.disconnect ordering and idempotency", () => {
   it("resets the time filter on disconnect", () => {
-    const core = new SendspinCore({ baseUrl: "http://h", playerId: "p" });
+    const core = new SendspinCore({ baseUrl: "http://h" });
     core._timeFilter.update(10000, 500, 1_000_000);
     expect(core._timeFilter.is_synchronized).toBe(true);
 
@@ -427,14 +422,14 @@ describe("SendspinCore.disconnect ordering and idempotency", () => {
   });
 
   it("does not send goodbye when never connected", () => {
-    const core = new SendspinCore({ baseUrl: "http://h", playerId: "p" });
+    const core = new SendspinCore({ baseUrl: "http://h" });
     const send = spySend(core);
     core.disconnect("user_request");
     expect(send).not.toHaveBeenCalled();
   });
 
   it("defaults the goodbye reason to restart, but forwards an explicit reason", () => {
-    const core = new SendspinCore({ baseUrl: "http://h", playerId: "p" });
+    const core = new SendspinCore({ baseUrl: "http://h" });
     const send = spySend(core);
     markTransportReady(core);
 
@@ -456,7 +451,7 @@ describe("SendspinCore.disconnect ordering and idempotency", () => {
   });
 
   it("fires onConnectionClose only via the close handler, not on disconnect()", () => {
-    const core = new SendspinCore({ baseUrl: "http://h", playerId: "p" });
+    const core = new SendspinCore({ baseUrl: "http://h" });
     const cb = vi.fn();
     core.onConnectionClose = cb;
     core.disconnect();

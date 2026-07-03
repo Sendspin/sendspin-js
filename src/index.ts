@@ -104,7 +104,6 @@ export class SendspinPlayer {
     // Create core (protocol + decoding). It resolves the effective initial
     // delay, so read it back below for the scheduler's starting value.
     this.core = new SendspinCore({
-      playerId: config.playerId,
       baseUrl: config.baseUrl,
       clientName: config.clientName,
       webSocket: config.webSocket,
@@ -123,6 +122,10 @@ export class SendspinPlayer {
       getExternalVolume: config.getExternalVolume,
       reconnect: config.reconnect,
       onStateChange: config.onStateChange,
+      onPairing: config.onPairing,
+      suite: config.suite,
+      unpairedAccess: config.unpairedAccess,
+      longTermPsks: config.longTermPsks,
     });
 
     const syncDelay = this.core.getSyncDelayMs();
