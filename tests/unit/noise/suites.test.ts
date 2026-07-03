@@ -27,3 +27,33 @@ describe.each(["chacha", "aesgcm"] as const)("suite %s", (id) => {
     );
   });
 });
+
+import { chacha20poly1305 } from "@noble/ciphers/chacha";
+import { gcm } from "@noble/ciphers/aes";
+
+describe("nonce endianness (interop)", () => {
+  const key = new Uint8Array(32).fill(3);
+  const pt = new Uint8Array([9, 9, 9]);
+  const leNonce = new Uint8Array([0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0]);
+  const beNonce = new Uint8Array([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]);
+
+  it("chacha uses a little-endian counter nonce", () => {
+    const our = SUITES.chacha.aeadEncrypt(key, 1n, new Uint8Array(), pt);
+    expect(Array.from(our)).toEqual(
+      Array.from(chacha20poly1305(key, leNonce, new Uint8Array()).encrypt(pt)),
+    );
+    expect(Array.from(our)).not.toEqual(
+      Array.from(chacha20poly1305(key, beNonce, new Uint8Array()).encrypt(pt)),
+    );
+  });
+
+  it("aesgcm uses a big-endian counter nonce", () => {
+    const our = SUITES.aesgcm.aeadEncrypt(key, 1n, new Uint8Array(), pt);
+    expect(Array.from(our)).toEqual(
+      Array.from(gcm(key, beNonce, new Uint8Array()).encrypt(pt)),
+    );
+    expect(Array.from(our)).not.toEqual(
+      Array.from(gcm(key, leNonce, new Uint8Array()).encrypt(pt)),
+    );
+  });
+});

@@ -47,7 +47,7 @@ const dh = (priv: Uint8Array, pub: Uint8Array) =>
   x25519.getSharedSecret(priv, pub);
 const publicKey = (priv: Uint8Array) => x25519.getPublicKey(priv);
 const generateKeypair = () => {
-  const privateKey = x25519.utils.randomPrivateKey();
+  const privateKey = x25519.utils.randomSecretKey();
   return { privateKey, publicKey: x25519.getPublicKey(privateKey) };
 };
 
@@ -58,7 +58,7 @@ export const SUITES: Record<SuiteId, CipherSuite> = {
     dh,
     generateKeypair,
     publicKey,
-    hash: (d) => sha256(d),
+    hash: sha256,
     aeadEncrypt: (k, n, ad, pt) =>
       chacha20poly1305(k, nonceLE(n), ad).encrypt(pt),
     aeadDecrypt: (k, n, ad, ct) =>
@@ -70,7 +70,7 @@ export const SUITES: Record<SuiteId, CipherSuite> = {
     dh,
     generateKeypair,
     publicKey,
-    hash: (d) => sha256(d),
+    hash: sha256,
     aeadEncrypt: (k, n, ad, pt) => gcm(k, nonceBE(n), ad).encrypt(pt),
     aeadDecrypt: (k, n, ad, ct) => gcm(k, nonceBE(n), ad).decrypt(ct),
   },
