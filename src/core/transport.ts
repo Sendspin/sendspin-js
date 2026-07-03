@@ -6,6 +6,8 @@ import { SUITES, SUITE_WIRE_NAME } from "./noise/suites";
 import { HandshakeState, MSG1, MSG2 } from "./noise/handshake";
 import { NoiseSession } from "./noise/session";
 import { base64urlEncode, base64urlDecode } from "./noise/base64url";
+import { authorizeActivate } from "./activate-authorization";
+import type { GoodbyeReason } from "../types";
 
 const utf8 = new TextEncoder();
 const dutf8 = new TextDecoder();
@@ -57,6 +59,7 @@ export class SendspinTransport {
       identity: Identity;
       pskStore: PskStore;
       suiteId: SuiteId;
+      unpairedAccess: boolean;
     },
     protected cb: TransportCallbacks,
   ) {}
@@ -245,7 +248,19 @@ export class SendspinTransport {
       return;
     }
     if (msg.type === "server/activate") {
-      this.handleActivate(msg);
+      this.handleActivate(
+        msg as {
+          type: string;
+          payload: {
+            activities: ("playback" | "pairing" | "management")[];
+            active_roles?: string[];
+          };
+        },
+      );
+      return;
+    }
+    if (msg.type === "server/unpair") {
+      this.handleUnpair();
       return;
     }
     this.cb.onControlMessage(msg);
@@ -284,11 +299,41 @@ export class SendspinTransport {
     this.lastHandshakeHash = newHs.handshakeHash;
   }
 
-  /** Authorization is inserted here in Task 10. Base: flush + forward. */
-  protected handleActivate(msg: { type: string; payload?: unknown }): void {
+  protected handleActivate(msg: {
+    type: string;
+    payload: {
+      activities: ("playback" | "pairing" | "management")[];
+      active_roles?: string[];
+    };
+  }): void {
+    const result = authorizeActivate(
+      this.matched!.category,
+      msg.payload.activities,
+      msg.payload.active_roles,
+      this.deps.unpairedAccess,
+    );
+    if (!result.ok) {
+      this.sendGoodbyeAndClose(result.goodbye);
+      return;
+    }
     this.clearTimeout();
     this.flushOutbound();
     this.cb.onControlMessage(msg);
+  }
+
+  private handleUnpair(): void {
+    if (this.matched) this.deps.pskStore.removeByPskId(this.matched.pskId);
+    this.sendGoodbyeAndClose("unpaired");
+  }
+
+  private sendGoodbyeAndClose(reason: GoodbyeReason): void {
+    try {
+      this.encryptSend({ type: "client/goodbye", payload: { reason } });
+    } catch {
+      /* best effort */
+    }
+    // close() disconnects the socket; core cleans up via wsManager's onclose handler.
+    this.close();
   }
 
   private flushOutbound(): void {

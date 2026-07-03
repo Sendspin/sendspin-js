@@ -9,7 +9,11 @@ import {
   base64urlEncode,
   base64urlDecode,
 } from "../../src/core/noise/base64url";
-import { SENTINEL_PSK, SENTINEL_PSK_ID } from "../../src/core/noise/constants";
+import {
+  SENTINEL_PSK,
+  SENTINEL_PSK_ID,
+  pskId,
+} from "../../src/core/noise/constants";
 
 const utf8 = new TextEncoder();
 const concat = (a: Uint8Array, b: Uint8Array) => {
@@ -49,7 +53,7 @@ export function harness() {
   };
   const transport = new SendspinTransport(
     ws as never,
-    { identity, pskStore: store, suiteId: "chacha" },
+    { identity, pskStore: store, suiteId: "chacha", unpairedAccess: true },
     cb,
   );
   return { ws, identity, store, cb, transport };
@@ -105,5 +109,59 @@ export function completeHandshake(h: ReturnType<typeof harness>) {
     server,
     clientId,
     priorHash: ini.handshakeHash,
+  };
+}
+
+/**
+ * Complete a full handshake authenticated by `psk`, added to the client's store
+ * beforehand (bound to a fixed server keypair's server_id when `bound` is true).
+ */
+export function completeHandshakeWithPsk(
+  h: ReturnType<typeof harness>,
+  psk: Uint8Array,
+  bound: boolean,
+) {
+  const server = SUITES.chacha.generateKeypair();
+  const serverId = base64urlEncode(server.publicKey);
+  h.store.addLongTerm(psk, bound ? serverId : undefined);
+
+  h.transport.start();
+  const clientInitStr = h.ws.sentText[0];
+  const clientId = JSON.parse(clientInitStr).payload.client_id as string;
+
+  const serverInitStr = JSON.stringify({
+    type: "server/init",
+    payload: { server_id: serverId, version: 1 },
+  });
+  h.transport.handleRaw({ data: serverInitStr } as MessageEvent);
+
+  const prologue = concat(
+    utf8.encode(clientInitStr),
+    utf8.encode(serverInitStr),
+  );
+  const ini = new HandshakeState({
+    suite: SUITES.chacha,
+    role: "initiator",
+    prologue,
+    s: server,
+    rs: base64urlDecode(clientId),
+    psk,
+  });
+  const m1 = ini.writeMessage(
+    MSG1,
+    utf8.encode(JSON.stringify({ psk_id: pskId(psk) })),
+  );
+  h.transport.handleRaw({
+    data: JSON.stringify({
+      type: "noise/handshake",
+      payload: { data: base64urlEncode(m1) },
+    }),
+  } as MessageEvent);
+
+  const m2str = h.ws.sentText[h.ws.sentText.length - 1];
+  const m2 = base64urlDecode(JSON.parse(m2str).payload.data);
+  ini.readMessage(MSG2, m2);
+  return {
+    serverSession: new NoiseSession("initiator", ini.split()),
   };
 }
