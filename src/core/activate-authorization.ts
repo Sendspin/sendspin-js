@@ -28,6 +28,27 @@ function isAllowedActivitySet(
   return false;
 }
 
+/**
+ * Is the WHOLE activation admissible for the given unpairedAccess: activities allowed AND
+ * (if active_roles present) the connection is playback-capable (activities + 'playback' allowed)?
+ */
+function isAdmissible(
+  category: PskCategory,
+  set: Set<Activity>,
+  hasActiveRoles: boolean,
+  unpairedAccess: boolean,
+): boolean {
+  if (!isAllowedActivitySet(category, set, unpairedAccess)) return false;
+  if (hasActiveRoles) {
+    const withPlayback = new Set(set);
+    withPlayback.add("playback");
+    if (!isAllowedActivitySet(category, withPlayback, unpairedAccess)) {
+      return false;
+    }
+  }
+  return true;
+}
+
 export function authorizeActivate(
   category: PskCategory,
   activities: Activity[],
@@ -35,31 +56,20 @@ export function authorizeActivate(
   unpairedAccess: boolean,
 ): AuthResult {
   const set = new Set(activities);
+  const hasActiveRoles = !!activeRoles && activeRoles.length > 0;
 
-  if (!isAllowedActivitySet(category, set, unpairedAccess)) {
-    // pairing_required only when enabling unpaired access would make it admissible
-    // (i.e. a Sentinel ['playback'] activation blocked solely by unpairedAccess=false).
-    if (
-      category === "sentinel" &&
-      set.size === 1 &&
-      set.has("playback") &&
-      !unpairedAccess
-    ) {
-      return { ok: false, goodbye: "pairing_required" };
-    }
-    return { ok: false, goodbye: "unauthorized" };
+  if (isAdmissible(category, set, hasActiveRoles, unpairedAccess)) {
+    return { ok: true };
   }
-
-  // Only a playback-capable connection may carry non-empty active_roles. A connection
-  // is playback-capable when its activities extended with 'playback' are still an
-  // allowed set for the matched PSK.
-  if (activeRoles && activeRoles.length > 0) {
-    const withPlayback = new Set(set);
-    withPlayback.add("playback");
-    if (!isAllowedActivitySet(category, withPlayback, unpairedAccess)) {
-      return { ok: false, goodbye: "unauthorized" };
-    }
+  // pairing_required exactly when the matched PSK is Sentinel and enabling unpaired
+  // access would make the whole activation admissible. Covers both a ['playback']
+  // activation AND an active_roles-gated one blocked solely by unpairedAccess=false.
+  if (
+    category === "sentinel" &&
+    !unpairedAccess &&
+    isAdmissible(category, set, hasActiveRoles, true)
+  ) {
+    return { ok: false, goodbye: "pairing_required" };
   }
-
-  return { ok: true };
+  return { ok: false, goodbye: "unauthorized" };
 }

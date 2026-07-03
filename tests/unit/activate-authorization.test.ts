@@ -43,11 +43,16 @@ describe("authorizeActivate", () => {
     expect(
       authorizeActivate("long_term", ["pairing"], ["player@v1"], true),
     ).toEqual({ ok: false, goodbye: "unauthorized" });
-    // Sentinel with unpaired access disabled is not playback-capable.
+  });
+
+  it("returns pairing_required when enabling unpaired access would admit the active_roles activation", () => {
     expect(authorizeActivate("sentinel", [], ["player@v1"], false)).toEqual({
       ok: false,
-      goodbye: "unauthorized",
+      goodbye: "pairing_required",
     });
+    expect(
+      authorizeActivate("sentinel", ["playback"], ["player@v1"], false),
+    ).toEqual({ ok: false, goodbye: "pairing_required" });
   });
 
   it("allows active_roles on a playback-capable connection", () => {
