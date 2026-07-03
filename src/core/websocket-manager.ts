@@ -289,6 +289,25 @@ export class WebSocketManager {
     }
   }
 
+  // Send a cleartext text frame (handshake only).
+  sendText(data: string): void {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(data);
+    } else {
+      console.warn("Sendspin: Cannot send text, WebSocket not connected");
+    }
+  }
+
+  // Send a binary frame (Noise transport ciphertext).
+  sendBinary(data: Uint8Array): void {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      // ponytail: TS types Uint8Array as ArrayBufferLike, DOM lib wants ArrayBuffer.
+      this.ws.send(data as Uint8Array<ArrayBuffer>);
+    } else {
+      console.warn("Sendspin: Cannot send binary, WebSocket not connected");
+    }
+  }
+
   // Check if WebSocket is connected
   isConnected(): boolean {
     return this.ws !== null && this.ws.readyState === WebSocket.OPEN;
