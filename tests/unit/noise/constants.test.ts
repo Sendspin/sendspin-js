@@ -1,7 +1,14 @@
 import { describe, it, expect } from "vitest";
 import { bytesToHex } from "@noble/hashes/utils";
-import { SENTINEL_PSK, SENTINEL_PSK_ID, pskId } from "../../../src/core/noise/constants";
-import { base64urlEncode, base64urlDecode } from "../../../src/core/noise/base64url";
+import {
+  SENTINEL_PSK,
+  SENTINEL_PSK_ID,
+  pskId,
+} from "../../../src/core/noise/constants";
+import {
+  base64urlEncode,
+  base64urlDecode,
+} from "../../../src/core/noise/base64url";
 
 describe("noise constants", () => {
   it("Sentinel PSK matches the spec constant", () => {

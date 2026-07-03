@@ -14,8 +14,18 @@ export interface CipherSuite {
   generateKeypair(): { privateKey: Uint8Array; publicKey: Uint8Array };
   publicKey(privateKey: Uint8Array): Uint8Array;
   /** AEAD encrypt: 32-byte key, 64-bit counter n, associated data, plaintext. */
-  aeadEncrypt(key: Uint8Array, n: bigint, ad: Uint8Array, plaintext: Uint8Array): Uint8Array;
-  aeadDecrypt(key: Uint8Array, n: bigint, ad: Uint8Array, ciphertext: Uint8Array): Uint8Array;
+  aeadEncrypt(
+    key: Uint8Array,
+    n: bigint,
+    ad: Uint8Array,
+    plaintext: Uint8Array,
+  ): Uint8Array;
+  aeadDecrypt(
+    key: Uint8Array,
+    n: bigint,
+    ad: Uint8Array,
+    ciphertext: Uint8Array,
+  ): Uint8Array;
   hash(data: Uint8Array): Uint8Array;
 }
 
@@ -33,7 +43,8 @@ function nonceBE(n: bigint): Uint8Array {
   return nonce;
 }
 
-const dh = (priv: Uint8Array, pub: Uint8Array) => x25519.getSharedSecret(priv, pub);
+const dh = (priv: Uint8Array, pub: Uint8Array) =>
+  x25519.getSharedSecret(priv, pub);
 const publicKey = (priv: Uint8Array) => x25519.getPublicKey(priv);
 const generateKeypair = () => {
   const privateKey = x25519.utils.randomPrivateKey();
@@ -48,8 +59,10 @@ export const SUITES: Record<SuiteId, CipherSuite> = {
     generateKeypair,
     publicKey,
     hash: (d) => sha256(d),
-    aeadEncrypt: (k, n, ad, pt) => chacha20poly1305(k, nonceLE(n), ad).encrypt(pt),
-    aeadDecrypt: (k, n, ad, ct) => chacha20poly1305(k, nonceLE(n), ad).decrypt(ct),
+    aeadEncrypt: (k, n, ad, pt) =>
+      chacha20poly1305(k, nonceLE(n), ad).encrypt(pt),
+    aeadDecrypt: (k, n, ad, ct) =>
+      chacha20poly1305(k, nonceLE(n), ad).decrypt(ct),
   },
   aesgcm: {
     name: "AESGCM",

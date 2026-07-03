@@ -4,7 +4,9 @@ import { base64urlEncode } from "./base64url";
 const enc = new TextEncoder();
 
 /** SHA-256("sendspin-sentinel-psk-v1"). */
-export const SENTINEL_PSK: Uint8Array = sha256(enc.encode("sendspin-sentinel-psk-v1"));
+export const SENTINEL_PSK: Uint8Array = sha256(
+  enc.encode("sendspin-sentinel-psk-v1"),
+);
 
 const PSK_ID_LABEL = enc.encode("sendspin-psk-id-v1");
 
