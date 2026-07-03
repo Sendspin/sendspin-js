@@ -46,7 +46,6 @@ function harness() {
     onHandshakeComplete: vi.fn(),
     onControlMessage: vi.fn(),
     onBinaryMessage: vi.fn(),
-    onClose: vi.fn(),
   };
   const transport = new SendspinTransport(
     ws as never,

@@ -11,6 +11,8 @@ const utf8 = new TextEncoder();
 const dutf8 = new TextDecoder();
 const HANDSHAKE_TIMEOUT_MS = 30000;
 const MAX_TRANSPORT_PLAINTEXT = 65519; // 65535 - 16 (tag); includes the type byte
+// Cap total reassembled size so an endless run of fragment-more frames can't exhaust memory.
+const MAX_REASSEMBLY_BYTES = 4 * 1024 * 1024;
 
 type State = "idle" | "await_server_init" | "await_noise1" | "transport";
 
@@ -25,7 +27,6 @@ export interface TransportCallbacks {
   onHandshakeComplete(info: HandshakeInfo): void;
   onControlMessage(msg: { type: string; payload?: unknown }): void;
   onBinaryMessage(bytes: Uint8Array): void;
-  onClose(): void;
 }
 
 function concat(a: Uint8Array, b: Uint8Array): Uint8Array {
@@ -44,7 +45,8 @@ export class SendspinTransport {
   private rawClientInit = new Uint8Array(0);
   private rawServerInit = new Uint8Array(0);
   private timeout: ReturnType<typeof setTimeout> | null = null;
-  private frag: { origType: number; parts: Uint8Array[] } | null = null;
+  private frag: { origType: number; parts: Uint8Array[]; size: number } | null =
+    null;
 
   constructor(
     private wsManager: WebSocketManager,
@@ -196,16 +198,27 @@ export class SendspinTransport {
 
   private handleFragment(type: number, body: Uint8Array): void {
     if (type === 2 && this.frag === null) {
-      this.frag = { origType: body[0], parts: [body.subarray(1)] };
+      const first = body.subarray(1);
+      this.frag = { origType: body[0], parts: [first], size: first.length };
       return;
     }
     if (type === 2) {
       this.frag!.parts.push(body);
+      this.frag!.size += body.length;
+      if (this.frag!.size > MAX_REASSEMBLY_BYTES) {
+        this.frag = null;
+        return this.fail();
+      }
       return;
     }
     // type === 3: closing frame
     if (this.frag === null) return this.fail();
     this.frag.parts.push(body);
+    this.frag.size += body.length;
+    if (this.frag.size > MAX_REASSEMBLY_BYTES) {
+      this.frag = null;
+      return this.fail();
+    }
     const origType = this.frag.origType;
     const data = this.frag.parts.reduce(
       (acc, p) => concat(acc, p),
