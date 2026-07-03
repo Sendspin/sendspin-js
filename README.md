@@ -148,6 +148,45 @@ player.setRequiredLeadTimeMs(300);
 player.setMinBufferMs(1500);
 ```
 
+### Encryption and pairing
+
+Every connection is encrypted (Noise KKpsk2). By default the SDK connects
+with an unpaired (Sentinel-PSK) identity; pair with a server to upgrade to a
+trusted, per-server long-term PSK.
+
+```typescript
+const player = new SendspinPlayer({
+  baseUrl: 'http://your-server:8095',
+  suite: 'chacha',            // "chacha" (default) or "aesgcm"
+  unpairedAccess: true,       // admit unpaired playback; default true
+  longTermPsks: [
+    { psk: 'base64url-psk', serverId: 'optional-server-id' },
+  ],
+  onPairing: (event, detail) => {
+    // event: "started" | "finalized" | "aborted"
+    console.log('Pairing:', event, detail);
+  },
+});
+
+await player.connect();
+
+console.log('Client ID:', player.clientId);      // 43-char base64url pubkey
+console.log('Pairing PSK:', player.pairingPsk);  // base64url string, or null without storage
+
+// Rotate the Pairing PSK (e.g. if it may have leaked)
+const newPsk = player.rotatePairingPsk();
+```
+
+Enter `player.pairingPsk` into the server to pair this client as trusted.
+Identity and pairing require `storage` (defaults to `localStorage`); without
+it, `clientId` is still generated per session but `pairingPsk` and
+`rotatePairingPsk()` return `null`.
+
+The Sendspin spec does not yet define a QR/URI payload format for pairing
+credentials, so the SDK only exposes `clientId` and `pairingPsk` as plain
+strings. A QR encoding can be added once that format is confirmed with the
+server (and Music Assistant).
+
 ### Core + scheduler as separate layers
 
 Apps that need the decoded PCM stream (e.g. visualizers) can use

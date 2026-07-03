@@ -56,6 +56,11 @@ const groupVolumeSlider = document.getElementById("group-volume-slider");
 const groupVolumeValue = document.getElementById("group-volume-value");
 const groupMuteBtn = document.getElementById("group-mute-btn");
 const groupMuteIcon = document.getElementById("group-mute-icon");
+const clientIdEl = document.getElementById("client-id");
+const pairingPskEl = document.getElementById("pairing-psk");
+const rotatePskBtn = document.getElementById("rotate-psk");
+const trustLevelEl = document.getElementById("trust-level");
+const unpairedAccessCheckbox = document.getElementById("unpaired-access");
 
 // Status elements
 const connectionStatus = document.getElementById("connection-status");
@@ -224,6 +229,33 @@ function resetStatusDisplay() {
   progressFill.style.width = "0%";
   progressCurrent.textContent = "--:--";
   progressDuration.textContent = "--:--";
+  clientIdEl.textContent = "-";
+  pairingPskEl.textContent = "-";
+  trustLevelEl.textContent = "-";
+}
+
+/**
+ * Populate the pairing panel from the current player instance
+ */
+function updatePairingDisplay() {
+  clientIdEl.textContent = player.clientId;
+  pairingPskEl.textContent = player.pairingPsk ?? "(no storage)";
+}
+
+/**
+ * Handle Pairing PSK lifecycle events from the SDK
+ */
+function onPairing(event, detail) {
+  console.log("Pairing event:", event, detail ?? "");
+  if (event === "started") {
+    trustLevelEl.textContent = "pairing...";
+  } else if (event === "finalized") {
+    trustLevelEl.textContent = "user (just paired)";
+    showToast("Pairing complete", "success");
+  } else if (event === "aborted") {
+    trustLevelEl.textContent = `aborted (${detail ?? "unknown"})`;
+    showToast(`Pairing aborted: ${detail ?? "unknown"}`, "error");
+  }
 }
 
 /**
@@ -611,10 +643,13 @@ async function connect() {
         syncDelayInput.value = delayMs;
         showToast(`Server set sync delay to ${delayMs}ms`, "info");
       },
+      unpairedAccess: unpairedAccessCheckbox.checked,
+      onPairing,
       onStateChange,
     });
 
     await player.connect();
+    updatePairingDisplay();
 
     // Apply saved volume
     player.setVolume(savedVolume);
@@ -822,6 +857,12 @@ function init() {
   groupMuteBtn.addEventListener("click", () => {
     const currentMuted = groupMuteIcon.textContent === "🔇";
     player.sendCommand("mute", { mute: !currentMuted });
+  });
+  rotatePskBtn.addEventListener("click", () => {
+    if (!player) return;
+    player.rotatePairingPsk();
+    pairingPskEl.textContent = player.pairingPsk ?? "(no storage)";
+    showToast("Pairing PSK rotated", "success");
   });
 
   // Transport control event listeners
