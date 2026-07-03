@@ -28,11 +28,19 @@ const PCM_FORMAT: StreamFormat = {
   bit_depth: 16,
 };
 
+// Capture control messages by replacing the transport's sendControl (the
+// ProtocolHandler's sender), bypassing the not-ready guard for offline tests.
 function spySend(core: SendspinCore): ReturnType<typeof vi.fn> {
   const send = vi.fn();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (core as any).wsManager.send = send;
+  (core as any).transport.sendControl = send;
   return send;
+}
+
+// Force the transport into transport mode so disconnect() sends a goodbye.
+function markTransportReady(core: SendspinCore): void {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (core as any).transport.state = "transport";
 }
 
 function seedMetadata(
@@ -428,8 +436,7 @@ describe("SendspinCore.disconnect ordering and idempotency", () => {
   it("defaults the goodbye reason to restart, but forwards an explicit reason", () => {
     const core = new SendspinCore({ baseUrl: "http://h", playerId: "p" });
     const send = spySend(core);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (core as any).wsManager.isConnected = () => true;
+    markTransportReady(core);
 
     core.disconnect();
     expect(send).toHaveBeenLastCalledWith(
@@ -457,23 +464,12 @@ describe("SendspinCore.disconnect ordering and idempotency", () => {
   });
 });
 
-describe("SendspinCore id fallbacks", () => {
-  it("generates a player_id and client_name when none provided", () => {
+describe("SendspinCore identity fallbacks", () => {
+  it("derives a 43-char base64url clientId and a random clientName", () => {
     const core = new SendspinCore({ baseUrl: "http://h" });
+    expect(core.clientId).toHaveLength(43);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const cfg = (core as any).config;
-    expect(cfg.playerId).toMatch(/^sendspin-js-[0-9a-z]{1,4}$/);
-    expect(cfg.clientName).toMatch(/^Sendspin JS Client \([0-9a-z]{1,4}\)$/);
-  });
-
-  it("falls back gracefully even when Math.random yields 0 (empty random suffix)", () => {
-    // Math.random()=0 -> (0).toString(36).substring(2,6) === "" -> id "sendspin-js-".
-    const spy = vi.spyOn(Math, "random").mockReturnValue(0);
-    const core = new SendspinCore({ baseUrl: "http://h" });
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const cfg = (core as any).config;
-    spy.mockRestore();
-    // Documents the degenerate id rather than asserting it is "good".
-    expect(cfg.playerId).toBe("sendspin-js-");
+    expect(cfg.clientName).toMatch(/^Sendspin JS Client \(/);
   });
 });

@@ -14,6 +14,12 @@ import { WebSocketManager } from "./websocket-manager";
 import { SendspinTimeFilter } from "./time-filter";
 import { StaticDelayStore } from "./static-delay-store";
 import { clampSyncDelayMs } from "../sync-delay";
+import { Identity } from "./noise/identity";
+import { PskStore } from "./noise/psk";
+import { SendspinTransport } from "./transport";
+import type { HandshakeInfo } from "./transport";
+import { PairingManager } from "./pairing";
+import { base64urlEncode, base64urlDecode } from "./noise/base64url";
 import type {
   SendspinCoreConfig,
   DecodedAudioChunk,
@@ -42,6 +48,12 @@ export class SendspinCore implements StreamHandler {
   private _syncDelayMs: number;
   private delayStore: StaticDelayStore;
 
+  private identity: Identity;
+  private pskStore: PskStore;
+  private transport: SendspinTransport;
+  private pairing: PairingManager;
+  private handshakeInfo: HandshakeInfo | null = null;
+
   // Stream events — consumers (e.g., SendspinPlayer) subscribe to these
   private _onAudioData?: (chunk: DecodedAudioChunk) => void;
   private _onStreamStart?: (
@@ -56,11 +68,10 @@ export class SendspinCore implements StreamHandler {
   private _onConnectionClose?: () => void;
 
   constructor(config: SendspinCoreConfig) {
-    const randomId = generateRandomId();
-    const playerId = config.playerId ?? `sendspin-js-${randomId}`;
-    const clientName = config.clientName ?? `Sendspin JS Client (${randomId})`;
+    const clientName =
+      config.clientName ?? `Sendspin JS Client (${generateRandomId()})`;
 
-    this.config = { ...config, playerId, clientName };
+    this.config = { ...config, clientName };
 
     // Initial delay precedence: explicit config, then persisted, then default.
     this.delayStore = new StaticDelayStore(config.storage ?? null);
@@ -79,9 +90,48 @@ export class SendspinCore implements StreamHandler {
 
     this.wsManager = new WebSocketManager(config.reconnect);
 
-    this.protocolHandler = new ProtocolHandler(
-      playerId,
+    this.identity = Identity.loadOrCreate(config.storage ?? null);
+    this.pskStore = new PskStore(config.storage ?? null);
+    for (const r of config.longTermPsks ?? []) {
+      this.pskStore.addLongTerm(base64urlDecode(r.psk), r.serverId);
+    }
+
+    this.transport = new SendspinTransport(
       this.wsManager,
+      {
+        identity: this.identity,
+        pskStore: this.pskStore,
+        suiteId: config.suite ?? "chacha",
+        unpairedAccess: config.unpairedAccess ?? true,
+      },
+      {
+        onHandshakeComplete: (info) => {
+          this.handshakeInfo = info;
+        },
+        onControlMessage: (msg) => this.routeControl(msg),
+        onBinaryMessage: (bytes) =>
+          this.handleBinaryMessage(bytes.buffer as ArrayBuffer),
+      },
+    );
+
+    this.pairing = new PairingManager({
+      sendControl: (m) => this.transport.sendControl(m),
+      close: () => this.transport.close(),
+      pskStore: this.pskStore,
+      serverId: () => this.handshakeInfo?.serverId ?? "",
+      matchedCategory: () => this.handshakeInfo?.category ?? "sentinel",
+      onEvent: (e, d) => this.config.onPairing?.(e, d),
+    });
+
+    const helloContext = {
+      trustLevel: () => this.handshakeInfo?.trustLevel ?? "none",
+      pairingAvailable: () => this.identity.persistent,
+      unpairedAccess: config.unpairedAccess ?? true,
+    };
+
+    this.protocolHandler = new ProtocolHandler(
+      this.transport,
+      helloContext,
       this, // this class implements StreamHandler
       this.stateManager,
       this.timeFilter,
@@ -97,6 +147,41 @@ export class SendspinCore implements StreamHandler {
         getExternalVolume: config.getExternalVolume,
       },
     );
+  }
+
+  // Route decrypted control messages from the transport. Pairing consumes its
+  // own activate/finalize/abort; everything else goes to the protocol handler.
+  private routeControl(msg: { type: string; payload?: unknown }): void {
+    if (msg.type === "server/activate") {
+      const p = (msg.payload ?? {}) as {
+        activities?: string[];
+        selected_pair_method?: string;
+      };
+      const consumed = this.pairing.onActivate(
+        p.activities ?? [],
+        p.selected_pair_method,
+      );
+      if (!consumed) this.protocolHandler.handleServerMessage(msg as never);
+      return;
+    }
+    if (msg.type === "server/pair-finalize")
+      return this.pairing.onPairFinalize();
+    if (msg.type === "pair/abort") {
+      return this.pairing.onAbort(
+        ((msg.payload ?? {}) as { reason?: string }).reason ?? "",
+      );
+    }
+    this.protocolHandler.handleServerMessage(msg as never);
+  }
+
+  private onTransportClose(): void {
+    this.protocolHandler.stopTimeSync();
+    this.protocolHandler.resetActivation();
+    // Stop periodic state-update sends so they don't spam
+    // "WebSocket not connected" warnings after the transport is gone.
+    this.stateManager.clearStateUpdateInterval();
+    console.log("Sendspin: Connection closed");
+    this._onConnectionClose?.();
   }
 
   // ========================================
@@ -187,23 +272,15 @@ export class SendspinCore implements StreamHandler {
   async connect(): Promise<void> {
     const onOpen = () => {
       this._onConnectionOpen?.();
-      console.log("Sendspin: Using player_id:", this.config.playerId);
-      this.protocolHandler.sendClientHello();
+      this.transport.start();
     };
     const onMessage = (event: MessageEvent) => {
-      this.protocolHandler.handleMessage(event);
+      this.transport.handleRaw(event);
     };
     const onError = (error: Event) => {
       console.error("Sendspin: WebSocket error", error);
     };
-    const onClose = () => {
-      this.protocolHandler.stopTimeSync();
-      // Stop periodic state-update sends so they don't spam
-      // "WebSocket not connected" warnings after the transport is gone.
-      this.stateManager.clearStateUpdateInterval();
-      console.log("Sendspin: Connection closed");
-      this._onConnectionClose?.();
-    };
+    const onClose = () => this.onTransportClose();
 
     if (this.config.webSocket) {
       // Adopt externally-managed WebSocket
@@ -247,7 +324,7 @@ export class SendspinCore implements StreamHandler {
   }
 
   disconnect(reason: GoodbyeReason = "restart"): void {
-    if (this.wsManager.isConnected()) {
+    if (this.transport.ready) {
       this.protocolHandler.sendGoodbye(reason);
     }
     this.protocolHandler.stopTimeSync();
@@ -340,6 +417,27 @@ export class SendspinCore implements StreamHandler {
 
   get isConnected(): boolean {
     return this.wsManager.isConnected();
+  }
+
+  // ========================================
+  // Identity / pairing
+  // ========================================
+
+  get clientId(): string {
+    return this.identity.clientId;
+  }
+
+  /** The client's Pairing PSK (base64url), for the operator to enter into the server. Null without storage. */
+  get pairingPsk(): string | null {
+    return this.identity.persistent
+      ? base64urlEncode(this.pskStore.getOrCreatePairingPsk())
+      : null;
+  }
+
+  rotatePairingPsk(): string | null {
+    if (!this.identity.persistent) return null;
+    this.pskStore.rotatePairingPsk();
+    return this.pairingPsk;
   }
 
   get timeSyncInfo(): { synced: boolean; offset: number; error: number } {

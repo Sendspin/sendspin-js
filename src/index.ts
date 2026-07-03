@@ -332,6 +332,21 @@ export class SendspinPlayer {
     return this.core.isConnected;
   }
 
+  /** The client's stable identity id (base64url X25519 public key). */
+  get clientId(): string {
+    return this.core.clientId;
+  }
+
+  /** The client's Pairing PSK (base64url) for the operator to enter server-side. Null without storage. */
+  get pairingPsk(): string | null {
+    return this.core.pairingPsk;
+  }
+
+  /** Rotate the Pairing PSK, returning the new value (null without storage). */
+  rotatePairingPsk(): string | null {
+    return this.core.rotatePairingPsk();
+  }
+
   // Get current correction mode
   get correctionMode(): CorrectionMode {
     return this.scheduler.correctionMode;

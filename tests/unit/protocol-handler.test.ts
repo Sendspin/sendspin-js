@@ -305,6 +305,15 @@ describe("ProtocolHandler extra", () => {
       activate(handler);
       expect(lastSent(send, "client/state")).toBeUndefined();
     });
+
+    it("re-sends the initial client/state on activate after resetActivation", () => {
+      const handler = makeHandler();
+      activate(handler);
+      send.mockClear();
+      handler.resetActivation();
+      activate(handler);
+      expect(lastSent(send, "client/state")).toBeDefined();
+    });
   });
 
   describe("sendStateUpdate message shape (spec client/state player object)", () => {

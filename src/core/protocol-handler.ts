@@ -115,7 +115,7 @@ export class ProtocolHandler {
   }
 
   // Handle server messages
-  private handleServerMessage(message: ServerMessage): void {
+  handleServerMessage(message: ServerMessage): void {
     switch (message.type) {
       case "server/hello":
         this.handleServerHello();
@@ -192,6 +192,12 @@ export class ProtocolHandler {
 
   stopTimeSync(): void {
     this.timeSyncManager.stop();
+  }
+
+  // Clear the activate guard so the next server/activate (e.g. after a
+  // reconnect on a reused handler) restarts time-sync and state updates.
+  resetActivation(): void {
+    this.activated = false;
   }
 
   private handleStreamStart(message: StreamStart): void {

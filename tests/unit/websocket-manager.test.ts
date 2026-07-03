@@ -6,7 +6,6 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { WebSocketManager } from "../../src/core/websocket-manager";
-import type { ClientMessage } from "../../src/types";
 
 class FakeWebSocket {
   static CONNECTING = 0;
@@ -167,12 +166,6 @@ class RichFakeWebSocket {
   }
 }
 
-const sampleMsg: ClientMessage = {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  type: "client/goodbye" as any,
-  payload: { reason: "shutdown" },
-} as ClientMessage;
-
 describe("WebSocketManager extra", () => {
   let mgr: WebSocketManager;
   const originalWebSocket = globalThis.WebSocket;
@@ -189,32 +182,6 @@ describe("WebSocketManager extra", () => {
     mgr.disconnect();
     globalThis.WebSocket = originalWebSocket;
     vi.useRealTimers();
-  });
-
-  describe("send", () => {
-    it("serializes the message as JSON when the socket is OPEN", async () => {
-      const p = mgr.connect("ws://host/sendspin");
-      RichFakeWebSocket.instances[0].fireOpen();
-      await p;
-
-      mgr.send(sampleMsg);
-      expect(RichFakeWebSocket.instances[0].sent).toEqual([
-        JSON.stringify(sampleMsg),
-      ]);
-    });
-
-    it("drops the message (no send) when the socket is not OPEN", async () => {
-      const p = mgr.connect("ws://host/sendspin");
-      // still CONNECTING — not OPEN
-      mgr.send(sampleMsg);
-      expect(RichFakeWebSocket.instances[0].sent).toEqual([]);
-      RichFakeWebSocket.instances[0].fireOpen();
-      await p;
-    });
-
-    it("does not throw when send is called with no socket", () => {
-      expect(() => mgr.send(sampleMsg)).not.toThrow();
-    });
   });
 
   describe("message / error handler wiring on connect()", () => {

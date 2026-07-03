@@ -1,4 +1,4 @@
-import type { ClientMessage, ReconnectConfig } from "../types";
+import type { ReconnectConfig } from "../types";
 
 export class WebSocketManager {
   private ws: WebSocket | null = null;
@@ -277,15 +277,6 @@ export class WebSocketManager {
     if (this.ws) {
       this.ws.close();
       this.ws = null;
-    }
-  }
-
-  // Send message to server (JSON)
-  send(message: ClientMessage): void {
-    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-      this.ws.send(JSON.stringify(message));
-    } else {
-      console.warn("Sendspin: Cannot send message, WebSocket not connected");
     }
   }
 

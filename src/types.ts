@@ -607,6 +607,12 @@ export interface SendspinCoreConfig {
    */
   longTermPsks?: Array<{ psk: string; serverId?: string }>;
 
+  /** Callback for Pairing PSK lifecycle events. */
+  onPairing?: (
+    event: "started" | "finalized" | "aborted",
+    detail?: string,
+  ) => void;
+
   /** Callback when player state changes (local or from server). */
   onStateChange?: (state: {
     isPlaying: boolean;
