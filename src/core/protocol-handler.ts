@@ -280,10 +280,11 @@ export class ProtocolHandler {
     const hello: ClientHello = {
       type: "client/hello" as MessageType.CLIENT_HELLO,
       payload: {
-        client_id: this.playerId,
         name: this.clientName,
-        version: 1,
         supported_roles: ["player@v1", "controller@v1", "metadata@v1"],
+        // Placeholder until Noise handshake wiring replaces client/hello with client/init.
+        trust_level: "none",
+        unpaired_access: { enabled: true },
         device_info: {
           product_name: "Web Browser",
           manufacturer:

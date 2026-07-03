@@ -211,9 +211,7 @@ describe("ProtocolHandler extra", () => {
 
       const hello = lastSent(send, "client/hello")!;
       const payload = hello.payload as Record<string, unknown>;
-      expect(payload.client_id).toBe("player-1");
       expect(payload.name).toBe("Living Room");
-      expect(payload.version).toBe(1);
       expect(payload.supported_roles).toContain("player@v1");
 
       const support = payload["player@v1_support"] as Record<string, unknown>;

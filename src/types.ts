@@ -15,6 +15,14 @@ export enum MessageType {
   STREAM_REQUEST_FORMAT = "stream/request-format",
   STREAM_END = "stream/end",
   GROUP_UPDATE = "group/update",
+  CLIENT_INIT = "client/init",
+  SERVER_INIT = "server/init",
+  NOISE_HANDSHAKE = "noise/handshake",
+  SERVER_ACTIVATE = "server/activate",
+  CLIENT_PAIR_FINALIZE = "client/pair-finalize",
+  SERVER_PAIR_FINALIZE = "server/pair-finalize",
+  PAIR_ABORT = "pair/abort",
+  SERVER_UNPAIR = "server/unpair",
 }
 
 /**
@@ -23,12 +31,20 @@ export enum MessageType {
  * - 'shutdown': Client is shutting down
  * - 'restart': Client is restarting and will reconnect
  * - 'user_request': User explicitly requested to disconnect
+ * - 'unauthorized': Client failed authentication/pairing
+ * - 'pairing_required': Server requires pairing before continuing
+ * - 'concurrent_attempt': Another pairing attempt is already in progress
+ * - 'unpaired': Server unpaired the client
  */
 export type GoodbyeReason =
   | "another_server"
   | "shutdown"
   | "restart"
-  | "user_request";
+  | "user_request"
+  | "unauthorized"
+  | "pairing_required"
+  | "concurrent_attempt"
+  | "unpaired";
 
 /**
  * Map of controller commands to their required parameters.
@@ -55,10 +71,11 @@ export type ControllerCommand = keyof ControllerCommands;
 export interface ClientHello {
   type: MessageType.CLIENT_HELLO;
   payload: {
-    client_id: string;
     name: string;
-    version: number;
     supported_roles: string[];
+    trust_level: "user" | "none";
+    supported_pair_methods?: Array<{ method: "pairing_psk" }>;
+    unpaired_access: { enabled: boolean };
     device_info?: {
       product_name?: string;
       manufacturer?: string;
@@ -219,8 +236,65 @@ export interface GroupUpdate {
   payload: GroupUpdatePayload;
 }
 
+export type PairMethod = "pairing_psk" | "dynamic_pin" | "static_pin";
+
+export interface ClientInit {
+  type: MessageType.CLIENT_INIT;
+  payload: { client_id: string; version: number; suite: string };
+}
+
+export interface ServerInit {
+  type: MessageType.SERVER_INIT;
+  payload: { server_id: string; version: number };
+}
+
+export interface NoiseHandshake {
+  type: MessageType.NOISE_HANDSHAKE;
+  payload: { data: string };
+}
+
+export interface ServerActivate {
+  type: MessageType.SERVER_ACTIVATE;
+  payload: {
+    activities: Array<"playback" | "pairing" | "management">;
+    active_roles?: string[];
+    selected_pair_method?: PairMethod;
+  };
+}
+
+export interface ClientPairFinalize {
+  type: MessageType.CLIENT_PAIR_FINALIZE;
+  payload: { long_term_psk: string };
+}
+
+export interface ServerPairFinalize {
+  type: MessageType.SERVER_PAIR_FINALIZE;
+  payload: Record<string, never>;
+}
+
+export type PairAbortReason =
+  | "concurrent_attempt"
+  | "method_not_supported"
+  | "user_cancelled";
+
+export interface PairAbort {
+  type: MessageType.PAIR_ABORT;
+  payload: { reason: PairAbortReason };
+}
+
+export interface ServerUnpair {
+  type: MessageType.SERVER_UNPAIR;
+  payload: Record<string, unknown>;
+}
+
 export type ServerMessage =
   | ServerHello
+  | ServerInit
+  | NoiseHandshake
+  | ServerActivate
+  | ServerPairFinalize
+  | ServerUnpair
+  | PairAbort
   | ServerTime
   | ServerState
   | StreamStart
@@ -517,6 +591,21 @@ export interface SendspinCoreConfig {
    * See {@link ReconnectConfig} for defaults.
    */
   reconnect?: ReconnectConfig;
+
+  /** Preferred Noise cipher suite. Default "chacha". */
+  suite?: "chacha" | "aesgcm";
+
+  /**
+   * Whether to admit unpaired (Sentinel-PSK) playback. Reported in
+   * client/hello.unpaired_access.enabled. Default true.
+   */
+  unpairedAccess?: boolean;
+
+  /**
+   * Pre-provisioned long-term PSK records (base64url psk, optional serverId).
+   * serverId present = stored-pubkey model; omitted = shared-PSK.
+   */
+  longTermPsks?: Array<{ psk: string; serverId?: string }>;
 
   /** Callback when player state changes (local or from server). */
   onStateChange?: (state: {
