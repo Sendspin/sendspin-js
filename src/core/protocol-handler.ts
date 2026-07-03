@@ -20,7 +20,6 @@ import type {
 } from "../types";
 import type { StreamHandler } from "../internal-types";
 import type { StateManager } from "./state-manager";
-import type { WebSocketManager } from "./websocket-manager";
 import { TimeSyncManager } from "./time-sync-manager";
 import { getSupportedFormats } from "./codec-support";
 import { clampSyncDelayMs } from "../sync-delay";
@@ -35,6 +34,16 @@ function assertBufferMs(value: number, name: string): void {
   if (!isFinite(value) || value < 0) {
     throw new RangeError(`${name} must be a non-negative finite number`);
   }
+}
+
+export interface MessageSender {
+  sendControl(msg: object): void;
+}
+
+export interface HelloContext {
+  trustLevel(): "user" | "none";
+  pairingAvailable(): boolean;
+  unpairedAccess: boolean;
 }
 
 export interface ProtocolHandlerConfig {
@@ -62,8 +71,8 @@ export class ProtocolHandler {
   private timeSyncManager: TimeSyncManager;
 
   constructor(
-    private playerId: string,
-    private wsManager: WebSocketManager,
+    private sender: MessageSender,
+    private helloContext: HelloContext,
     private streamHandler: StreamHandler,
     private stateManager: StateManager,
     private timeFilter: SendspinTimeFilter,
@@ -82,7 +91,7 @@ export class ProtocolHandler {
     this.onDelayCommand = config.onDelayCommand;
     this.getExternalVolume = config.getExternalVolume;
     this.timeSyncManager = new TimeSyncManager(
-      wsManager,
+      sender,
       stateManager,
       timeFilter,
     );
@@ -110,6 +119,10 @@ export class ProtocolHandler {
     switch (message.type) {
       case "server/hello":
         this.handleServerHello();
+        break;
+
+      case "server/activate":
+        this.handleServerActivate();
         break;
 
       case "server/time":
@@ -142,15 +155,23 @@ export class ProtocolHandler {
     }
   }
 
-  // Handle server hello
+  // Handle server hello: reply with client/hello. client/state and time-sync
+  // are deferred to server/activate.
   private handleServerHello(): void {
     console.log("Sendspin: Connected to server");
-    // Per spec: Send initial client/state immediately after server/hello
+    this.sendClientHello();
+  }
+
+  private activated = false;
+
+  // Handle server/activate: start the initial client/state, time-sync, and
+  // periodic state updates. Guarded so a repeat activate is a no-op.
+  private handleServerActivate(): void {
+    if (this.activated) return;
+    this.activated = true;
     this.sendStateUpdate();
-    // Start time synchronization with fixed bursts.
     this.timeSyncManager.startAndSchedule();
 
-    // Start periodic state updates
     const stateInterval = globalThis.setInterval(
       () => this.sendStateUpdate(),
       STATE_UPDATE_INTERVAL,
@@ -275,16 +296,20 @@ export class ProtocolHandler {
     this.sendStateUpdate(true);
   }
 
-  // Send client hello with player identification
+  // Send client hello. Note: client_id and version live in client/init, NOT
+  // client/hello - the spec's forward-compat rule forbids sending fields it
+  // does not define for a message.
   sendClientHello(): void {
     const hello: ClientHello = {
       type: "client/hello" as MessageType.CLIENT_HELLO,
       payload: {
         name: this.clientName,
         supported_roles: ["player@v1", "controller@v1", "metadata@v1"],
-        // Placeholder until Noise handshake wiring replaces client/hello with client/init.
-        trust_level: "none",
-        unpaired_access: { enabled: true },
+        trust_level: this.helloContext.trustLevel(),
+        supported_pair_methods: this.helloContext.pairingAvailable()
+          ? [{ method: "pairing_psk" }]
+          : [],
+        unpaired_access: { enabled: this.helloContext.unpairedAccess },
         device_info: {
           product_name: "Web Browser",
           manufacturer:
@@ -300,7 +325,7 @@ export class ProtocolHandler {
         },
       },
     };
-    this.wsManager.send(hello);
+    this.sender.sendControl(hello);
   }
 
   setRequiredLeadTimeMs(leadTimeMs: number): void {
@@ -344,12 +369,12 @@ export class ProtocolHandler {
         },
       },
     };
-    this.wsManager.send(message);
+    this.sender.sendControl(message);
   }
 
   // Send goodbye message before disconnecting
   sendGoodbye(reason: GoodbyeReason): void {
-    this.wsManager.send({
+    this.sender.sendControl({
       type: "client/goodbye" as MessageType.CLIENT_GOODBYE,
       payload: {
         reason,
@@ -362,7 +387,7 @@ export class ProtocolHandler {
     command: T,
     params: ControllerCommands[T],
   ): void {
-    this.wsManager.send({
+    this.sender.sendControl({
       type: "client/command" as MessageType.CLIENT_COMMAND,
       payload: {
         controller: {

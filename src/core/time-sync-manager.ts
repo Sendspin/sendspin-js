@@ -1,6 +1,6 @@
 import type { SendspinTimeFilter } from "./time-filter";
 import type { StateManager } from "./state-manager";
-import type { WebSocketManager } from "./websocket-manager";
+import type { MessageSender } from "./protocol-handler";
 import type { ClientTime, MessageType, ServerTime } from "../types";
 
 const TIME_SYNC_BURST_SIZE = 8;
@@ -23,7 +23,7 @@ export class TimeSyncManager {
   private timeSyncBurstSamples: TimeSyncSample[] = [];
 
   constructor(
-    private wsManager: WebSocketManager,
+    private sender: MessageSender,
     private stateManager: StateManager,
     private timeFilter: SendspinTimeFilter,
   ) {}
@@ -45,7 +45,7 @@ export class TimeSyncManager {
   }
 
   private startTimeSyncBurstIfIdle(): void {
-    if (this.timeSyncBurstActive || !this.wsManager.isConnected()) {
+    if (this.timeSyncBurstActive) {
       return;
     }
 
@@ -59,8 +59,7 @@ export class TimeSyncManager {
   private sendNextTimeSyncBurstProbe(): void {
     if (
       !this.timeSyncBurstActive ||
-      this.timeSyncInFlightClientTransmitted !== null ||
-      !this.wsManager.isConnected()
+      this.timeSyncInFlightClientTransmitted !== null
     ) {
       return;
     }
@@ -210,7 +209,7 @@ export class TimeSyncManager {
         client_transmitted: clientTimeUs,
       },
     };
-    this.wsManager.send(message);
+    this.sender.sendControl(message);
     return clientTimeUs;
   }
 }

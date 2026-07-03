@@ -2,13 +2,13 @@
  * Unit tests for TimeSyncManager (NTP-style burst → Kalman filter feeder).
  *
  * Drives the burst state machine with a stubbed performance.now and a fake
- * WebSocketManager so the NTP arithmetic, robust candidate selection, and
+ * MessageSender so the NTP arithmetic, robust candidate selection, and
  * timeout/abort paths are exercised deterministically.
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { TimeSyncManager } from "../../src/core/time-sync-manager";
-import type { WebSocketManager } from "../../src/core/websocket-manager";
+import type { MessageSender } from "../../src/core/protocol-handler";
 import type { StateManager } from "../../src/core/state-manager";
 import type { SendspinTimeFilter } from "../../src/core/time-filter";
 import type { ServerTime } from "../../src/types";
@@ -45,17 +45,14 @@ describe("TimeSyncManager", () => {
 
     send = vi.fn();
     update = vi.fn();
-    const wsManager = {
-      isConnected: () => true,
-      send,
-    } as unknown as WebSocketManager;
+    const sender: MessageSender = { sendControl: send };
     const stateManager = {
       setTimeSyncInterval: vi.fn(),
       clearTimeSyncInterval: vi.fn(),
     } as unknown as StateManager;
     const timeFilter = { update } as unknown as SendspinTimeFilter;
 
-    mgr = new TimeSyncManager(wsManager, stateManager, timeFilter);
+    mgr = new TimeSyncManager(sender, stateManager, timeFilter);
   });
 
   afterEach(() => {
@@ -136,7 +133,6 @@ describe("TimeSyncManager extra", () => {
   let send: ReturnType<typeof vi.fn>;
   let update: ReturnType<typeof vi.fn>;
   let mgr: TimeSyncManager;
-  let connected: boolean;
   let nowMs: number;
   let setIntervalSpy: ReturnType<typeof vi.fn>;
 
@@ -164,44 +160,22 @@ describe("TimeSyncManager extra", () => {
 
     send = vi.fn();
     update = vi.fn();
-    connected = true;
     setIntervalSpy = vi.fn();
 
-    const wsManager = {
-      isConnected: () => connected,
-      send,
-    } as unknown as WebSocketManager;
+    const sender: MessageSender = { sendControl: send };
     const stateManager = {
       setTimeSyncInterval: setIntervalSpy,
       clearTimeSyncInterval: vi.fn(),
     } as unknown as StateManager;
     const timeFilter = { update } as unknown as SendspinTimeFilter;
 
-    mgr = new TimeSyncManager(wsManager, stateManager, timeFilter);
+    mgr = new TimeSyncManager(sender, stateManager, timeFilter);
   });
 
   afterEach(() => {
     mgr.stop();
     vi.restoreAllMocks();
     vi.useRealTimers();
-  });
-
-  it("does not start a burst when the socket is disconnected", () => {
-    connected = false;
-    mgr.startAndSchedule();
-    expect(send).not.toHaveBeenCalled();
-    // The recurring tick is still scheduled so it can start later.
-    expect(setIntervalSpy).toHaveBeenCalled();
-  });
-
-  it("starts a fresh burst on the next 10s tick once reconnected", () => {
-    connected = false;
-    mgr.startAndSchedule();
-    expect(send).not.toHaveBeenCalled();
-
-    connected = true;
-    vi.advanceTimersByTime(10000);
-    expect(send).toHaveBeenCalledTimes(1);
   });
 
   it("schedules a recurring burst every 10s after the previous one finalizes", () => {
@@ -225,20 +199,6 @@ describe("TimeSyncManager extra", () => {
     expect(send.mock.calls.length).toBe(afterFirst + 1);
     runBurst();
     expect(update).toHaveBeenCalledTimes(2);
-  });
-
-  it("stops sending further probes when isConnected flips false mid-burst", () => {
-    mgr.startAndSchedule();
-    expect(sentT1()).toHaveLength(1);
-
-    // Answer the first probe, but the socket drops before the next probe goes out.
-    const t1 = lastT1();
-    connected = false;
-    respond(t1, t1 + 1000, nowMs * 1000 + 500);
-
-    // sendNextTimeSyncBurstProbe guards on isConnected, so no second probe.
-    expect(sentT1()).toHaveLength(1);
-    expect(update).not.toHaveBeenCalled();
   });
 
   it("sends client/time with only type and client_transmitted (spec shape)", () => {

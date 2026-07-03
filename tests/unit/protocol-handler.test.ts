@@ -1,17 +1,29 @@
 /**
  * Unit tests for ProtocolHandler message routing and command handling.
  *
- * Uses a real StateManager (pure) with mocked WebSocketManager, StreamHandler
+ * Uses a real StateManager (pure) with a stubbed MessageSender, StreamHandler
  * and time filter so message dispatch, the static-delay guard, and the
  * stream/clear roles filter can be asserted directly.
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { ProtocolHandler } from "../../src/core/protocol-handler";
+import {
+  ProtocolHandler,
+  type HelloContext,
+  type MessageSender,
+} from "../../src/core/protocol-handler";
 import { StateManager } from "../../src/core/state-manager";
-import type { WebSocketManager } from "../../src/core/websocket-manager";
 import type { SendspinTimeFilter } from "../../src/core/time-filter";
 import type { StreamHandler } from "../../src/internal-types";
+
+function makeHelloContext(overrides: Partial<HelloContext> = {}): HelloContext {
+  return {
+    trustLevel: () => "none",
+    pairingAvailable: () => true,
+    unpairedAccess: true,
+    ...overrides,
+  };
+}
 
 function makeStreamHandler(): StreamHandler &
   Record<string, ReturnType<typeof vi.fn>> {
@@ -67,15 +79,12 @@ describe("ProtocolHandler", () => {
     streamHandler = makeStreamHandler();
     stateManager = new StateManager();
     onDelayCommand = vi.fn();
-    const wsManager = {
-      send,
-      isConnected: () => true,
-    } as unknown as WebSocketManager;
+    const sender: MessageSender = { sendControl: send };
     const timeFilter = { update: vi.fn() } as unknown as SendspinTimeFilter;
 
     handler = new ProtocolHandler(
-      "player-1",
-      wsManager,
+      sender,
+      makeHelloContext(),
       streamHandler,
       stateManager,
       timeFilter,
@@ -166,21 +175,34 @@ describe("ProtocolHandler extra", () => {
   let stateManager: StateManager;
   let onDelayCommand: ReturnType<typeof vi.fn>;
   let onVolumeCommand: ReturnType<typeof vi.fn>;
-  let wsManager: WebSocketManager;
+  let sender: MessageSender;
+  let helloContext: HelloContext;
   let timeFilter: SendspinTimeFilter;
 
   function makeHandler(
     config: ConstructorParameters<typeof ProtocolHandler>[5] = {},
   ): ProtocolHandler {
     return new ProtocolHandler(
-      "player-1",
-      wsManager,
+      sender,
+      helloContext,
       streamHandler,
       stateManager,
       timeFilter,
       { onDelayCommand, ...config },
     );
   }
+
+  // Dispatch a server/activate so client/state + time-sync start (the tests
+  // below that pre-date server/activate sequencing rely on this).
+  const activate = (handler: ProtocolHandler): void =>
+    handler.handleMessage(
+      msgEvent(
+        JSON.stringify({
+          type: "server/activate",
+          payload: { activities: ["playback"] },
+        }),
+      ),
+    );
 
   beforeEach(() => {
     vi.useFakeTimers();
@@ -189,10 +211,8 @@ describe("ProtocolHandler extra", () => {
     stateManager = new StateManager();
     onDelayCommand = vi.fn();
     onVolumeCommand = vi.fn();
-    wsManager = {
-      send,
-      isConnected: () => true,
-    } as unknown as WebSocketManager;
+    sender = { sendControl: send };
+    helloContext = makeHelloContext();
     timeFilter = { update: vi.fn() } as unknown as SendspinTimeFilter;
   });
 
@@ -213,6 +233,9 @@ describe("ProtocolHandler extra", () => {
       const payload = hello.payload as Record<string, unknown>;
       expect(payload.name).toBe("Living Room");
       expect(payload.supported_roles).toContain("player@v1");
+      expect(payload.supported_pair_methods).toEqual([
+        { method: "pairing_psk" },
+      ]);
 
       const support = payload["player@v1_support"] as Record<string, unknown>;
       expect(support.supported_commands).toEqual(["volume", "mute"]);
@@ -227,25 +250,60 @@ describe("ProtocolHandler extra", () => {
         bit_depth: expect.any(Number),
       });
     });
+
+    it("omits pairing_psk from supported_pair_methods when pairing is unavailable", () => {
+      helloContext = makeHelloContext({ pairingAvailable: () => false });
+      const handler = makeHandler();
+      handler.sendClientHello();
+
+      const hello = lastSent(send, "client/hello")!;
+      const payload = hello.payload as Record<string, unknown>;
+      expect(payload.supported_pair_methods).toEqual([]);
+    });
   });
 
   describe("handleServerHello", () => {
-    it("sends an initial client/state immediately", () => {
+    it("sends client/hello with trust_level and unpaired_access", () => {
       const handler = makeHandler();
       handler.handleMessage(
         msgEvent(JSON.stringify({ type: "server/hello", payload: {} })),
       );
+      const hello = lastSent(send, "client/hello")!;
+      const payload = hello.payload as Record<string, unknown>;
+      expect(payload.trust_level).toBe("none");
+      expect(payload.unpaired_access).toEqual({ enabled: true });
+    });
+
+    it("does not send the initial client/state (deferred to server/activate)", () => {
+      const handler = makeHandler();
+      handler.handleMessage(
+        msgEvent(JSON.stringify({ type: "server/hello", payload: {} })),
+      );
+      expect(lastSent(send, "client/state")).toBeUndefined();
+    });
+  });
+
+  describe("handleServerActivate", () => {
+    it("sends an initial client/state immediately", () => {
+      const handler = makeHandler();
+      activate(handler);
       expect(lastSent(send, "client/state")).toBeDefined();
     });
 
     it("starts a periodic client/state interval (5s)", () => {
       const handler = makeHandler();
-      handler.handleMessage(
-        msgEvent(JSON.stringify({ type: "server/hello", payload: {} })),
-      );
+      activate(handler);
       send.mockClear();
       vi.advanceTimersByTime(5000);
       expect(lastSent(send, "client/state")).toBeDefined();
+    });
+
+    it("is a no-op on a repeat activate", () => {
+      const handler = makeHandler();
+      activate(handler);
+      send.mockClear();
+      activate(handler);
+      expect(lastSent(send, "client/state")).toBeUndefined();
     });
   });
 
