@@ -47,6 +47,9 @@ export class SendspinTransport {
   private timeout: ReturnType<typeof setTimeout> | null = null;
   private frag: { origType: number; parts: Uint8Array[]; size: number } | null =
     null;
+  private lastHandshakeHash: Uint8Array = new Uint8Array(0);
+  private quiesced = false;
+  private outboundQueue: object[] = [];
 
   constructor(
     private wsManager: WebSocketManager,
@@ -87,6 +90,9 @@ export class SendspinTransport {
     this.frag = null;
     this.serverId = "";
     this.rawServerInit = new Uint8Array(0);
+    this.quiesced = false;
+    this.outboundQueue = [];
+    this.lastHandshakeHash = new Uint8Array(0);
     const initStr = JSON.stringify({
       type: "client/init",
       payload: {
@@ -173,6 +179,7 @@ export class SendspinTransport {
     this.matched = entry;
     this.state = "transport";
     this.clearTimeout();
+    this.lastHandshakeHash = this.hs!.handshakeHash;
     this.cb.onHandshakeComplete(this.handshakeInfo!);
   }
 
@@ -232,23 +239,99 @@ export class SendspinTransport {
     }
   }
 
-  /** Extended in later tasks (re-handshake, authorization, unpair). Base: forward. */
   protected handleControl(msg: { type: string; payload?: unknown }): void {
+    if (msg.type === "noise/handshake") {
+      this.handleRehandshake(msg as { payload: { data: string } });
+      return;
+    }
+    if (msg.type === "server/activate") {
+      this.handleActivate(msg);
+      return;
+    }
     this.cb.onControlMessage(msg);
   }
 
-  /** Encrypt and send a JSON control message as a transport binary frame. */
+  private handleRehandshake(msg: { payload: { data: string } }): void {
+    this.quiesced = true;
+    this.armTimeout();
+    const newHs = new HandshakeState({
+      suite: this.suite,
+      role: "responder",
+      prologue: this.lastHandshakeHash,
+      s: this.deps.identity.keypair,
+      rs: base64urlDecode(this.serverId),
+    });
+    const payload1 = newHs.readMessage(MSG1, base64urlDecode(msg.payload.data));
+    const { psk_id } = JSON.parse(dutf8.decode(payload1)) as { psk_id: string };
+    const entry = this.deps.pskStore.lookup(psk_id);
+    if (!entry) return this.fail();
+    if (
+      entry.category === "long_term" &&
+      entry.serverId !== undefined &&
+      entry.serverId !== this.serverId
+    ) {
+      return this.fail();
+    }
+    newHs.setPsk(entry.psk);
+    const m2 = newHs.writeMessage(MSG2, utf8.encode("{}"));
+    // Send msg 2 under the CURRENT keys, then swap.
+    this.encryptSend({
+      type: "noise/handshake",
+      payload: { data: base64urlEncode(m2) },
+    });
+    this.session = new NoiseSession("responder", newHs.split());
+    this.matched = entry;
+    this.lastHandshakeHash = newHs.handshakeHash;
+  }
+
+  /** Authorization is inserted here in Task 10. Base: flush + forward. */
+  protected handleActivate(msg: { type: string; payload?: unknown }): void {
+    this.clearTimeout();
+    this.flushOutbound();
+    this.cb.onControlMessage(msg);
+  }
+
+  private flushOutbound(): void {
+    this.quiesced = false;
+    const q = this.outboundQueue;
+    this.outboundQueue = [];
+    for (const m of q) this.encryptSend(m);
+  }
+
+  // Only the periodic background traffic is held during a re-handshake window.
+  // The post-re-handshake flow (server/hello -> client/hello -> server/activate)
+  // MUST be allowed through, or the client/hello never leaves and the server
+  // never sends server/activate: deadlock. So queue ONLY client/time and
+  // client/state; let client/hello, client/pair-*, pair/abort, client/goodbye pass.
+  private static readonly QUIESCED_TYPES = new Set([
+    "client/time",
+    "client/state",
+  ]);
+
   sendControl(msg: object): void {
     if (this.state !== "transport" || !this.session) {
       console.warn("Sendspin: sendControl before transport ready");
       return;
     }
+    const type = (msg as { type?: string }).type;
+    if (
+      this.quiesced &&
+      type !== undefined &&
+      SendspinTransport.QUIESCED_TYPES.has(type)
+    ) {
+      this.outboundQueue.push(msg);
+      return;
+    }
+    this.encryptSend(msg);
+  }
+
+  private encryptSend(msg: object): void {
     const json = utf8.encode(JSON.stringify(msg));
     const pt = concat(Uint8Array.of(0), json);
     if (pt.length > MAX_TRANSPORT_PLAINTEXT) {
       throw new Error("Sendspin: control message exceeds single-frame limit");
     }
-    this.wsManager.sendBinary(this.session.encrypt(pt));
+    this.wsManager.sendBinary(this.session!.encrypt(pt));
   }
 
   private armTimeout(): void {
