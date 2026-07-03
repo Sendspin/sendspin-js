@@ -62,4 +62,9 @@ export class PairingManager {
     this.deps.onEvent?.("aborted", reason);
     this.deps.close();
   }
+
+  /** Discard any in-flight pairing state, e.g. on transport close. */
+  reset(): void {
+    this.pendingPsk = null;
+  }
 }

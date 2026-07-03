@@ -14,7 +14,11 @@ import {
   base64urlEncode,
   base64urlDecode,
 } from "../../src/core/noise/base64url";
-import { SENTINEL_PSK, SENTINEL_PSK_ID } from "../../src/core/noise/constants";
+import {
+  SENTINEL_PSK,
+  SENTINEL_PSK_ID,
+  pskId,
+} from "../../src/core/noise/constants";
 import type { SendspinStorage } from "../../src/types";
 
 const utf8 = new TextEncoder();
@@ -75,14 +79,21 @@ function clientControlTypes(ws: MockWS, session: NoiseSession): string[] {
 }
 
 /** Drive the server side (initiator) of KKpsk2 to transport mode. */
-function completeHandshake(ws: MockWS): NoiseSession {
+function completeHandshake(ws: MockWS): {
+  serverSession: NoiseSession;
+  serverId: string;
+  server: ReturnType<typeof SUITES.chacha.generateKeypair>;
+  clientId: string;
+  priorHash: Uint8Array;
+} {
   const clientInitStr = ws.sent[0] as string;
   const clientId = JSON.parse(clientInitStr).payload.client_id as string;
 
   const server = SUITES.chacha.generateKeypair();
+  const serverId = base64urlEncode(server.publicKey);
   const serverInitStr = JSON.stringify({
     type: "server/init",
-    payload: { server_id: base64urlEncode(server.publicKey), version: 1 },
+    payload: { server_id: serverId, version: 1 },
   });
   inject(ws, serverInitStr);
 
@@ -112,7 +123,13 @@ function completeHandshake(ws: MockWS): NoiseSession {
 
   const m2str = ws.sent[ws.sent.length - 1] as string;
   ini.readMessage(MSG2, base64urlDecode(JSON.parse(m2str).payload.data));
-  return new NoiseSession("initiator", ini.split());
+  return {
+    serverSession: new NoiseSession("initiator", ini.split()),
+    serverId,
+    server,
+    clientId,
+    priorHash: ini.handshakeHash,
+  };
 }
 
 describe("SendspinCore encryption wiring", () => {
@@ -139,7 +156,7 @@ describe("SendspinCore encryption wiring", () => {
     });
     await core.connect();
 
-    const serverSession = completeHandshake(ws);
+    const { serverSession } = completeHandshake(ws);
     const before = ws.sent.length;
 
     // Encrypted server/hello -> core routes to protocol handler -> client/hello.
@@ -166,7 +183,7 @@ describe("SendspinCore encryption wiring", () => {
       storage: memStorage(),
     });
     await core.connect();
-    const session = completeHandshake(ws);
+    const { serverSession: session } = completeHandshake(ws);
 
     serverSend(ws, session, { type: "server/hello", payload: {} });
     serverSend(ws, session, {
@@ -189,6 +206,65 @@ describe("SendspinCore encryption wiring", () => {
     expect(states).toHaveLength(2);
 
     core.disconnect(); // clear the periodic state/time-sync intervals
+  });
+
+  it("refreshes core's trust snapshot after an in-band re-handshake, so a Pairing-PSK activation is accepted instead of aborted", async () => {
+    const ws = new MockWS();
+    const core = new SendspinCore({
+      webSocket: ws as unknown as WebSocket,
+      storage: memStorage(),
+    });
+    await core.connect();
+
+    const { serverSession, server, clientId, priorHash } =
+      completeHandshake(ws);
+
+    // The client's own Pairing PSK, provisioned out of band, is the re-handshake target.
+    const pairingPsk = base64urlDecode(core.pairingPsk!);
+
+    // Server re-handshakes to the Pairing PSK, prologue = prior handshake hash.
+    const ini = new HandshakeState({
+      suite: SUITES.chacha,
+      role: "initiator",
+      prologue: priorHash,
+      s: server,
+      rs: base64urlDecode(clientId),
+      psk: pairingPsk,
+    });
+    const rm1 = ini.writeMessage(
+      MSG1,
+      utf8.encode(JSON.stringify({ psk_id: pskId(pairingPsk) })),
+    );
+    serverSend(ws, serverSession, {
+      type: "noise/handshake",
+      payload: { data: base64urlEncode(rm1) },
+    });
+
+    // Client's msg 2 comes back under the OLD keys; server reads it and both split.
+    const rm2Frame = serverSession.decrypt(
+      ws.sent[ws.sent.length - 1] as Uint8Array,
+    );
+    const rm2 = base64urlDecode(
+      JSON.parse(new TextDecoder().decode(rm2Frame.subarray(1))).payload.data,
+    );
+    ini.readMessage(MSG2, rm2);
+    const newServerSession = new NoiseSession("initiator", ini.split());
+
+    // Without the fix, core's cached category snapshot stays "sentinel" and
+    // PairingManager aborts with method_not_supported instead of finalizing.
+    serverSend(ws, newServerSession, {
+      type: "server/activate",
+      payload: {
+        activities: ["pairing"],
+        selected_pair_method: "pairing_psk",
+      },
+    });
+
+    const reply = ws.sent[ws.sent.length - 1] as Uint8Array;
+    const replyMsg = JSON.parse(
+      new TextDecoder().decode(newServerSession.decrypt(reply).subarray(1)),
+    );
+    expect(replyMsg.type).toBe("client/pair-finalize");
   });
 
   it("exposes a 43-char pairingPsk that rotates", () => {

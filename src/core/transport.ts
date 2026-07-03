@@ -297,6 +297,7 @@ export class SendspinTransport {
     this.session = new NoiseSession("responder", newHs.split());
     this.matched = entry;
     this.lastHandshakeHash = newHs.handshakeHash;
+    this.cb.onHandshakeComplete(this.handshakeInfo!);
   }
 
   protected handleActivate(msg: {
