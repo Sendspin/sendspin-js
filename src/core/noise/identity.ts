@@ -2,19 +2,16 @@ import type { SendspinStorage } from "../../types";
 import { SUITES } from "./suites";
 import { base64urlEncode, base64urlDecode } from "./base64url";
 
-const SK_KEY = "sendspin:identity:sk";
+const SK_KEY = "sendspin-identity-sk";
 
 export class Identity {
   readonly clientId: string;
-  readonly persistent: boolean;
 
   private constructor(
     readonly privateKey: Uint8Array,
     readonly publicKey: Uint8Array,
-    persistent: boolean,
   ) {
     this.clientId = base64urlEncode(publicKey);
-    this.persistent = persistent;
   }
 
   get keypair(): { privateKey: Uint8Array; publicKey: Uint8Array } {
@@ -27,13 +24,18 @@ export class Identity {
       const stored = storage.getItem(SK_KEY);
       if (stored) {
         const sk = base64urlDecode(stored);
-        return new Identity(sk, kp.publicKey(sk), true);
+        return new Identity(sk, kp.publicKey(sk));
       }
       const fresh = kp.generateKeypair();
       storage.setItem(SK_KEY, base64urlEncode(fresh.privateKey));
-      return new Identity(fresh.privateKey, fresh.publicKey, true);
+      return new Identity(fresh.privateKey, fresh.publicKey);
     }
+    // Without storage the keypair regenerates each session, so client_id is not
+    // stable and pairing records cannot persist. Callers disable pairing here.
+    console.warn(
+      "Sendspin: no storage provided, using an ephemeral identity (client_id changes each session, pairing unavailable)",
+    );
     const fresh = kp.generateKeypair();
-    return new Identity(fresh.privateKey, fresh.publicKey, false);
+    return new Identity(fresh.privateKey, fresh.publicKey);
   }
 }

@@ -69,6 +69,7 @@ export class ProtocolHandler {
   private onDelayCommand?: (delayMs: number) => void;
   private getExternalVolume?: () => { volume: number; muted: boolean };
   private timeSyncManager: TimeSyncManager;
+  private activated = false;
 
   constructor(
     private sender: MessageSender,
@@ -162,8 +163,6 @@ export class ProtocolHandler {
     this.sendClientHello();
   }
 
-  private activated = false;
-
   // Handle server/activate: start the initial client/state, time-sync, and
   // periodic state updates. Guarded so a repeat activate is a no-op.
   private handleServerActivate(): void {
@@ -194,8 +193,11 @@ export class ProtocolHandler {
     this.timeSyncManager.stop();
   }
 
-  // Clear the activate guard so the next server/activate (e.g. after a
-  // reconnect on a reused handler) restarts time-sync and state updates.
+  /**
+   * Clear the activate guard so the next server/activate (e.g. after a reconnect on a
+   * reused handler) restarts time-sync and state updates.
+   * @internal called by SendspinCore on transport close, not part of the public API.
+   */
   resetActivation(): void {
     this.activated = false;
   }
@@ -302,9 +304,7 @@ export class ProtocolHandler {
     this.sendStateUpdate(true);
   }
 
-  // Send client hello. Note: client_id and version live in client/init, NOT
-  // client/hello - the spec's forward-compat rule forbids sending fields it
-  // does not define for a message.
+  // client_id and version live in client/init, not the hello.
   sendClientHello(): void {
     const hello: ClientHello = {
       type: "client/hello" as MessageType.CLIENT_HELLO,

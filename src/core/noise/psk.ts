@@ -17,8 +17,8 @@ export interface PskEntry {
   serverId?: string;
 }
 
-const LONG_TERM_KEY = "sendspin:psks";
-const PAIRING_KEY = "sendspin:pairing-psk";
+const LONG_TERM_KEY = "sendspin-psks";
+const PAIRING_KEY = "sendspin-pairing-psk";
 
 interface StoredRecord {
   psk: string; // base64url
@@ -29,6 +29,9 @@ export class PskStore {
   private entries = new Map<string, PskEntry>();
 
   constructor(private storage: SendspinStorage | null) {
+    // The Sentinel PSK is always a candidate: every unpaired connection's handshake
+    // matches its psk_id, so without it a first-time or unpaired connection (and
+    // therefore pairing itself) could not complete the Noise handshake.
     this.add({
       psk: SENTINEL_PSK,
       pskId: pskId(SENTINEL_PSK),

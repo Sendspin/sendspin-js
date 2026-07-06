@@ -182,11 +182,6 @@ Identity and pairing require `storage` (defaults to `localStorage`); without
 it, `clientId` is still generated per session but `pairingPsk` and
 `rotatePairingPsk()` return `null`.
 
-The Sendspin spec does not yet define a QR/URI payload format for pairing
-credentials, so the SDK only exposes `clientId` and `pairingPsk` as plain
-strings. A QR encoding can be added once that format is confirmed with the
-server (and Music Assistant).
-
 ### Core + scheduler as separate layers
 
 Apps that need the decoded PCM stream (e.g. visualizers) can use

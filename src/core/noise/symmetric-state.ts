@@ -1,5 +1,5 @@
 import { hmac } from "@noble/hashes/hmac";
-import { sha256 } from "@noble/hashes/sha256";
+import { sha256 } from "@noble/hashes/sha2";
 import type { CipherSuite } from "./suites";
 import { CipherState, EMPTY } from "./cipher-state";
 

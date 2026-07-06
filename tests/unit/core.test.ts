@@ -460,11 +460,13 @@ describe("SendspinCore.disconnect ordering and idempotency", () => {
 });
 
 describe("SendspinCore identity fallbacks", () => {
-  it("derives a 43-char base64url clientId and a random clientName", () => {
+  it("derives a 43-char base64url clientId and a clientName from it", () => {
     const core = new SendspinCore({ baseUrl: "http://h" });
     expect(core.clientId).toHaveLength(43);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const cfg = (core as any).config;
-    expect(cfg.clientName).toMatch(/^Sendspin JS Client \(/);
+    expect(cfg.clientName).toBe(
+      `Sendspin JS Client (${core.clientId.slice(0, 6)})`,
+    );
   });
 });

@@ -33,10 +33,6 @@ import type {
 } from "../types";
 import type { StreamHandler } from "../internal-types";
 
-function generateRandomId(): string {
-  return Math.random().toString(36).substring(2, 6);
-}
-
 export class SendspinCore implements StreamHandler {
   private wsManager: WebSocketManager;
   private protocolHandler: ProtocolHandler;
@@ -49,6 +45,7 @@ export class SendspinCore implements StreamHandler {
   private delayStore: StaticDelayStore;
 
   private identity: Identity;
+  private hasStorage: boolean;
   private pskStore: PskStore;
   private transport: SendspinTransport;
   private pairing: PairingManager;
@@ -68,8 +65,11 @@ export class SendspinCore implements StreamHandler {
   private _onConnectionClose?: () => void;
 
   constructor(config: SendspinCoreConfig) {
+    this.hasStorage = (config.storage ?? null) !== null;
+    this.identity = Identity.loadOrCreate(config.storage ?? null);
     const clientName =
-      config.clientName ?? `Sendspin JS Client (${generateRandomId()})`;
+      config.clientName ??
+      `Sendspin JS Client (${this.identity.clientId.slice(0, 6)})`;
 
     this.config = { ...config, clientName };
 
@@ -90,7 +90,6 @@ export class SendspinCore implements StreamHandler {
 
     this.wsManager = new WebSocketManager(config.reconnect);
 
-    this.identity = Identity.loadOrCreate(config.storage ?? null);
     this.pskStore = new PskStore(config.storage ?? null);
     for (const r of config.longTermPsks ?? []) {
       this.pskStore.addLongTerm(base64urlDecode(r.psk), r.serverId);
@@ -125,7 +124,7 @@ export class SendspinCore implements StreamHandler {
 
     const helloContext = {
       trustLevel: () => this.handshakeInfo?.trustLevel ?? "none",
-      pairingAvailable: () => this.identity.persistent,
+      pairingAvailable: () => this.hasStorage,
       unpairedAccess: config.unpairedAccess ?? true,
     };
 
@@ -430,13 +429,13 @@ export class SendspinCore implements StreamHandler {
 
   /** The client's Pairing PSK (base64url), for the operator to enter into the server. Null without storage. */
   get pairingPsk(): string | null {
-    return this.identity.persistent
+    return this.hasStorage
       ? base64urlEncode(this.pskStore.getOrCreatePairingPsk())
       : null;
   }
 
   rotatePairingPsk(): string | null {
-    if (!this.identity.persistent) return null;
+    if (!this.hasStorage) return null;
     this.pskStore.rotatePairingPsk();
     return this.pairingPsk;
   }
