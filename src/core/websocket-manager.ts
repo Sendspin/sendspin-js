@@ -292,7 +292,7 @@ export class WebSocketManager {
   // Send a binary frame (Noise transport ciphertext).
   sendBinary(data: Uint8Array): void {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-      // ponytail: TS types Uint8Array as ArrayBufferLike, DOM lib wants ArrayBuffer.
+      // TS types Uint8Array as ArrayBufferLike, DOM lib wants ArrayBuffer.
       this.ws.send(data as Uint8Array<ArrayBuffer>);
     } else {
       console.warn("Sendspin: Cannot send binary, WebSocket not connected");
