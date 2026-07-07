@@ -214,6 +214,8 @@ export class SendspinTransport {
   private handleFragment(type: number, body: Uint8Array): void {
     if (type === 2 && this.frag === null) {
       if (body.length < 1) return this.fail();
+      // Reject a fragment whose inner type is itself a fragment marker.
+      if (body[0] === 2 || body[0] === 3) return this.fail();
       const first = body.subarray(1);
       this.frag = { origType: body[0], parts: [first], size: first.length };
       return;
