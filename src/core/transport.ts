@@ -323,7 +323,9 @@ export class SendspinTransport {
   }
 
   private handleUnpair(): void {
-    if (this.matched) this.deps.pskStore.removeByPskId(this.matched.pskId);
+    // trust_level 'none' (Sentinel or in-flight pairing): ignore and continue.
+    if (this.matched?.category !== "long_term") return;
+    this.deps.pskStore.removeByPskId(this.matched.pskId); // no-op for shared-PSK
     this.sendGoodbyeAndClose("unpaired");
   }
 

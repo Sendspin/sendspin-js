@@ -94,6 +94,9 @@ export class SendspinCore implements StreamHandler {
     for (const r of config.longTermPsks ?? []) {
       this.pskStore.addLongTerm(base64urlDecode(r.psk), r.serverId);
     }
+    // Register the Pairing PSK as a standing candidate whenever pairing is advertised,
+    // so a server may re-handshake to it before the app ever reads player.pairingPsk.
+    if (this.hasStorage) this.pskStore.getOrCreatePairingPsk();
 
     this.transport = new SendspinTransport(
       this.wsManager,

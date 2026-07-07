@@ -1,6 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { harness, completeHandshakeWithPsk } from "./transport-harness";
-import { pskId } from "../../src/core/noise/constants";
+import {
+  harness,
+  completeHandshake,
+  completeHandshakeWithPsk,
+  fakeWsSend,
+} from "./transport-harness";
+import { pskId, SENTINEL_PSK_ID } from "../../src/core/noise/constants";
 
 const utf8 = new TextEncoder();
 const concat = (a: Uint8Array, b: Uint8Array) => {
@@ -47,5 +52,22 @@ describe("transport server/unpair", () => {
     } as MessageEvent);
     expect(h.store.lookup(pskId(lt))).not.toBeNull();
     expect(h.ws.disconnected).toBe(true);
+  });
+
+  it("ignores server/unpair on an untrusted (Sentinel) session", () => {
+    const h = harness();
+    const { serverSession } = completeHandshake(h);
+    const before = fakeWsSend(h).binary.length;
+    const frame = concat(
+      Uint8Array.of(0),
+      utf8.encode(JSON.stringify({ type: "server/unpair", payload: {} })),
+    );
+    h.transport.handleRaw({
+      data: serverSession.encrypt(frame).buffer,
+    } as MessageEvent);
+    // trust_level none: ignored, no goodbye sent, socket stays open, sentinel intact.
+    expect(h.ws.disconnected).toBe(false);
+    expect(fakeWsSend(h).binary.length).toBe(before);
+    expect(h.store.lookup(SENTINEL_PSK_ID)).not.toBeNull();
   });
 });
