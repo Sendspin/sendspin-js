@@ -68,4 +68,19 @@ describe("authorizeActivate", () => {
       authorizeActivate("sentinel", ["playback"], ["player@v1"], true).ok,
     ).toBe(true);
   });
+
+  it("rejects selected_pair_method present without a pairing activity", () => {
+    expect(
+      authorizeActivate("long_term", ["playback"], [], true, "pairing_psk"),
+    ).toEqual({ ok: false, goodbye: "unauthorized" });
+    expect(
+      authorizeActivate("sentinel", [], undefined, true, "pairing_psk"),
+    ).toEqual({ ok: false, goodbye: "unauthorized" });
+  });
+
+  it("allows selected_pair_method alongside a pairing activity", () => {
+    expect(
+      authorizeActivate("pairing", ["pairing"], [], true, "pairing_psk").ok,
+    ).toBe(true);
+  });
 });
