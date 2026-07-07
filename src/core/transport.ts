@@ -238,10 +238,12 @@ export class SendspinTransport {
       return this.fail();
     }
     const origType = this.frag.origType;
-    const data = this.frag.parts.reduce(
-      (acc, p) => concat(acc, p),
-      new Uint8Array(0),
-    );
+    const data = new Uint8Array(this.frag.size);
+    let off = 0;
+    for (const p of this.frag.parts) {
+      data.set(p, off);
+      off += p.length;
+    }
     this.frag = null;
     if (origType === 0) {
       this.handleControl(JSON.parse(dutf8.decode(data)));
