@@ -172,7 +172,7 @@ await player.connect();
 ```
 
 Unpaired playback authenticates with the well-known Sentinel PSK, so it is
-exposed to an active man-in-the-middle. While its on by default, you can set `unpairedAccess: false` to require pairing before any playback.
+exposed to an active man-in-the-middle. While it's on by default, you can set `unpairedAccess: false` to require pairing before any playback.
 
 ```typescript
 console.log('Client ID:', player.clientId);      // 43-char base64url pubkey
