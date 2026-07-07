@@ -44,23 +44,33 @@ export class PskStore {
 
   private loadPersisted(): void {
     if (!this.storage) return;
+    // Treat a corrupt entry as no stored PSK and clear it, rather than
+    // letting a parse error abort connection setup.
     const raw = this.storage.getItem(LONG_TERM_KEY);
     if (raw) {
-      const records = JSON.parse(raw) as StoredRecord[];
-      for (const r of records) {
-        const psk = base64urlDecode(r.psk);
-        this.add({
-          psk,
-          pskId: pskId(psk),
-          category: "long_term",
-          serverId: r.serverId,
-        });
+      try {
+        const records = JSON.parse(raw) as StoredRecord[];
+        for (const r of records) {
+          const psk = base64urlDecode(r.psk);
+          this.add({
+            psk,
+            pskId: pskId(psk),
+            category: "long_term",
+            serverId: r.serverId,
+          });
+        }
+      } catch {
+        this.storage.setItem(LONG_TERM_KEY, "[]");
       }
     }
     const pairing = this.storage.getItem(PAIRING_KEY);
     if (pairing) {
-      const psk = base64urlDecode(pairing);
-      this.add({ psk, pskId: pskId(psk), category: "pairing" });
+      try {
+        const psk = base64urlDecode(pairing);
+        this.add({ psk, pskId: pskId(psk), category: "pairing" });
+      } catch {
+        this.storage.setItem(PAIRING_KEY, "");
+      }
     }
   }
 
