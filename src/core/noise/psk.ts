@@ -29,9 +29,7 @@ export class PskStore {
   private entries = new Map<string, PskEntry>();
 
   constructor(private storage: SendspinStorage | null) {
-    // The Sentinel PSK is always a candidate: every unpaired connection's handshake
-    // matches its psk_id, so without it a first-time or unpaired connection (and
-    // therefore pairing itself) could not complete the Noise handshake.
+    // Always a candidate: every unpaired connection's handshake matches its psk_id.
     this.add({
       psk: SENTINEL_PSK,
       pskId: pskId(SENTINEL_PSK),

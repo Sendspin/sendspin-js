@@ -86,9 +86,7 @@ export class SendspinTransport {
   }
 
   start(): void {
-    // Reset all per-connection state so a reconnect (start() called again on the
-    // same transport instance) does not inherit a stale session, half-read
-    // fragment, or pending re-handshake from a dropped connection.
+    // Reset per-connection state so a reconnect does not inherit a stale session.
     this.hs = null;
     this.session = null;
     this.matched = null;
@@ -302,8 +300,7 @@ export class SendspinTransport {
     this.session = new NoiseSession("responder", newHs.split());
     this.matched = entry;
     this.lastHandshakeHash = newHs.handshakeHash;
-    // The re-handshake re-runs server/hello -> client/hello -> server/activate, so the
-    // next activate is treated as a fresh first (active_roles required again).
+    // The re-handshake re-runs the activate sequence, so the next activate is a fresh first.
     this.seenActivate = false;
     this.effectiveActiveRoles = undefined;
     this.cb.onHandshakeComplete(this.handshakeInfo!);
@@ -318,8 +315,7 @@ export class SendspinTransport {
     };
   }): void {
     const payloadRoles = msg.payload.active_roles;
-    // active_roles is required on the first activate and persists when a later
-    // activate omits it, so authorization uses the effective (persisted) value.
+    // active_roles is required on the first activate and persists when later ones omit it.
     if (!this.seenActivate && payloadRoles === undefined) {
       this.sendGoodbyeAndClose("unauthorized");
       return;
@@ -344,9 +340,9 @@ export class SendspinTransport {
   }
 
   private handleUnpair(): void {
-    // trust_level 'none' (Sentinel or in-flight pairing): ignore and continue.
+    // trust_level none (Sentinel or in-flight pairing): ignore.
     if (this.matched?.category !== "long_term") return;
-    this.deps.pskStore.removeByPskId(this.matched.pskId); // no-op for shared-PSK
+    this.deps.pskStore.removeByPskId(this.matched.pskId);
     this.sendGoodbyeAndClose("unpaired");
   }
 
@@ -356,7 +352,6 @@ export class SendspinTransport {
     } catch {
       /* best effort */
     }
-    // close() disconnects the socket; core cleans up via wsManager's onclose handler.
     this.close();
   }
 
@@ -367,11 +362,8 @@ export class SendspinTransport {
     for (const m of q) this.encryptSend(m);
   }
 
-  // Only the periodic background traffic is held during a re-handshake window.
-  // The post-re-handshake flow (server/hello -> client/hello -> server/activate)
-  // MUST be allowed through, or the client/hello never leaves and the server
-  // never sends server/activate: deadlock. So queue ONLY client/time and
-  // client/state; let client/hello, client/pair-*, pair/abort, client/goodbye pass.
+  // Held during a re-handshake. Only periodic traffic, so client/hello can still
+  // flow (queuing it would deadlock the post-re-handshake server/activate).
   private static readonly QUIESCED_TYPES = new Set([
     "client/time",
     "client/state",

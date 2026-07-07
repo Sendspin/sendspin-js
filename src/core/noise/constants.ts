@@ -10,10 +10,7 @@ export const SENTINEL_PSK: Uint8Array = sha256(
 
 const PSK_ID_LABEL = enc.encode("sendspin-psk-id-v1");
 
-/**
- * psk_id for any PSK: base64url(SHA-256("sendspin-psk-id-v1" || PSK)). The spec uses
- * this one label for all PSK categories (sentinel, pairing, long-term).
- */
+/** psk_id = base64url(SHA-256("sendspin-psk-id-v1" || PSK)); same label for all PSK categories. */
 export function pskId(psk: Uint8Array): string {
   const buf = new Uint8Array(PSK_ID_LABEL.length + psk.length);
   buf.set(PSK_ID_LABEL, 0);

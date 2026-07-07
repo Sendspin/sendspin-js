@@ -30,8 +30,7 @@ export class Identity {
       storage.setItem(SK_KEY, base64urlEncode(fresh.privateKey));
       return new Identity(fresh.privateKey, fresh.publicKey);
     }
-    // Without storage the keypair regenerates each session, so client_id is not
-    // stable and pairing records cannot persist. Callers disable pairing here.
+    // No storage: ephemeral keypair, so client_id is unstable and pairing is disabled.
     console.warn(
       "Sendspin: no storage provided, using an ephemeral identity (client_id changes each session, pairing unavailable)",
     );
