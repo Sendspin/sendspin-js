@@ -595,6 +595,9 @@ export interface SendspinCoreConfig {
   /**
    * Whether to admit unpaired (Sentinel-PSK) playback. Reported in
    * client/hello.unpaired_access.enabled. Default true.
+   *
+   * Unpaired playback authenticates with the well-known Sentinel PSK, so it is
+   * exposed to an active MITM. Set false to require pairing before any playback.
    */
   unpairedAccess?: boolean;
 

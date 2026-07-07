@@ -47,6 +47,16 @@ describe("PairingManager", () => {
     expect(close).toHaveBeenCalledTimes(1);
   });
 
+  it("ignores a duplicate pairing activate and mints only one PSK", () => {
+    const { sent, mgr } = setup("pairing");
+    expect(mgr.onActivate(["pairing"], "pairing_psk")).toBe(true);
+    expect(mgr.onActivate(["pairing"], "pairing_psk")).toBe(true);
+    const finalizes = sent.filter(
+      (m) => (m as { type: string }).type === "client/pair-finalize",
+    );
+    expect(finalizes).toHaveLength(1);
+  });
+
   it("discards the pending PSK on leave-pairing (non-pairing activate)", () => {
     const { store, sent, mgr } = setup("pairing");
     mgr.onActivate(["pairing"], "pairing_psk");

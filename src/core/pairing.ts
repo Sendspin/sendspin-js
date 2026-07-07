@@ -38,6 +38,7 @@ export class PairingManager {
       this.deps.close(); // spec: the sender closes the connection after pair/abort
       return true;
     }
+    if (this.pendingPsk) return true; // finalize already in flight, do not re-mint
     // A Sendspin PSK must be a 32-byte CSPRNG value, not a clamped X25519 private key.
     const psk = crypto.getRandomValues(new Uint8Array(32));
     this.pendingPsk = psk;

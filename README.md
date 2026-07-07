@@ -158,7 +158,7 @@ trusted, per-server long-term PSK.
 const player = new SendspinPlayer({
   baseUrl: 'http://your-server:8095',
   suite: 'chacha',            // "chacha" (default) or "aesgcm"
-  unpairedAccess: true,       // admit unpaired playback; default true
+  unpairedAccess: true,       // admit unpaired playback; default true (see note below)
   longTermPsks: [
     { psk: 'base64url-psk', serverId: 'optional-server-id' },
   ],
@@ -169,7 +169,12 @@ const player = new SendspinPlayer({
 });
 
 await player.connect();
+```
 
+Unpaired playback authenticates with the well-known Sentinel PSK, so it is
+exposed to an active man-in-the-middle. While its on by default, you can set `unpairedAccess: false` to require pairing before any playback.
+
+```typescript
 console.log('Client ID:', player.clientId);      // 43-char base64url pubkey
 console.log('Pairing PSK:', player.pairingPsk);  // base64url string, or null without storage
 

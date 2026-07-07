@@ -108,6 +108,8 @@ export class SendspinCore implements StreamHandler {
       {
         onHandshakeComplete: (info) => {
           this.handshakeInfo = info;
+          // Drop any pending pairing PSK a re-handshake would otherwise strand.
+          this.pairing.reset();
         },
         onControlMessage: (msg) => this.routeControl(msg),
         onBinaryMessage: (bytes) =>

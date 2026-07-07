@@ -132,6 +132,47 @@ function completeHandshake(ws: MockWS): {
   };
 }
 
+/**
+ * Run one in-band re-handshake to `psk`: deliver msg 1 under `prev` keys, read
+ * the client's msg 2 (also under `prev`), and return the post-swap session.
+ * Callers must first decrypt any client frames sent under `prev` so its recv
+ * nonce stays aligned with the msg 2 that follows.
+ */
+function rehandshakeTo(
+  ws: MockWS,
+  prev: NoiseSession,
+  prevHash: Uint8Array,
+  server: ReturnType<typeof SUITES.chacha.generateKeypair>,
+  clientId: string,
+  psk: Uint8Array,
+): { session: NoiseSession; hash: Uint8Array } {
+  const ini = new HandshakeState({
+    suite: SUITES.chacha,
+    role: "initiator",
+    prologue: prevHash,
+    s: server,
+    rs: base64urlDecode(clientId),
+    psk,
+  });
+  const rm1 = ini.writeMessage(
+    MSG1,
+    utf8.encode(JSON.stringify({ psk_id: pskId(psk) })),
+  );
+  serverSend(ws, prev, {
+    type: "noise/handshake",
+    payload: { data: base64urlEncode(rm1) },
+  });
+  const rm2Frame = prev.decrypt(ws.sent[ws.sent.length - 1] as Uint8Array);
+  const rm2 = base64urlDecode(
+    JSON.parse(new TextDecoder().decode(rm2Frame.subarray(1))).payload.data,
+  );
+  ini.readMessage(MSG2, rm2);
+  return {
+    session: new NoiseSession("initiator", ini.split()),
+    hash: ini.handshakeHash,
+  };
+}
+
 describe("SendspinCore encryption wiring", () => {
   it("sends client/init on open with the identity client_id", async () => {
     const ws = new MockWS();
@@ -266,6 +307,65 @@ describe("SendspinCore encryption wiring", () => {
       new TextDecoder().decode(newServerSession.decrypt(reply).subarray(1)),
     );
     expect(replyMsg.type).toBe("client/pair-finalize");
+  });
+
+  it("drops an in-flight pairing PSK across a re-handshake, so a late finalize does not persist", async () => {
+    const ws = new MockWS();
+    const events: string[] = [];
+    const core = new SendspinCore({
+      webSocket: ws as unknown as WebSocket,
+      storage: memStorage(),
+      onPairing: (e) => events.push(e),
+    });
+    await core.connect();
+
+    const { serverSession, server, clientId, priorHash } =
+      completeHandshake(ws);
+    const pairingPsk = base64urlDecode(core.pairingPsk!);
+
+    // Re-handshake #1: promote to the Pairing PSK so activations count as pairing.
+    const s1 = rehandshakeTo(
+      ws,
+      serverSession,
+      priorHash,
+      server,
+      clientId,
+      pairingPsk,
+    );
+
+    // Pairing activate -> client mints a PSK and sends client/pair-finalize.
+    serverSend(ws, s1.session, {
+      type: "server/activate",
+      payload: {
+        activities: ["pairing"],
+        active_roles: [],
+        selected_pair_method: "pairing_psk",
+      },
+    });
+    expect(events).toContain("started");
+    // Consume the pair-finalize frame to keep s1's recv nonce aligned.
+    const finType = JSON.parse(
+      new TextDecoder().decode(
+        s1.session
+          .decrypt(ws.sent[ws.sent.length - 1] as Uint8Array)
+          .subarray(1),
+      ),
+    ).type;
+    expect(finType).toBe("client/pair-finalize");
+
+    // Re-handshake #2: must reset the in-flight pairing state.
+    const s2 = rehandshakeTo(
+      ws,
+      s1.session,
+      s1.hash,
+      server,
+      clientId,
+      pairingPsk,
+    );
+
+    // A late server/pair-finalize is now a no-op: nothing persists, no event.
+    serverSend(ws, s2.session, { type: "server/pair-finalize" });
+    expect(events).not.toContain("finalized");
   });
 
   it("exposes a 43-char pairingPsk that rotates", () => {

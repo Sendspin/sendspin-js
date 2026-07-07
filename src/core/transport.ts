@@ -13,6 +13,7 @@ const utf8 = new TextEncoder();
 const dutf8 = new TextDecoder();
 const HANDSHAKE_TIMEOUT_MS = 30000;
 const MAX_TRANSPORT_PLAINTEXT = 65519; // 65535 - 16 (tag); includes the type byte
+const MAX_TRANSPORT_CIPHERTEXT = MAX_TRANSPORT_PLAINTEXT + 16; // Noise transport message cap
 // Cap total reassembled size so an endless run of fragment-more frames can't exhaust memory.
 const MAX_REASSEMBLY_BYTES = 4 * 1024 * 1024;
 
@@ -189,7 +190,9 @@ export class SendspinTransport {
   }
 
   private onTransportFrame(bytes: Uint8Array): void {
+    if (bytes.length > MAX_TRANSPORT_CIPHERTEXT) return this.fail();
     const pt = this.session!.decrypt(bytes); // throws => fail (via handleRaw catch)
+    if (pt.length < 1) return this.fail();
     this.dispatchPlain(pt[0], pt.subarray(1), pt);
   }
 
@@ -210,6 +213,7 @@ export class SendspinTransport {
 
   private handleFragment(type: number, body: Uint8Array): void {
     if (type === 2 && this.frag === null) {
+      if (body.length < 1) return this.fail();
       const first = body.subarray(1);
       this.frag = { origType: body[0], parts: [first], size: first.length };
       return;
