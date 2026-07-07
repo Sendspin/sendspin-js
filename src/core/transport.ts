@@ -52,6 +52,8 @@ export class SendspinTransport {
   private lastHandshakeHash: Uint8Array = new Uint8Array(0);
   private quiesced = false;
   private outboundQueue: object[] = [];
+  private seenActivate = false;
+  private effectiveActiveRoles: string[] | undefined = undefined;
 
   constructor(
     private wsManager: WebSocketManager,
@@ -96,6 +98,8 @@ export class SendspinTransport {
     this.quiesced = false;
     this.outboundQueue = [];
     this.lastHandshakeHash = new Uint8Array(0);
+    this.seenActivate = false;
+    this.effectiveActiveRoles = undefined;
     const initStr = JSON.stringify({
       type: "client/init",
       payload: {
@@ -298,6 +302,10 @@ export class SendspinTransport {
     this.session = new NoiseSession("responder", newHs.split());
     this.matched = entry;
     this.lastHandshakeHash = newHs.handshakeHash;
+    // The re-handshake re-runs server/hello -> client/hello -> server/activate, so the
+    // next activate is treated as a fresh first (active_roles required again).
+    this.seenActivate = false;
+    this.effectiveActiveRoles = undefined;
     this.cb.onHandshakeComplete(this.handshakeInfo!);
   }
 
@@ -309,10 +317,20 @@ export class SendspinTransport {
       selected_pair_method?: string;
     };
   }): void {
+    const payloadRoles = msg.payload.active_roles;
+    // active_roles is required on the first activate and persists when a later
+    // activate omits it, so authorization uses the effective (persisted) value.
+    if (!this.seenActivate && payloadRoles === undefined) {
+      this.sendGoodbyeAndClose("unauthorized");
+      return;
+    }
+    if (payloadRoles !== undefined) this.effectiveActiveRoles = payloadRoles;
+    this.seenActivate = true;
+
     const result = authorizeActivate(
       this.matched!.category,
       msg.payload.activities,
-      msg.payload.active_roles,
+      this.effectiveActiveRoles,
       this.deps.unpairedAccess,
       msg.payload.selected_pair_method,
     );

@@ -188,7 +188,7 @@ describe("SendspinCore encryption wiring", () => {
     serverSend(ws, session, { type: "server/hello", payload: {} });
     serverSend(ws, session, {
       type: "server/activate",
-      payload: { activities: ["playback"] },
+      payload: { activities: ["playback"], active_roles: ["player@v1"] },
     });
 
     // Socket close -> onTransportClose -> resetActivation (session stays intact).
@@ -197,7 +197,7 @@ describe("SendspinCore encryption wiring", () => {
     // A second activate must re-run (guard was reset), sending client/state again.
     serverSend(ws, session, {
       type: "server/activate",
-      payload: { activities: ["playback"] },
+      payload: { activities: ["playback"], active_roles: ["player@v1"] },
     });
 
     const states = clientControlTypes(ws, session).filter(
@@ -256,6 +256,7 @@ describe("SendspinCore encryption wiring", () => {
       type: "server/activate",
       payload: {
         activities: ["pairing"],
+        active_roles: [],
         selected_pair_method: "pairing_psk",
       },
     });
