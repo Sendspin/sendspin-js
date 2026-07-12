@@ -152,7 +152,9 @@ export class SendspinPlayer {
 
     this.core.onStreamStart = (format, isFormatUpdate) => {
       this.scheduler.initAudioContext();
-      this.scheduler.resumeAudioContext();
+      void this.scheduler.resumeAudioContext().catch((error) => {
+        console.warn("Sendspin: Failed to resume AudioContext:", error);
+      });
       if (!isFormatUpdate) {
         this.scheduler.clearBuffers();
       }
@@ -224,6 +226,15 @@ export class SendspinPlayer {
       },
       runwaySec * 1000 + DISCONNECT_PLAYBACK_RESET_GRACE_MS,
     );
+  }
+
+  /**
+   * Initialize and resume audio playback. Call this directly from a click or
+   * tap handler, before any other await, to satisfy browser autoplay policies.
+   */
+  async unlock(): Promise<void> {
+    this.scheduler.initAudioContext();
+    await this.scheduler.resumeAudioContext();
   }
 
   // Connect to Sendspin server
