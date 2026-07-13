@@ -73,6 +73,7 @@ export class ProtocolHandler {
   private onDelayCommand?: (delayMs: number) => void;
   private getExternalVolume?: () => { volume: number; muted: boolean };
   private timeSyncManager: TimeSyncManager;
+  private hasReceivedServerHello = false;
 
   // Last player payload sent to the current server connection, or null when no
   // full state has been sent yet. Cleared on (re)connect so the first send is
@@ -164,7 +165,7 @@ export class ProtocolHandler {
   private handleServerHello(): void {
     console.log("Sendspin: Connected to server");
     // Per spec: Send initial client/state immediately after server/hello
-    this.lastSentPlayer = null;
+    this.hasReceivedServerHello = true;
     this.sendStateUpdate();
     // Start time synchronization with fixed bursts.
     this.timeSyncManager.startAndSchedule();
@@ -319,6 +320,7 @@ export class ProtocolHandler {
       },
     };
     // Reset so the first client/state after connect is a full snapshot.
+    this.hasReceivedServerHello = false;
     this.lastSentPlayer = null;
     this.wsManager.send(hello);
   }
@@ -340,6 +342,8 @@ export class ProtocolHandler {
   // When skipHardwareRead is true, use stateManager values instead of reading from hardware.
   // This avoids race conditions when responding to volume commands.
   sendStateUpdate(skipHardwareRead = false): void {
+    if (!this.hasReceivedServerHello) return;
+
     let volume = this.stateManager.volume;
     let muted = this.stateManager.muted;
     if (!skipHardwareRead && this.useHardwareVolume && this.getExternalVolume) {

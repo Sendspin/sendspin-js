@@ -182,6 +182,18 @@ describe("ProtocolHandler extra", () => {
     );
   }
 
+  const serverHello = () =>
+    msgEvent(JSON.stringify({ type: "server/hello", payload: {} }));
+
+  function makeReadyHandler(
+    config: ConstructorParameters<typeof ProtocolHandler>[5] = {},
+  ): ProtocolHandler {
+    const handler = makeHandler(config);
+    handler.handleMessage(serverHello());
+    send.mockClear();
+    return handler;
+  }
+
   beforeEach(() => {
     vi.useFakeTimers();
     send = vi.fn();
@@ -255,7 +267,7 @@ describe("ProtocolHandler extra", () => {
     it("reports volume in 0-100 and the player operational state", () => {
       const handler = makeHandler();
       stateManager.volume = 42;
-      handler.sendStateUpdate();
+      handler.handleMessage(serverHello());
 
       const state = lastSent(send, "client/state")!;
       const player = (state.payload as Record<string, unknown>)
@@ -268,7 +280,7 @@ describe("ProtocolHandler extra", () => {
     it("includes static_delay_ms clamped to 0-5000", () => {
       streamHandler = makeStreamHandlerWithDelay(9999);
       const handler = makeHandler();
-      handler.sendStateUpdate();
+      handler.handleMessage(serverHello());
 
       const player = (
         lastSent(send, "client/state")!.payload as Record<string, unknown>
@@ -278,7 +290,7 @@ describe("ProtocolHandler extra", () => {
 
     it("declares set_static_delay in player supported_commands", () => {
       const handler = makeHandler();
-      handler.sendStateUpdate();
+      handler.handleMessage(serverHello());
       const player = (
         lastSent(send, "client/state")!.payload as Record<string, unknown>
       ).player as Record<string, unknown>;
@@ -287,7 +299,7 @@ describe("ProtocolHandler extra", () => {
 
     it("includes required_lead_time_ms (spec: always required for players)", () => {
       const handler = makeHandler();
-      handler.sendStateUpdate();
+      handler.handleMessage(serverHello());
       const player = (
         lastSent(send, "client/state")!.payload as Record<string, unknown>
       ).player as Record<string, unknown>;
@@ -296,7 +308,7 @@ describe("ProtocolHandler extra", () => {
 
     it("includes min_buffer_ms (spec: always required for players)", () => {
       const handler = makeHandler();
-      handler.sendStateUpdate();
+      handler.handleMessage(serverHello());
       const player = (
         lastSent(send, "client/state")!.payload as Record<string, unknown>
       ).player as Record<string, unknown>;
@@ -310,8 +322,7 @@ describe("ProtocolHandler extra", () => {
           useHardwareVolume: true,
           getExternalVolume,
         });
-        // stateManager would say 100/false; hardware says 30/true.
-        handler.sendStateUpdate();
+        handler.handleMessage(serverHello());
 
         const player = (
           lastSent(send, "client/state")!.payload as Record<string, unknown>
@@ -323,11 +334,12 @@ describe("ProtocolHandler extra", () => {
 
       it("skips the hardware read and uses stateManager values when skipHardwareRead", () => {
         const getExternalVolume = vi.fn(() => ({ volume: 30, muted: true }));
-        const handler = makeHandler({
+        const handler = makeReadyHandler({
           useHardwareVolume: true,
           getExternalVolume,
         });
         stateManager.volume = 77;
+        getExternalVolume.mockClear();
         send.mockClear();
 
         handler.sendStateUpdate(true);
@@ -343,9 +355,6 @@ describe("ProtocolHandler extra", () => {
   });
 
   describe("delta client/state (spec: full then changed-only)", () => {
-    const serverHello = () =>
-      msgEvent(JSON.stringify({ type: "server/hello", payload: {} }));
-
     it("sends the full player payload on the first state after connect", () => {
       const handler = makeHandler();
       handler.sendClientHello();
@@ -388,6 +397,16 @@ describe("ProtocolHandler extra", () => {
       });
     });
 
+    it("does not send client/state before server hello", () => {
+      const handler = makeHandler();
+      handler.sendClientHello();
+
+      stateManager.volume = 42;
+      handler.sendStateUpdate();
+
+      expect(lastSent(send, "client/state")).toBeUndefined();
+    });
+
     it("sends only the changed field on the next update", () => {
       const handler = makeHandler();
       handler.sendClientHello();
@@ -415,6 +434,7 @@ describe("ProtocolHandler extra", () => {
       // Reconnect: a fresh server has no prior state to merge into.
       handler.sendClientHello();
       handler.sendStateUpdate();
+      handler.handleMessage(serverHello());
 
       const player = (
         lastSent(send, "client/state")!.payload as Record<string, unknown>
@@ -452,8 +472,7 @@ describe("ProtocolHandler extra", () => {
     });
 
     it("sends a follow-up client/state reflecting the commanded volume", () => {
-      const handler = makeHandler();
-      send.mockClear();
+      const handler = makeReadyHandler();
       handler.handleMessage(cmd({ command: "volume", volume: 33 }));
       const player = (
         lastSent(send, "client/state")!.payload as Record<string, unknown>
@@ -490,8 +509,7 @@ describe("ProtocolHandler extra", () => {
     });
 
     it("sends a client/state after ending the player stream", () => {
-      const handler = makeHandler();
-      send.mockClear();
+      const handler = makeReadyHandler();
       handler.handleMessage(end({}));
       expect(lastSent(send, "client/state")).toBeDefined();
     });
