@@ -253,7 +253,7 @@ export type Codec = "pcm" | "opus" | "flac";
 
 /**
  * Audio sync correction mode:
- * - "sync": Multi-device sync, may use pitch-changing playback-rate adjustments for faster convergence.
+ * - "sync": Multi-device sync, may use small playback-rate adjustments (capped at ±0.5%, inaudible) for faster convergence.
  * - "quality": No rate changes; uses sample fixes and tighter resyncs, so you get fewer adjustments but occasional jumps. Starts out of sync until the clock converges. Not recommended for bad networks.
  * - "quality-local": Avoids playback-rate changes; may drift vs. group sync and only resyncs as a last resort.
  */
@@ -266,9 +266,9 @@ export type CorrectionMode = "sync" | "quality" | "quality-local";
 export interface CorrectionThresholds {
   /** Hard resync when sync error exceeds this (ms) */
   resyncAboveMs: number;
-  /** Use ±2% playback rate when error exceeds this (ms). Infinity = disabled. */
+  /** Use the firm (±0.5%) playback-rate tier when error exceeds this (ms). Infinity = disabled. */
   rate2AboveMs: number;
-  /** Use ±1% playback rate when error exceeds this (ms). Infinity = disabled. */
+  /** Use the soft (±0.3%) playback-rate tier when error exceeds this (ms). Infinity = disabled. */
   rate1AboveMs: number;
   /** Use sample insertion/deletion when error is below this (ms). 0 = disabled. */
   samplesBelowMs: number;
@@ -296,10 +296,9 @@ export interface SendspinPlayerConfig extends SendspinCoreConfig {
 
   /**
    * Sync correction mode:
-   * - "sync" (default): Corrects out of sync playback using all methods and may use pitch-changing
-   *   playback-rate adjustments for faster convergence.
-   *   Best for multi-device sync but may cause audible pitch shifts, especially just
-   *   after starting of playback.
+   * - "sync" (default): Corrects out of sync playback using all methods, including small
+   *   playback-rate adjustments capped at ±0.5% (inaudible) for faster convergence.
+   *   Best for multi-device sync.
    * - "quality": No playback-rate changes; uses sample fixes and tighter resyncs, so expect fewer adjustments but occasional jumps. Starts out of sync until the clock converges. Not recommended for bad networks.
    * - "quality-local": Avoids playback-rate changes; may drift vs. other players and only resyncs
    *   as a last resort.
@@ -330,12 +329,6 @@ export interface SendspinPlayerConfig extends SendspinCoreConfig {
    * Default: true
    */
   useOutputLatencyCompensation?: boolean;
-
-  /**
-   * Storage for persisting SDK state (e.g., cached output latency).
-   * Defaults to localStorage. Pass null to disable persistence.
-   */
-  storage?: SendspinStorage | null;
 }
 
 /**
@@ -449,9 +442,29 @@ export interface SendspinCoreConfig {
    * Positive values make playback earlier to compensate for downstream device latency.
    * Allowed range: 0-5000.
    * Runtime update behavior depends on the active correction mode settings.
-   * Defaults to a browser/platform-specific heuristic value if not provided.
+   * Falls back to a persisted value, then `defaultSyncDelay`, then 0.
+   * SendspinPlayer supplies a browser/platform-specific heuristic as that default.
+   *
+   * Server-commanded delays (set_static_delay) are persisted via `storage` and
+   * restored on the next connect. Passing `syncDelay` explicitly overrides any
+   * persisted value for that connect.
    */
   syncDelay?: number;
+
+  /**
+   * Fallback static delay used when neither `syncDelay` nor a persisted value
+   * is available. SendspinPlayer sets this to a platform-specific heuristic.
+   * @internal
+   */
+  defaultSyncDelay?: number;
+
+  /**
+   * Storage for persisting SDK state (cached output latency and the
+   * server-commanded static delay). SendspinCore persists only when this is
+   * provided. SendspinPlayer defaults it to localStorage. Pass null to
+   * disable persistence.
+   */
+  storage?: SendspinStorage | null;
 
   /**
    * Minimum startup lead time in milliseconds reported to the server via
@@ -488,6 +501,7 @@ export interface SendspinCoreConfig {
   /**
    * Callback when server sends a set_static_delay command.
    * Called with the new static delay in milliseconds (0-5000).
+   * The SDK persists the value via `storage` before invoking this callback.
    */
   onDelayCommand?: (delayMs: number) => void;
 

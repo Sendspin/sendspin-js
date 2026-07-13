@@ -6,7 +6,20 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { SendspinCore } from "../../src/core/core";
-import type { StreamFormat } from "../../src/types";
+import type { SendspinStorage, StreamFormat } from "../../src/types";
+
+function makeStorage(): SendspinStorage & { data: Map<string, string> } {
+  const data = new Map<string, string>();
+  return {
+    data,
+    getItem: (k) => (data.has(k) ? data.get(k)! : null),
+    setItem: (k, v) => {
+      data.set(k, v);
+    },
+  };
+}
+
+const STATIC_DELAY_KEY = "sendspin-static-delay-ms";
 
 const PCM_FORMAT: StreamFormat = {
   codec: "pcm",
@@ -340,6 +353,59 @@ describe("SendspinCore.setSyncDelay", () => {
   });
 });
 
+describe("SendspinCore static delay persistence", () => {
+  it("persists a server-commanded delay change to storage", () => {
+    const storage = makeStorage();
+    const core = new SendspinCore({
+      baseUrl: "http://h",
+      playerId: "p",
+      storage,
+    });
+
+    core.handleSyncDelayChange(123);
+
+    expect(storage.data.get(STATIC_DELAY_KEY)).toBe("123");
+  });
+
+  it("restores a persisted delay on a fresh core with the same storage", () => {
+    const storage = makeStorage();
+    storage.data.set(STATIC_DELAY_KEY, "321");
+
+    const core = new SendspinCore({
+      baseUrl: "http://h",
+      playerId: "p",
+      storage,
+    });
+
+    expect(core.getSyncDelayMs()).toBe(321);
+  });
+
+  it("lets an explicit config.syncDelay override the persisted value", () => {
+    const storage = makeStorage();
+    storage.data.set(STATIC_DELAY_KEY, "321");
+
+    const core = new SendspinCore({
+      baseUrl: "http://h",
+      playerId: "p",
+      syncDelay: 100,
+      storage,
+    });
+
+    expect(core.getSyncDelayMs()).toBe(100);
+  });
+
+  it("does not throw or persist when storage is disabled", () => {
+    const core = new SendspinCore({
+      baseUrl: "http://h",
+      playerId: "p",
+      storage: null,
+    });
+
+    expect(() => core.handleSyncDelayChange(123)).not.toThrow();
+    expect(core.getSyncDelayMs()).toBe(123);
+  });
+});
+
 describe("SendspinCore.disconnect ordering and idempotency", () => {
   it("resets the time filter on disconnect", () => {
     const core = new SendspinCore({ baseUrl: "http://h", playerId: "p" });
@@ -357,6 +423,29 @@ describe("SendspinCore.disconnect ordering and idempotency", () => {
     const send = spySend(core);
     core.disconnect("user_request");
     expect(send).not.toHaveBeenCalled();
+  });
+
+  it("defaults the goodbye reason to restart, but forwards an explicit reason", () => {
+    const core = new SendspinCore({ baseUrl: "http://h", playerId: "p" });
+    const send = spySend(core);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (core as any).wsManager.isConnected = () => true;
+
+    core.disconnect();
+    expect(send).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        type: "client/goodbye",
+        payload: { reason: "restart" },
+      }),
+    );
+
+    core.disconnect("shutdown");
+    expect(send).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        type: "client/goodbye",
+        payload: { reason: "shutdown" },
+      }),
+    );
   });
 
   it("fires onConnectionClose only via the close handler, not on disconnect()", () => {

@@ -12,6 +12,7 @@ import { ProtocolHandler } from "./protocol-handler";
 import { StateManager } from "./state-manager";
 import { WebSocketManager } from "./websocket-manager";
 import { SendspinTimeFilter } from "./time-filter";
+import { StaticDelayStore } from "./static-delay-store";
 import { clampSyncDelayMs } from "../sync-delay";
 import type {
   SendspinCoreConfig,
@@ -39,6 +40,7 @@ export class SendspinCore implements StreamHandler {
 
   private config: SendspinCoreConfig;
   private _syncDelayMs: number;
+  private delayStore: StaticDelayStore;
 
   // Stream events — consumers (e.g., SendspinPlayer) subscribe to these
   private _onAudioData?: (chunk: DecodedAudioChunk) => void;
@@ -59,7 +61,13 @@ export class SendspinCore implements StreamHandler {
     const clientName = config.clientName ?? `Sendspin JS Client (${randomId})`;
 
     this.config = { ...config, playerId, clientName };
-    this._syncDelayMs = clampSyncDelayMs(config.syncDelay ?? 0);
+
+    // Initial delay precedence: explicit config, then persisted, then default.
+    this.delayStore = new StaticDelayStore(config.storage ?? null);
+    const persisted = this.delayStore.load();
+    const initialDelay =
+      config.syncDelay ?? persisted ?? config.defaultSyncDelay ?? 0;
+    this._syncDelayMs = clampSyncDelayMs(initialDelay);
 
     this.timeFilter = new SendspinTimeFilter(0, 1.1, 2.0, 1e-12);
     this.stateManager = new StateManager(config.onStateChange);
@@ -127,9 +135,14 @@ export class SendspinCore implements StreamHandler {
     this._onVolumeUpdate?.();
   }
 
-  handleSyncDelayChange(delayMs: number): void {
+  private applyDelay(delayMs: number): void {
     this._syncDelayMs = clampSyncDelayMs(delayMs);
+    this.delayStore.save(this._syncDelayMs);
     this._onSyncDelayChange?.(this._syncDelayMs);
+  }
+
+  handleSyncDelayChange(delayMs: number): void {
+    this.applyDelay(delayMs);
   }
 
   getSyncDelayMs(): number {
@@ -233,7 +246,7 @@ export class SendspinCore implements StreamHandler {
     this.stateManager.currentStreamFormat = null;
   }
 
-  disconnect(reason: GoodbyeReason = "shutdown"): void {
+  disconnect(reason: GoodbyeReason = "restart"): void {
     if (this.wsManager.isConnected()) {
       this.protocolHandler.sendGoodbye(reason);
     }
@@ -266,8 +279,7 @@ export class SendspinCore implements StreamHandler {
   // ========================================
 
   setSyncDelay(delayMs: number): void {
-    this._syncDelayMs = clampSyncDelayMs(delayMs);
-    this._onSyncDelayChange?.(this._syncDelayMs);
+    this.applyDelay(delayMs);
     this.protocolHandler.sendStateUpdate();
   }
 

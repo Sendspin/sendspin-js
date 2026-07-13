@@ -94,9 +94,15 @@ export class SendspinPlayer {
       );
     }
 
-    const syncDelay = config.syncDelay ?? getDefaultSyncDelay();
+    let storage: SendspinStorage | null = null;
+    if (config.storage !== undefined) {
+      storage = config.storage;
+    } else if (typeof localStorage !== "undefined") {
+      storage = localStorage;
+    }
 
-    // Create core (protocol + decoding)
+    // Create core (protocol + decoding). It resolves the effective initial
+    // delay, so read it back below for the scheduler's starting value.
     this.core = new SendspinCore({
       playerId: config.playerId,
       baseUrl: config.baseUrl,
@@ -106,7 +112,9 @@ export class SendspinPlayer {
       bufferCapacity:
         config.bufferCapacity ??
         (outputMode === "media-element" ? 1024 * 1024 * 5 : 1024 * 1024 * 1.5),
-      syncDelay,
+      syncDelay: config.syncDelay,
+      defaultSyncDelay: getDefaultSyncDelay(),
+      storage,
       requiredLeadTimeMs: config.requiredLeadTimeMs,
       minBufferMs: config.minBufferMs,
       useHardwareVolume: config.useHardwareVolume,
@@ -117,14 +125,9 @@ export class SendspinPlayer {
       onStateChange: config.onStateChange,
     });
 
-    // Create scheduler (Web Audio playback)
-    let storage: SendspinStorage | null = null;
-    if (config.storage !== undefined) {
-      storage = config.storage;
-    } else if (typeof localStorage !== "undefined") {
-      storage = localStorage;
-    }
+    const syncDelay = this.core.getSyncDelayMs();
 
+    // Create scheduler (Web Audio playback)
     this.scheduler = new AudioScheduler({
       stateManager: this.core._stateManager,
       timeFilter: this.core._timeFilter,
@@ -149,7 +152,9 @@ export class SendspinPlayer {
 
     this.core.onStreamStart = (format, isFormatUpdate) => {
       this.scheduler.initAudioContext();
-      this.scheduler.resumeAudioContext();
+      void this.scheduler.resumeAudioContext().catch((error) => {
+        console.warn("Sendspin: Failed to resume AudioContext:", error);
+      });
       if (!isFormatUpdate) {
         this.scheduler.clearBuffers();
       }
@@ -223,6 +228,15 @@ export class SendspinPlayer {
     );
   }
 
+  /**
+   * Initialize and resume audio playback. Call this directly from a click or
+   * tap handler, before any other await, to satisfy browser autoplay policies.
+   */
+  async unlock(): Promise<void> {
+    this.scheduler.initAudioContext();
+    await this.scheduler.resumeAudioContext();
+  }
+
   // Connect to Sendspin server
   async connect(): Promise<void> {
     this.suppressDisconnectPlaybackReset = false;
@@ -231,9 +245,9 @@ export class SendspinPlayer {
 
   /**
    * Disconnect from Sendspin server
-   * @param reason - Optional reason for disconnecting (default: 'shutdown')
+   * @param reason - Optional reason for disconnecting (default: 'restart')
    */
-  disconnect(reason: GoodbyeReason = "shutdown"): void {
+  disconnect(reason: GoodbyeReason = "restart"): void {
     this.cancelPendingDisconnectPlaybackReset();
     this.suppressDisconnectPlaybackReset = true;
 

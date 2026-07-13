@@ -15,7 +15,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { AudioScheduler } from "../../src/audio/scheduler";
+import { AudioScheduler, SYNC_ERROR_ALPHA } from "../../src/audio/scheduler";
 import { StateManager } from "../../src/core/state-manager";
 import type { DecodedAudioChunk, StreamFormat } from "../../src/types";
 
@@ -70,7 +70,12 @@ class FakeBufferSource {
 }
 
 class FakeGainNode {
-  gain = { value: 1.0 };
+  gain = {
+    value: 1.0,
+    setTargetAtTime(target: number, _startTime: number, _timeConstant: number) {
+      this.value = target;
+    },
+  };
   connect() {}
 }
 
@@ -82,6 +87,8 @@ class FakeAudioContext {
   outputLatency = 0;
   destination = {};
   startedSources: FakeBufferSource[] = [];
+  resumeCalls = 0;
+  resumeError: Error | null = null;
   // deliberately NO getOutputTimestamp -> clock stays "estimated"
   constructor(opts?: { sampleRate?: number }) {
     this.sampleRate = opts?.sampleRate ?? 48000;
@@ -98,7 +105,9 @@ class FakeAudioContext {
   createMediaStreamDestination() {
     return { stream: {} };
   }
-  resume() {
+  resume(): Promise<void> {
+    this.resumeCalls++;
+    if (this.resumeError) return Promise.reject(this.resumeError);
     this.state = "running";
     return Promise.resolve();
   }
@@ -109,6 +118,7 @@ class FakeAudioContext {
 }
 
 let lastCtx: FakeAudioContext | null = null;
+let audioContextCreateCount = 0;
 
 // ---------------------------------------------------------------------------
 // Controllable time-filter stub
@@ -163,16 +173,19 @@ function makeChunk(
   };
 }
 
-interface Harness {
+interface SchedulerHarness {
   scheduler: AudioScheduler;
   state: StateManager;
   tf: FakeTimeFilter;
+}
+
+interface Harness extends SchedulerHarness {
   ctx: FakeAudioContext;
 }
 
-function setup(
+function createScheduler(
   opts: Partial<ConstructorParameters<typeof AudioScheduler>[0]> = {},
-): Harness {
+): SchedulerHarness {
   const state = new StateManager();
   const tf = new FakeTimeFilter();
   const scheduler = new AudioScheduler({
@@ -186,6 +199,13 @@ function setup(
   });
   // currentStreamFormat drives ctx sample rate
   state.currentStreamFormat = PCM_FORMAT;
+  return { scheduler, state, tf };
+}
+
+function setup(
+  opts: Partial<ConstructorParameters<typeof AudioScheduler>[0]> = {},
+): Harness {
+  const { scheduler, state, tf } = createScheduler(opts);
   scheduler.initAudioContext();
   const ctx = lastCtx!;
   // running state so playback proceeds
@@ -199,9 +219,11 @@ let nowMsValue = 0;
 beforeEach(() => {
   nowMsValue = 5_000_000; // 5000s in ms -> matches serverTime base below
   lastCtx = null;
+  audioContextCreateCount = 0;
   // global Web Audio + browser stubs
   vi.stubGlobal("AudioContext", function (opts?: { sampleRate?: number }) {
     const ctx = new FakeAudioContext(opts);
+    audioContextCreateCount++;
     lastCtx = ctx;
     return ctx;
   });
@@ -227,6 +249,89 @@ afterEach(() => {
 function nowUs(): number {
   return nowMsValue * 1000;
 }
+
+describe("AudioScheduler AudioContext lifecycle", () => {
+  beforeEach(() => {
+    vi.spyOn(console, "log").mockImplementation(() => {});
+  });
+
+  it("does not resume a newly initialized context that is already running", async () => {
+    const { scheduler } = createScheduler();
+
+    expect(lastCtx).toBeNull();
+    scheduler.initAudioContext();
+
+    const ctx = lastCtx!;
+    expect(audioContextCreateCount).toBe(1);
+    expect(ctx.sampleRate).toBe(SAMPLE_RATE);
+    expect(scheduler.getAudioContext()).toBe(ctx);
+
+    await scheduler.resumeAudioContext();
+    expect(ctx.resumeCalls).toBe(0);
+  });
+
+  it("resumes a suspended context", async () => {
+    const h = setup();
+    h.ctx.state = "suspended";
+
+    await expect(h.scheduler.resumeAudioContext()).resolves.toBeUndefined();
+
+    expect(h.ctx.resumeCalls).toBe(1);
+    expect(h.ctx.state).toBe("running");
+  });
+
+  it("leaves an already-running context untouched", async () => {
+    const h = setup();
+
+    await expect(h.scheduler.resumeAudioContext()).resolves.toBeUndefined();
+
+    expect(h.ctx.resumeCalls).toBe(0);
+    expect(h.ctx.state).toBe("running");
+  });
+
+  it("keeps repeated initialization and resume calls idempotent", async () => {
+    const { scheduler } = createScheduler();
+    scheduler.initAudioContext();
+    const ctx = lastCtx!;
+    ctx.state = "suspended";
+
+    scheduler.initAudioContext();
+    await scheduler.resumeAudioContext();
+    await scheduler.resumeAudioContext();
+
+    expect(audioContextCreateCount).toBe(1);
+    expect(ctx.resumeCalls).toBe(1);
+    expect(ctx.state).toBe("running");
+  });
+
+  it("creates a new context after close", () => {
+    const { scheduler } = createScheduler();
+    scheduler.initAudioContext();
+    const firstCtx = lastCtx;
+
+    scheduler.close();
+    scheduler.initAudioContext();
+
+    expect(audioContextCreateCount).toBe(2);
+    expect(lastCtx).not.toBe(firstCtx);
+  });
+
+  it("propagates resume failures and allows retrying", async () => {
+    const h = setup();
+    const resumeError = new Error("resume blocked");
+    h.ctx.state = "suspended";
+    h.ctx.resumeError = resumeError;
+
+    await expect(h.scheduler.resumeAudioContext()).rejects.toBe(resumeError);
+    expect(h.ctx.resumeCalls).toBe(1);
+    expect(h.ctx.state).toBe("suspended");
+
+    h.ctx.resumeError = null;
+    await expect(h.scheduler.resumeAudioContext()).resolves.toBeUndefined();
+    expect(h.ctx.resumeCalls).toBe(2);
+    expect(h.ctx.state).toBe("running");
+  });
+});
 
 describe("AudioScheduler scheduling math", () => {
   it("first chunk schedules at ctxTime + headroom when chunk client time == now", () => {
@@ -348,12 +453,18 @@ describe("AudioScheduler consecutive-chunk continuity", () => {
 });
 
 describe("AudioScheduler drift correction (sync mode)", () => {
-  // The correction branch keys off the EMA-smoothed error (alpha 0.1), seeded
-  // from 0 after the first chunk. So a single correction chunk with raw error R
-  // produces smoothedError = 0.1 * R. We size each offset so 0.1*R lands in the
-  // target band. The first chunk establishes nextPlaybackTime at offset 0; the
-  // offset is then applied for one contiguous second chunk (gap 100ms < 0.1s
-  // threshold, so the in-sync correction branch — not the gap branch — runs).
+  // The correction branch keys off the EMA-smoothed error, seeded from 0 after
+  // the first chunk. So a single correction chunk with raw error R produces
+  // smoothedError = SYNC_ERROR_ALPHA * R. offsetForSmoothedMs sizes the raw
+  // offset to land a target smoothed error in the desired band, independent of
+  // the alpha value. The first chunk establishes nextPlaybackTime at offset 0.
+  // The offset is then applied for one contiguous second chunk (gap 100ms <
+  // 0.1s threshold, so the in-sync correction branch runs, not the gap branch).
+
+  // Raw clientOffset (µs) that yields the given smoothed error (ms) after one chunk.
+  function offsetForSmoothedMs(ms: number): number {
+    return Math.round((ms / SYNC_ERROR_ALPHA) * 1000);
+  }
 
   function primeFirstChunk(h: Harness, base: number) {
     h.scheduler.handleDecodedChunk(makeChunk(base, 0));
@@ -380,8 +491,8 @@ describe("AudioScheduler drift correction (sync mode)", () => {
     const h = setup();
     const base = nowUs();
     primeFirstChunk(h, base);
-    // raw 20ms -> smoothed 2ms, in (deadband 1, samplesBelow 8).
-    correctOnce(h, base, 20_000);
+    // smoothed 2ms, in (deadband 1, samplesBelow 8).
+    correctOnce(h, base, offsetForSmoothedMs(2));
     expect(h.scheduler.syncInfo.correctionMethod).toBe("samples");
     expect([1, -1]).toContain(h.scheduler.syncInfo.samplesAdjusted);
   });
@@ -390,11 +501,23 @@ describe("AudioScheduler drift correction (sync mode)", () => {
     const h = setup();
     const base = nowUs();
     primeFirstChunk(h, base);
-    // raw 300ms -> smoothed 30ms, in (samplesBelow 8, resyncAbove 200).
-    correctOnce(h, base, 300_000);
+    // smoothed 30ms, in (samplesBelow 8, resyncAbove 200).
+    correctOnce(h, base, offsetForSmoothedMs(30));
     expect(h.scheduler.syncInfo.correctionMethod).toBe("rate");
-    expect([0.98, 0.99, 1.01, 1.02]).toContain(
+    expect([0.995, 0.997, 1.003, 1.005]).toContain(
       h.scheduler.syncInfo.playbackRate,
+    );
+  });
+
+  it("keeps the firm rate tier within the ±0.5% spec cap for large sub-resync errors", () => {
+    const h = setup();
+    const base = nowUs();
+    primeFirstChunk(h, base);
+    // smoothed 50ms, above rate2AboveMs (35) and below resync (200).
+    correctOnce(h, base, offsetForSmoothedMs(50));
+    expect(h.scheduler.syncInfo.correctionMethod).toBe("rate");
+    expect(Math.abs(h.scheduler.syncInfo.playbackRate - 1)).toBeLessThanOrEqual(
+      0.005 + 1e-9,
     );
   });
 
@@ -408,9 +531,9 @@ describe("AudioScheduler drift correction (sync mode)", () => {
     // server timestamps contiguous (gap 100ms) so the in-sync resync branch
     // runs, not the gap branch.
     nowMsValue += 2000;
-    // raw error must still clear resyncAbove after smoothing: raw 2500ms ->
-    // smoothed 250ms. (nowUs advanced 2s, so add 2s to the offset to keep raw.)
-    h.tf.clientOffsetUs = 2_000_000 + 2_500_000;
+    // Drive smoothed error to 250ms (> resyncAbove 200). nowUs advanced 2s, so
+    // add 2s to the offset to keep the raw error at the intended magnitude.
+    h.tf.clientOffsetUs = 2_000_000 + offsetForSmoothedMs(250);
     h.scheduler.handleDecodedChunk(makeChunk(base + 100_000, 0));
     h.scheduler.processAudioQueue();
     expect(h.scheduler.syncInfo.correctionMethod).toBe("resync");
@@ -429,6 +552,29 @@ describe("AudioScheduler server-timestamp gap handling", () => {
     h.scheduler.handleDecodedChunk(makeChunk(base + 5_000_000, 0));
     h.scheduler.processAudioQueue();
     expect(h.scheduler.syncInfo.correctionMethod).toBe("resync");
+  });
+});
+
+describe("AudioScheduler cutover backlog handling", () => {
+  it("drops late backlog on a cutover instead of clamping it forward", () => {
+    const h = setup();
+    const base = nowUs();
+    // Schedule 5 contiguous 100ms chunks so several sources are pending.
+    for (let i = 0; i < 5; i++) {
+      h.scheduler.handleDecodedChunk(makeChunk(base + i * 100_000, 0));
+    }
+    h.scheduler.processAudioQueue();
+    expect(h.ctx.startedSources.length).toBeGreaterThanOrEqual(2);
+
+    // A filter correction shifts the mapping so all buffered audio is now ~2s late.
+    h.tf.clientOffsetUs = -2_000_000;
+    const startedBeforeCutover = h.ctx.startedSources.length;
+
+    // A runtime sync-delay change triggers a guarded cutover (sync mode).
+    h.scheduler.setSyncDelay(10);
+
+    // The late backlog is dropped, not re-scheduled at clamped-forward times.
+    expect(h.ctx.startedSources.length - startedBeforeCutover).toBe(0);
   });
 });
 
@@ -513,15 +659,29 @@ describe("AudioScheduler empty / no-context edge cases", () => {
 });
 
 describe("AudioScheduler volume", () => {
-  it("maps volume 0-100 to gain 0-1 and applies mute", () => {
+  it("applies the perceptual (volume/100)^1.5 curve to gain", () => {
     const h = setup();
+    const gain = (h.scheduler as any).gainNode;
+
     h.state.volume = 50;
     h.scheduler.updateVolume();
-    const gain = (h.ctx as any) && (h.scheduler as any).gainNode;
-    expect(gain.gain.value).toBeCloseTo(0.5, 6);
+    expect(gain.gain.value).toBeCloseTo(Math.pow(0.5, 1.5), 6);
 
+    h.state.volume = 100;
+    h.scheduler.updateVolume();
+    expect(gain.gain.value).toBeCloseTo(1.0, 6);
+
+    h.state.volume = 0;
+    h.scheduler.updateVolume();
+    expect(gain.gain.value).toBeCloseTo(0, 6);
+  });
+
+  it("maps muted to gain 0 regardless of volume", () => {
+    const h = setup();
+    h.state.volume = 80;
     h.state.muted = true;
     h.scheduler.updateVolume();
+    const gain = (h.scheduler as any).gainNode;
     expect(gain.gain.value).toBe(0);
   });
 
