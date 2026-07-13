@@ -31,6 +31,19 @@ const STATE_UPDATE_INTERVAL = 5000; // 5 seconds
 const DEFAULT_REQUIRED_LEAD_TIME_MS = 250;
 const DEFAULT_MIN_BUFFER_MS = 250;
 
+type PlayerStatePayload = NonNullable<ClientState["payload"]["player"]>;
+
+// Snapshot of the diffable player fields. supported_commands is static, sent
+// only in the initial full state, so it is not tracked here.
+interface SentPlayerState {
+  state: NonNullable<PlayerStatePayload["state"]>;
+  volume: number;
+  muted: boolean;
+  static_delay_ms: number;
+  required_lead_time_ms: number;
+  min_buffer_ms: number;
+}
+
 function assertBufferMs(value: number, name: string): void {
   if (!isFinite(value) || value < 0) {
     throw new RangeError(`${name} must be a non-negative finite number`);
@@ -60,6 +73,11 @@ export class ProtocolHandler {
   private onDelayCommand?: (delayMs: number) => void;
   private getExternalVolume?: () => { volume: number; muted: boolean };
   private timeSyncManager: TimeSyncManager;
+
+  // Last player payload sent to the current server connection, or null when no
+  // full state has been sent yet. Cleared on (re)connect so the first send is
+  // full again.
+  private lastSentPlayer: SentPlayerState | null = null;
 
   constructor(
     private playerId: string,
@@ -146,6 +164,7 @@ export class ProtocolHandler {
   private handleServerHello(): void {
     console.log("Sendspin: Connected to server");
     // Per spec: Send initial client/state immediately after server/hello
+    this.lastSentPlayer = null;
     this.sendStateUpdate();
     // Start time synchronization with fixed bursts.
     this.timeSyncManager.startAndSchedule();
@@ -299,6 +318,8 @@ export class ProtocolHandler {
         },
       },
     };
+    // Reset so the first client/state after connect is a full snapshot.
+    this.lastSentPlayer = null;
     this.wsManager.send(hello);
   }
 
@@ -314,7 +335,8 @@ export class ProtocolHandler {
     this.sendStateUpdate();
   }
 
-  // Send state update
+  // Send state update. The first send after a (re)connect is a full snapshot;
+  // later sends are deltas carrying only changed fields, which the server merges.
   // When skipHardwareRead is true, use stateManager values instead of reading from hardware.
   // This avoids race conditions when responding to volume commands.
   sendStateUpdate(skipHardwareRead = false): void {
@@ -329,20 +351,39 @@ export class ProtocolHandler {
     const syncDelayMs = this.streamHandler.getSyncDelayMs();
     const staticDelayMs = clampSyncDelayMs(syncDelayMs);
 
+    const current: SentPlayerState = {
+      state: this.stateManager.playerState,
+      volume,
+      muted,
+      static_delay_ms: staticDelayMs,
+      required_lead_time_ms: this.requiredLeadTimeMs,
+      min_buffer_ms: this.minBufferMs,
+    };
+
+    const last = this.lastSentPlayer;
+    let player: PlayerStatePayload;
+    if (last === null) {
+      // Full state: every field plus the static supported_commands.
+      player = { ...current, supported_commands: ["set_static_delay"] };
+    } else {
+      // Delta: only changed fields.
+      player = {};
+      if (current.state !== last.state) player.state = current.state;
+      if (current.static_delay_ms !== last.static_delay_ms)
+        player.static_delay_ms = current.static_delay_ms;
+      if (current.volume !== last.volume) player.volume = current.volume;
+      if (current.muted !== last.muted) player.muted = current.muted;
+      if (current.required_lead_time_ms !== last.required_lead_time_ms)
+        player.required_lead_time_ms = current.required_lead_time_ms;
+      if (current.min_buffer_ms !== last.min_buffer_ms)
+        player.min_buffer_ms = current.min_buffer_ms;
+    }
+
     const message: ClientState = {
       type: "client/state" as MessageType.CLIENT_STATE,
-      payload: {
-        player: {
-          state: this.stateManager.playerState,
-          volume,
-          muted,
-          static_delay_ms: staticDelayMs,
-          required_lead_time_ms: this.requiredLeadTimeMs,
-          min_buffer_ms: this.minBufferMs,
-          supported_commands: ["set_static_delay"],
-        },
-      },
+      payload: { player },
     };
+    this.lastSentPlayer = current;
     this.wsManager.send(message);
   }
 

@@ -88,12 +88,13 @@ export interface ClientState {
   type: MessageType.CLIENT_STATE;
   payload: {
     player?: {
-      state: "synchronized" | "error";
-      volume: number;
-      muted: boolean;
-      static_delay_ms: number;
-      required_lead_time_ms: number;
-      min_buffer_ms: number;
+      // Full initial state includes all fields; deltas include only changed fields.
+      state?: "synchronized" | "error";
+      static_delay_ms?: number;
+      volume?: number;
+      muted?: boolean;
+      required_lead_time_ms?: number;
+      min_buffer_ms?: number;
       supported_commands?: string[];
     };
   };
