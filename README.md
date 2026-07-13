@@ -88,6 +88,7 @@ const player = new SendspinPlayer({
   clientName: 'My Player',
   webSocket: ws,
 });
+await player.unlock();
 await player.connect();
 ```
 
