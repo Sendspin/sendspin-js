@@ -166,7 +166,6 @@ export class ProtocolHandler {
     console.log("Sendspin: Connected to server");
     // Per spec: Send initial client/state immediately after server/hello
     this.hasReceivedServerHello = true;
-    this.lastSentPlayer = null;
     this.sendStateUpdate();
     // Start time synchronization with fixed bursts.
     this.timeSyncManager.startAndSchedule();
