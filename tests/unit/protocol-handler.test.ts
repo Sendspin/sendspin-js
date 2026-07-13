@@ -365,6 +365,29 @@ describe("ProtocolHandler extra", () => {
       });
     });
 
+    it("sends the full player payload when state changes before server hello", () => {
+      const handler = makeHandler();
+      handler.sendClientHello();
+      stateManager.volume = 42;
+      handler.sendStateUpdate();
+      send.mockClear();
+
+      handler.handleMessage(serverHello());
+
+      const player = (
+        lastSent(send, "client/state")!.payload as Record<string, unknown>
+      ).player as Record<string, unknown>;
+      expect(player).toMatchObject({
+        state: "synchronized",
+        volume: 42,
+        muted: expect.any(Boolean),
+        static_delay_ms: expect.any(Number),
+        required_lead_time_ms: expect.any(Number),
+        min_buffer_ms: expect.any(Number),
+        supported_commands: ["set_static_delay"],
+      });
+    });
+
     it("sends only the changed field on the next update", () => {
       const handler = makeHandler();
       handler.sendClientHello();
