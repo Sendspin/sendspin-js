@@ -35,6 +35,17 @@ function spySend(core: SendspinCore): ReturnType<typeof vi.fn> {
   return send;
 }
 
+function completeHandshake(
+  core: SendspinCore,
+  send: ReturnType<typeof vi.fn>,
+): void {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (core as any).protocolHandler.handleMessage({
+    data: JSON.stringify({ type: "server/hello", payload: {} }),
+  } as MessageEvent);
+  send.mockClear();
+}
+
 function seedMetadata(
   core: SendspinCore,
   timestampUs: number,
@@ -285,6 +296,10 @@ describe("SendspinCore command + state forwarding", () => {
     core = new SendspinCore({ baseUrl: "http://h", playerId: "p" });
   });
 
+  afterEach(() => {
+    core._stateManager.clearAllIntervals();
+  });
+
   it("forwards a controller command with command name and params merged", () => {
     const send = spySend(core);
     core.sendCommand("volume", { volume: 42 });
@@ -297,16 +312,18 @@ describe("SendspinCore command + state forwarding", () => {
 
   it("setVolume clamps in state manager and sends a client/state update", () => {
     const send = spySend(core);
-    core.setVolume(150);
+    completeHandshake(core, send);
+    core.setVolume(-10);
 
-    expect(core.volume).toBe(100); // clamped 0-100
+    expect(core.volume).toBe(0); // clamped 0-100
     expect(send).toHaveBeenCalledTimes(1);
     expect(send.mock.calls[0][0].type).toBe("client/state");
-    expect(send.mock.calls[0][0].payload.player.volume).toBe(100);
+    expect(send.mock.calls[0][0].payload.player.volume).toBe(0);
   });
 
   it("setMuted updates state and sends a client/state update", () => {
     const send = spySend(core);
+    completeHandshake(core, send);
     core.setMuted(true);
 
     expect(core.muted).toBe(true);
@@ -330,10 +347,15 @@ describe("SendspinCore.setSyncDelay", () => {
     core = new SendspinCore({ baseUrl: "http://h", playerId: "p" });
   });
 
+  afterEach(() => {
+    core._stateManager.clearAllIntervals();
+  });
+
   it("clamps the delay, updates getSyncDelayMs, fires callback, and sends state", () => {
     const cb = vi.fn();
     core.onSyncDelayChange = cb;
     const send = spySend(core);
+    completeHandshake(core, send);
 
     core.setSyncDelay(99999); // clamp to 5000
 
