@@ -87,6 +87,8 @@ class FakeAudioContext {
   outputLatency = 0;
   destination = {};
   startedSources: FakeBufferSource[] = [];
+  resumeCalls = 0;
+  resumeError: Error | null = null;
   // deliberately NO getOutputTimestamp -> clock stays "estimated"
   constructor(opts?: { sampleRate?: number }) {
     this.sampleRate = opts?.sampleRate ?? 48000;
@@ -103,7 +105,9 @@ class FakeAudioContext {
   createMediaStreamDestination() {
     return { stream: {} };
   }
-  resume() {
+  resume(): Promise<void> {
+    this.resumeCalls++;
+    if (this.resumeError) return Promise.reject(this.resumeError);
     this.state = "running";
     return Promise.resolve();
   }
@@ -114,6 +118,7 @@ class FakeAudioContext {
 }
 
 let lastCtx: FakeAudioContext | null = null;
+let audioContextCreateCount = 0;
 
 // ---------------------------------------------------------------------------
 // Controllable time-filter stub
@@ -168,16 +173,19 @@ function makeChunk(
   };
 }
 
-interface Harness {
+interface SchedulerHarness {
   scheduler: AudioScheduler;
   state: StateManager;
   tf: FakeTimeFilter;
+}
+
+interface Harness extends SchedulerHarness {
   ctx: FakeAudioContext;
 }
 
-function setup(
+function createScheduler(
   opts: Partial<ConstructorParameters<typeof AudioScheduler>[0]> = {},
-): Harness {
+): SchedulerHarness {
   const state = new StateManager();
   const tf = new FakeTimeFilter();
   const scheduler = new AudioScheduler({
@@ -191,6 +199,13 @@ function setup(
   });
   // currentStreamFormat drives ctx sample rate
   state.currentStreamFormat = PCM_FORMAT;
+  return { scheduler, state, tf };
+}
+
+function setup(
+  opts: Partial<ConstructorParameters<typeof AudioScheduler>[0]> = {},
+): Harness {
+  const { scheduler, state, tf } = createScheduler(opts);
   scheduler.initAudioContext();
   const ctx = lastCtx!;
   // running state so playback proceeds
@@ -204,9 +219,11 @@ let nowMsValue = 0;
 beforeEach(() => {
   nowMsValue = 5_000_000; // 5000s in ms -> matches serverTime base below
   lastCtx = null;
+  audioContextCreateCount = 0;
   // global Web Audio + browser stubs
   vi.stubGlobal("AudioContext", function (opts?: { sampleRate?: number }) {
     const ctx = new FakeAudioContext(opts);
+    audioContextCreateCount++;
     lastCtx = ctx;
     return ctx;
   });
@@ -232,6 +249,89 @@ afterEach(() => {
 function nowUs(): number {
   return nowMsValue * 1000;
 }
+
+describe("AudioScheduler AudioContext lifecycle", () => {
+  beforeEach(() => {
+    vi.spyOn(console, "log").mockImplementation(() => {});
+  });
+
+  it("does not resume a newly initialized context that is already running", async () => {
+    const { scheduler } = createScheduler();
+
+    expect(lastCtx).toBeNull();
+    scheduler.initAudioContext();
+
+    const ctx = lastCtx!;
+    expect(audioContextCreateCount).toBe(1);
+    expect(ctx.sampleRate).toBe(SAMPLE_RATE);
+    expect(scheduler.getAudioContext()).toBe(ctx);
+
+    await scheduler.resumeAudioContext();
+    expect(ctx.resumeCalls).toBe(0);
+  });
+
+  it("resumes a suspended context", async () => {
+    const h = setup();
+    h.ctx.state = "suspended";
+
+    await expect(h.scheduler.resumeAudioContext()).resolves.toBeUndefined();
+
+    expect(h.ctx.resumeCalls).toBe(1);
+    expect(h.ctx.state).toBe("running");
+  });
+
+  it("leaves an already-running context untouched", async () => {
+    const h = setup();
+
+    await expect(h.scheduler.resumeAudioContext()).resolves.toBeUndefined();
+
+    expect(h.ctx.resumeCalls).toBe(0);
+    expect(h.ctx.state).toBe("running");
+  });
+
+  it("keeps repeated initialization and resume calls idempotent", async () => {
+    const { scheduler } = createScheduler();
+    scheduler.initAudioContext();
+    const ctx = lastCtx!;
+    ctx.state = "suspended";
+
+    scheduler.initAudioContext();
+    await scheduler.resumeAudioContext();
+    await scheduler.resumeAudioContext();
+
+    expect(audioContextCreateCount).toBe(1);
+    expect(ctx.resumeCalls).toBe(1);
+    expect(ctx.state).toBe("running");
+  });
+
+  it("creates a new context after close", () => {
+    const { scheduler } = createScheduler();
+    scheduler.initAudioContext();
+    const firstCtx = lastCtx;
+
+    scheduler.close();
+    scheduler.initAudioContext();
+
+    expect(audioContextCreateCount).toBe(2);
+    expect(lastCtx).not.toBe(firstCtx);
+  });
+
+  it("propagates resume failures and allows retrying", async () => {
+    const h = setup();
+    const resumeError = new Error("resume blocked");
+    h.ctx.state = "suspended";
+    h.ctx.resumeError = resumeError;
+
+    await expect(h.scheduler.resumeAudioContext()).rejects.toBe(resumeError);
+    expect(h.ctx.resumeCalls).toBe(1);
+    expect(h.ctx.state).toBe("suspended");
+
+    h.ctx.resumeError = null;
+    await expect(h.scheduler.resumeAudioContext()).resolves.toBeUndefined();
+    expect(h.ctx.resumeCalls).toBe(2);
+    expect(h.ctx.state).toBe("running");
+  });
+});
 
 describe("AudioScheduler scheduling math", () => {
   it("first chunk schedules at ctxTime + headroom when chunk client time == now", () => {

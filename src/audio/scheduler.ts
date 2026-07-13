@@ -593,13 +593,8 @@ export class AudioScheduler {
 
   async resumeAudioContext(): Promise<void> {
     if (this.audioContext && this.audioContext.state === "suspended") {
-      try {
-        await this.audioContext.resume();
-        console.log("Sendspin: AudioContext resumed");
-      } catch (e) {
-        console.warn("Sendspin: Failed to resume AudioContext:", e);
-        return;
-      }
+      await this.audioContext.resume();
+      console.log("Sendspin: AudioContext resumed");
       if (this.audioBufferQueue.length > 0) this.scheduleQueueProcessing();
       if (this.usesRecorrectionMonitor) this.recorrectionMonitor.start();
     }
