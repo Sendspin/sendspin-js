@@ -255,7 +255,7 @@ describe("AudioScheduler AudioContext lifecycle", () => {
     vi.spyOn(console, "log").mockImplementation(() => {});
   });
 
-  it("initializes a new running context without resuming it", async () => {
+  it("does not resume a newly initialized context that is already running", async () => {
     const { scheduler } = createScheduler();
 
     expect(lastCtx).toBeNull();
