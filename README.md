@@ -16,6 +16,10 @@ import { SendspinPlayer } from '@sendspin/sendspin-js';
 const player = new SendspinPlayer({
   baseUrl: 'http://your-server:8095',
   clientName: 'My Web Player',
+  // Advertised to the server as device_info.product_name. Defaults to
+  // "Sendspin JS". Avoid "Web Browser": some servers treat that as their own
+  // built-in player and skip pairing setup.
+  productName: 'My App',
   // Optional: "sync" (default), "quality" (no pitch shifts; not recommended for bad networks),
   // or "quality-local" (best for unsynced playback)
   correctionMode: 'sync',

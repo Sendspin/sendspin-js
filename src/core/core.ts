@@ -158,6 +158,7 @@ export class SendspinCore implements StreamHandler {
       this.timeFilter,
       {
         clientName,
+        productName: config.productName,
         codecs: config.codecs,
         bufferCapacity: config.bufferCapacity,
         requiredLeadTimeMs: config.requiredLeadTimeMs,

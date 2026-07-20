@@ -50,6 +50,7 @@ export interface HelloContext {
 
 export interface ProtocolHandlerConfig {
   clientName?: string;
+  productName?: string;
   codecs?: Codec[];
   bufferCapacity?: number;
   requiredLeadTimeMs?: number;
@@ -62,6 +63,7 @@ export interface ProtocolHandlerConfig {
 
 export class ProtocolHandler {
   private clientName: string;
+  private productName: string;
   private codecs: Codec[];
   private bufferCapacity: number;
   private requiredLeadTimeMs: number;
@@ -82,6 +84,9 @@ export class ProtocolHandler {
     config: ProtocolHandlerConfig = {},
   ) {
     this.clientName = config.clientName ?? "Sendspin Player";
+    // Servers may treat product_name "Web Browser" as their own built-in web
+    // player and skip pairing setup, so default to the library name.
+    this.productName = config.productName ?? "Sendspin JS";
     this.codecs = config.codecs ?? ["opus", "flac", "pcm"];
     this.bufferCapacity = config.bufferCapacity ?? 1024 * 1024 * 5; // 5MB default
     this.requiredLeadTimeMs =
@@ -300,7 +305,7 @@ export class ProtocolHandler {
         supported_pair_methods: this.helloContext.pairMethods(),
         unpaired_access: { enabled: this.helloContext.unpairedAccess },
         device_info: {
-          product_name: "Web Browser",
+          product_name: this.productName,
           manufacturer:
             (typeof navigator !== "undefined" && navigator.vendor) || "Unknown",
           software_version:

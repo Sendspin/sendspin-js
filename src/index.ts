@@ -107,6 +107,7 @@ export class SendspinPlayer {
     this.core = new SendspinCore({
       baseUrl: config.baseUrl,
       clientName: config.clientName,
+      productName: config.productName,
       webSocket: config.webSocket,
       codecs: config.codecs,
       bufferCapacity:

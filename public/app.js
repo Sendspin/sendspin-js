@@ -654,6 +654,7 @@ async function connect() {
     player = new SendspinPlayer({
       baseUrl: serverUrl,
       clientName: "Sendspin Sample Player",
+      productName: "Sendspin JS Sample Player",
       requiredLeadTimeMs,
       minBufferMs,
       correctionMode: savedCorrectionMode,

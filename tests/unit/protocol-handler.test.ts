@@ -241,6 +241,22 @@ describe("ProtocolHandler extra", () => {
       expect(payload.unpaired_access).toEqual({ enabled: true });
     });
 
+    it("advertises the configured product name, defaulting to the library", () => {
+      const dflt = makeHandler();
+      dispatch(dflt, { type: "server/hello", payload: {} });
+      let info = (lastSent(send, "client/hello")!.payload as never)[
+        "device_info"
+      ] as { product_name: string };
+      expect(info.product_name).toBe("Sendspin JS");
+
+      const named = makeHandler({ productName: "My App" });
+      dispatch(named, { type: "server/hello", payload: {} });
+      info = (lastSent(send, "client/hello")!.payload as never)[
+        "device_info"
+      ] as { product_name: string };
+      expect(info.product_name).toBe("My App");
+    });
+
     it("does not send the initial client/state (deferred to server/activate)", () => {
       const handler = makeHandler();
       dispatch(handler, { type: "server/hello", payload: {} });
