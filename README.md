@@ -209,6 +209,15 @@ Identity and pairing require `storage` (defaults to `localStorage`); without
 it, `clientId` is still generated per session but `pairingPsk` and
 `rotatePairingPsk()` return `null`.
 
+Apps that key their own state on the client id can read it before a player
+exists. A player built afterwards on the same storage adopts this identity.
+
+```typescript
+import { loadSendspinClientIdentity } from '@sendspin/sendspin-js';
+
+const { clientId, pairingPsk } = loadSendspinClientIdentity();
+```
+
 ### Core + scheduler as separate layers
 
 Apps that need the decoded PCM stream (e.g. visualizers) can use

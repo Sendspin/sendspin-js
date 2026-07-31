@@ -421,6 +421,8 @@ export class SendspinPlayer {
 export * from "./types";
 export { SendspinTimeFilter } from "./core/time-filter";
 export { SendspinCore } from "./core/core";
+export { loadSendspinClientIdentity } from "./client-identity";
+export type { SendspinClientIdentity } from "./client-identity";
 export { SendspinDecoder } from "./audio/decoder";
 export { AudioScheduler } from "./audio/scheduler";
 
