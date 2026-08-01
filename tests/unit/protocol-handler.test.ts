@@ -229,6 +229,29 @@ describe("ProtocolHandler extra", () => {
         bit_depth: expect.any(Number),
       });
     });
+
+    it("advertises a buffer capacity covering the stream-ahead depth", () => {
+      const handler = makeHandler({ codecs: ["pcm"] });
+      handler.sendClientHello();
+
+      const support = (
+        lastSent(send, "client/hello")!.payload as Record<string, unknown>
+      )["player@v1_support"] as Record<string, unknown>;
+      // 30s of 48kHz/16-bit stereo PCM, the worst case among the pcm formats.
+      expect(support.buffer_capacity as number).toBeGreaterThanOrEqual(
+        48000 * 2 * 2 * 30,
+      );
+    });
+
+    it("uses an explicit buffer capacity when configured", () => {
+      const handler = makeHandler({ codecs: ["pcm"], bufferCapacity: 123_456 });
+      handler.sendClientHello();
+
+      const support = (
+        lastSent(send, "client/hello")!.payload as Record<string, unknown>
+      )["player@v1_support"] as Record<string, unknown>;
+      expect(support.buffer_capacity).toBe(123_456);
+    });
   });
 
   describe("handleServerHello", () => {

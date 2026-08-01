@@ -12,6 +12,7 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
 import {
   getBrowserSupportedCodecs,
+  getDefaultBufferCapacity,
   getSupportedFormats,
 } from "../../src/core/codec-support";
 import type { Codec } from "../../src/types";
@@ -148,5 +149,43 @@ describe("getSupportedFormats", () => {
     // Firefox does not support opus; requesting only opus leaves nothing.
     setEnv({ userAgent: UA.firefox, hasAudioDecoder: true });
     expect(() => getSupportedFormats(["opus"])).toThrow(/No supported codecs/);
+  });
+});
+
+describe("getDefaultBufferCapacity", () => {
+  // Server-side stream-ahead depth the advertised capacity has to cover.
+  const DEPTH_SECONDS = 30;
+
+  it("covers the stream-ahead depth of incompressible FLAC", () => {
+    setEnv({ userAgent: UA.chrome, hasAudioDecoder: true });
+    const capacity = getDefaultBufferCapacity(getSupportedFormats(["flac"]));
+    // FLAC on incompressible audio sits just above raw PCM: 48kHz stereo
+    // 16-bit is 192 kB/s, measured at 195.4 kB/s through the server encoder.
+    expect(capacity).toBeGreaterThanOrEqual(195_400 * DEPTH_SECONDS);
+  });
+
+  it("covers PCM at its exact byte rate", () => {
+    setEnv({ userAgent: UA.chrome, hasAudioDecoder: true });
+    const capacity = getDefaultBufferCapacity(getSupportedFormats(["pcm"]));
+    expect(capacity).toBeGreaterThanOrEqual(48000 * 2 * 2 * DEPTH_SECONDS);
+  });
+
+  it("sizes for the highest byte rate among the advertised formats", () => {
+    setEnv({ userAgent: UA.chrome, hasAudioDecoder: true });
+    const opusOnly = getDefaultBufferCapacity(getSupportedFormats(["opus"]));
+    const withFlac = getDefaultBufferCapacity(
+      getSupportedFormats(["opus", "flac"]),
+    );
+    expect(withFlac).toBeGreaterThan(opusOnly);
+    expect(withFlac).toBe(
+      getDefaultBufferCapacity(getSupportedFormats(["flac"])),
+    );
+  });
+
+  it("stays well above the stream-ahead depth for Opus", () => {
+    setEnv({ userAgent: UA.chrome, hasAudioDecoder: true });
+    const capacity = getDefaultBufferCapacity(getSupportedFormats(["opus"]));
+    // ~96 kbps in practice, so the depth covered is far beyond 30s.
+    expect(capacity / (96_000 / 8)).toBeGreaterThan(DEPTH_SECONDS);
   });
 });

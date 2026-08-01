@@ -22,7 +22,7 @@ import type { StreamHandler } from "../internal-types";
 import type { StateManager } from "./state-manager";
 import type { WebSocketManager } from "./websocket-manager";
 import { TimeSyncManager } from "./time-sync-manager";
-import { getSupportedFormats } from "./codec-support";
+import { getDefaultBufferCapacity, getSupportedFormats } from "./codec-support";
 import { clampSyncDelayMs } from "../sync-delay";
 
 // Constants
@@ -52,7 +52,7 @@ export interface ProtocolHandlerConfig {
 export class ProtocolHandler {
   private clientName: string;
   private codecs: Codec[];
-  private bufferCapacity: number;
+  private bufferCapacity: number | undefined;
   private requiredLeadTimeMs: number;
   private minBufferMs: number;
   private useHardwareVolume: boolean;
@@ -71,7 +71,9 @@ export class ProtocolHandler {
   ) {
     this.clientName = config.clientName ?? "Sendspin Player";
     this.codecs = config.codecs ?? ["opus", "flac", "pcm"];
-    this.bufferCapacity = config.bufferCapacity ?? 1024 * 1024 * 5; // 5MB default
+    // Left undefined so the capacity is derived from the formats actually
+    // advertised in client/hello (see sendClientHello).
+    this.bufferCapacity = config.bufferCapacity;
     this.requiredLeadTimeMs =
       config.requiredLeadTimeMs ?? DEFAULT_REQUIRED_LEAD_TIME_MS;
     assertBufferMs(this.requiredLeadTimeMs, "requiredLeadTimeMs");
@@ -277,6 +279,7 @@ export class ProtocolHandler {
 
   // Send client hello with player identification
   sendClientHello(): void {
+    const supportedFormats = getSupportedFormats(this.codecs);
     const hello: ClientHello = {
       type: "client/hello" as MessageType.CLIENT_HELLO,
       payload: {
@@ -293,8 +296,9 @@ export class ProtocolHandler {
             "Unknown",
         },
         "player@v1_support": {
-          supported_formats: getSupportedFormats(this.codecs),
-          buffer_capacity: this.bufferCapacity,
+          supported_formats: supportedFormats,
+          buffer_capacity:
+            this.bufferCapacity ?? getDefaultBufferCapacity(supportedFormats),
           supported_commands: ["volume", "mute"],
         },
       },

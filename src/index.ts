@@ -109,9 +109,7 @@ export class SendspinPlayer {
       clientName: config.clientName,
       webSocket: config.webSocket,
       codecs: config.codecs,
-      bufferCapacity:
-        config.bufferCapacity ??
-        (outputMode === "media-element" ? 1024 * 1024 * 5 : 1024 * 1024 * 1.5),
+      bufferCapacity: config.bufferCapacity,
       syncDelay: config.syncDelay,
       defaultSyncDelay: getDefaultSyncDelay(),
       storage,
