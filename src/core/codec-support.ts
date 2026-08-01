@@ -119,8 +119,7 @@ function getWireByteRate(format: SupportedFormat): number {
  * horizon still caps how much audio is buffered — while under-advertising costs
  * buffer depth and, with it, resilience to network stalls.
  *
- * :param formats: Formats advertised in `client/hello`, as returned by
- *     `getSupportedFormats`.
+ * @param formats - Formats advertised in `client/hello`, as returned by `getSupportedFormats`
  */
 export function getDefaultBufferCapacity(formats: SupportedFormat[]): number {
   const worstByteRate = Math.max(...formats.map(getWireByteRate));

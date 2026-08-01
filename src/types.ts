@@ -425,7 +425,7 @@ export interface SendspinCoreConfig {
 
   /**
    * Buffer capacity in bytes, advertised to the server as the amount of
-   * not-yet-played compressed audio it may send ahead.
+   * not-yet-played encoded audio it may send ahead.
    *
    * Defaults to the server's stream-ahead depth at the worst-case byte rate of
    * the negotiable formats: ~6.5MB when FLAC or PCM is offered, ~2.1MB for
