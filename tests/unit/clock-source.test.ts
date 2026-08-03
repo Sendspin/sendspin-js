@@ -169,6 +169,92 @@ describe("ClockSource", () => {
     });
   });
 
+  describe("playout-latency normalization", () => {
+    // Real browsers put getOutputTimestamp().contextTime one output latency
+    // behind currentTime (measured in Chromium/macOS: 20.9ms lag vs a reported
+    // baseLatency + outputLatency of 21.3ms). Both clock sources must report the
+    // render clock, so the caller-supplied latency is added back.
+    function laggingCtx(base: { currentTime: number }, latencySec: number) {
+      return makeCtx({
+        currentTime: () => base.currentTime,
+        getOutputTimestamp: () => ({
+          contextTime: base.currentTime - latencySec,
+          performanceTime: nowMs,
+        }),
+      });
+    }
+
+    function promote(
+      cs: ClockSource,
+      ctx: AudioContext,
+      base: { currentTime: number },
+      latencySec: number,
+    ): number {
+      let snapshot = cs.getTimingSnapshot(ctx, latencySec);
+      for (let i = 0; i < 8; i++) {
+        nowMs += 150;
+        base.currentTime += 0.15;
+        snapshot = cs.getTimingSnapshot(ctx, latencySec);
+      }
+      return snapshot.audioContextTimeSec;
+    }
+
+    it("reports the render clock, not the playout clock, once promoted", () => {
+      const latencySec = 0.021333333333333333;
+      const base = { currentTime: 10.0 };
+      const cs = new ClockSource();
+      const derived = promote(
+        cs,
+        laggingCtx(base, latencySec),
+        base,
+        latencySec,
+      );
+
+      expect(cs.active).toBe("timestamp");
+      expect(derived).toBeCloseTo(base.currentTime, 6);
+    });
+
+    it("trails the render clock by the latency when none is supplied", () => {
+      const latencySec = 0.021333333333333333;
+      const base = { currentTime: 10.0 };
+      const cs = new ClockSource();
+      // Passing 0 leaves contextTime in the playout domain: the promoted clock
+      // then reads one latency early, which would schedule audio that much late.
+      const derived = promote(cs, laggingCtx(base, latencySec), base, 0);
+
+      expect(cs.active).toBe("timestamp");
+      expect(base.currentTime - derived).toBeCloseTo(latencySec, 6);
+    });
+
+    it("still promotes on devices whose output latency exceeds the divergence tolerance", () => {
+      // 300ms of latency (e.g. a Bluetooth sink) exceeds the 250ms timestamp/raw
+      // divergence tolerance, so without normalization every sample is rejected.
+      const latencySec = 0.3;
+
+      const normalizedBase = { currentTime: 10.0 };
+      const normalized = new ClockSource();
+      promote(
+        normalized,
+        laggingCtx(normalizedBase, latencySec),
+        normalizedBase,
+        latencySec,
+      );
+      expect(normalized.active).toBe("timestamp");
+
+      nowMs = 1000;
+      const unnormalizedBase = { currentTime: 10.0 };
+      const unnormalized = new ClockSource();
+      promote(
+        unnormalized,
+        laggingCtx(unnormalizedBase, latencySec),
+        unnormalizedBase,
+        0,
+      );
+      expect(unnormalized.active).toBe("estimated");
+      expect(unnormalized.lastRejectReason).toMatch(/divergence/);
+    });
+  });
+
   describe("timestamp rejection / demotion", () => {
     it("rejects and never promotes when contextTime diverges from raw beyond tolerance", () => {
       const base = { contextTime: 10.0 };

@@ -4,9 +4,23 @@
  * Tracks AudioContext.baseLatency + outputLatency using exponential moving
  * average to filter browser jitter (especially Chrome). Persists the smoothed
  * value to storage for cross-session consistency.
+ *
+ * outputLatency is device-derived, so it follows the actual output path
+ * (built-in speakers, USB DAC, Bluetooth) as it changes at runtime.
  */
 
 import type { SendspinStorage } from "../types";
+
+/**
+ * Stand-in for AudioContext.outputLatency on browsers that do not implement it
+ * (Safari and iOS Safari before 18.4), which report baseLatency only.
+ *
+ * Estimated from the 40-50ms gap observed between Safari and browsers that do
+ * report the property on comparable hardware; it is a stand-in, not a
+ * measurement of the current device. Used only when the property is absent, so a
+ * reported 0 is taken at face value. Exported for tests.
+ */
+export const UNREPORTED_OUTPUT_LATENCY_SEC = 0.04;
 
 const OUTPUT_LATENCY_ALPHA = 0.01;
 const OUTPUT_LATENCY_STORAGE_KEY = "sendspin-output-latency-us";
@@ -51,7 +65,12 @@ export class OutputLatencyTracker {
   getRawUs(audioContext: AudioContext | null): number {
     if (!audioContext) return 0;
     const baseLatency = audioContext.baseLatency ?? 0;
-    const outputLatency = audioContext.outputLatency ?? 0;
+    const reportedOutputLatency = audioContext.outputLatency;
+    const outputLatency =
+      typeof reportedOutputLatency === "number" &&
+      Number.isFinite(reportedOutputLatency)
+        ? reportedOutputLatency
+        : UNREPORTED_OUTPUT_LATENCY_SEC;
     return (baseLatency + outputLatency) * 1_000_000;
   }
 
