@@ -309,8 +309,6 @@ export class SendspinTransport {
   }
 
   private handleRehandshake(msg: { payload: { data: string } }): void {
-    this.quiesced = true;
-    this.armTimeout();
     const newHs = new HandshakeState({
       suite: this.suite,
       role: "responder",
@@ -331,6 +329,9 @@ export class SendspinTransport {
     }
     newHs.setPsk(entry.psk);
     const m2 = newHs.writeMessage(MSG2, utf8.encode("{}"));
+    // Hold periodic outbound traffic until the post-re-handshake server/activate.
+    this.quiesced = true;
+    this.armTimeout();
     // Send msg 2 under the CURRENT keys, then swap.
     this.encryptSend({
       type: "noise/handshake",
