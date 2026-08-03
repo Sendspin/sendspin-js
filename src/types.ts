@@ -448,7 +448,12 @@ export interface SendspinCoreConfig {
    * Allowed range: 0-5000.
    * Runtime update behavior depends on the active correction mode settings.
    * Falls back to a persisted value, then `defaultSyncDelay`, then 0.
-   * SendspinPlayer supplies a browser/platform-specific heuristic as that default.
+   *
+   * The default of 0 means audio leaves the audio output port at the instant the
+   * server stamped it for, matching the protocol default. Only set this to
+   * compensate for latency the SDK cannot see (an amplifier, external speakers,
+   * a Bluetooth link), not for browser output latency, which is measured and
+   * compensated automatically via `useOutputLatencyCompensation`.
    *
    * Server-commanded delays (set_static_delay) are persisted via `storage` and
    * restored on the next connect. Passing `syncDelay` explicitly overrides any
@@ -458,7 +463,7 @@ export interface SendspinCoreConfig {
 
   /**
    * Fallback static delay used when neither `syncDelay` nor a persisted value
-   * is available. SendspinPlayer sets this to a platform-specific heuristic.
+   * is available. Defaults to 0.
    * @internal
    */
   defaultSyncDelay?: number;

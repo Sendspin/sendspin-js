@@ -10,7 +10,10 @@
  */
 
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
-import { OutputLatencyTracker } from "../../src/audio/output-latency-tracker";
+import {
+  OutputLatencyTracker,
+  UNREPORTED_OUTPUT_LATENCY_SEC,
+} from "../../src/audio/output-latency-tracker";
 import type { SendspinStorage } from "../../src/types";
 
 const ALPHA = 0.01;
@@ -43,10 +46,45 @@ describe("OutputLatencyTracker", () => {
       expect(t.getRawUs(fakeCtx(0.005, 0.02))).toBeCloseTo(25000, 6);
     });
 
-    it("treats missing latency fields as 0", () => {
+    it("substitutes the fallback when outputLatency is unreported (Safari < 18.4)", () => {
+      const t = new OutputLatencyTracker(null);
+      // baseLatency shipped in Safari 14.1, outputLatency only in 18.4.
+      const ctx = { baseLatency: 0.005 } as unknown as AudioContext;
+      expect(t.getRawUs(ctx)).toBeCloseTo(
+        (0.005 + UNREPORTED_OUTPUT_LATENCY_SEC) * 1_000_000,
+        6,
+      );
+    });
+
+    it("takes a reported outputLatency of 0 at face value", () => {
+      const t = new OutputLatencyTracker(null);
+      expect(t.getRawUs(fakeCtx(0.005, 0))).toBeCloseTo(5000, 6);
+    });
+
+    it("falls back for both fields when the context reports no latency at all", () => {
       const t = new OutputLatencyTracker(null);
       const ctx = {} as unknown as AudioContext;
-      expect(t.getRawUs(ctx)).toBe(0);
+      expect(t.getRawUs(ctx)).toBeCloseTo(
+        UNREPORTED_OUTPUT_LATENCY_SEC * 1_000_000,
+        6,
+      );
+    });
+
+    it("substitutes the fallback for an unusable outputLatency reading", () => {
+      const t = new OutputLatencyTracker(null);
+      for (const unusable of [NaN, Infinity, -0.01]) {
+        expect(t.getRawUs(fakeCtx(0.005, unusable))).toBeCloseTo(
+          (0.005 + UNREPORTED_OUTPUT_LATENCY_SEC) * 1_000_000,
+          6,
+        );
+      }
+    });
+
+    it("ignores an unusable baseLatency reading", () => {
+      const t = new OutputLatencyTracker(null);
+      for (const unusable of [NaN, Infinity, -0.01]) {
+        expect(t.getRawUs(fakeCtx(unusable, 0.02))).toBeCloseTo(20000, 6);
+      }
     });
   });
 

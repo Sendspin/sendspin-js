@@ -10,8 +10,11 @@
  *
  * Scheduling math reference (scheduler.ts computeTargetPlaybackTime):
  *   targetPlaybackTime = ctxTime + (clientTime(serverUs) - nowUs)/1e6
- *                        + SCHEDULE_HEADROOM_SEC(0.2) - outputLatencySec
+ *                        - outputLatencySec
  * We disable output-latency compensation in most tests to keep math clean.
+ *
+ * These tests assert scheduled `source.start()` times; render-offset.test.ts
+ * covers the audible instant those add up to.
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
@@ -20,7 +23,6 @@ import { StateManager } from "../../src/core/state-manager";
 import type { DecodedAudioChunk, StreamFormat } from "../../src/types";
 
 const SAMPLE_RATE = 48000;
-const HEADROOM_SEC = 0.2;
 
 // ---------------------------------------------------------------------------
 // Fake Web Audio
@@ -334,7 +336,7 @@ describe("AudioScheduler AudioContext lifecycle", () => {
 });
 
 describe("AudioScheduler scheduling math", () => {
-  it("first chunk schedules at ctxTime + headroom when chunk client time == now", () => {
+  it("first chunk schedules at ctxTime when chunk client time == now", () => {
     const { scheduler, ctx, tf } = setup();
     // serverTime maps to clientTime == nowUs -> delta 0
     const serverTime = nowUs();
@@ -344,21 +346,22 @@ describe("AudioScheduler scheduling math", () => {
 
     expect(ctx.startedSources.length).toBe(1);
     const src = ctx.startedSources[0];
-    // scheduleTime = playbackTime - syncDelay(0) = target = ctxTime + 0.2
-    expect(src.started!).toBeCloseTo(ctx.currentTime + HEADROOM_SEC, 6);
+    // The target is the mapped client instant itself.
+    expect(src.started!).toBeCloseTo(ctx.currentTime, 6);
     expect(src.playbackRate.value).toBe(1.0);
   });
 
   it("subtracts syncDelayMs from the schedule time of the first chunk", () => {
     const syncDelayMs = 50;
     const { scheduler, ctx } = setup({ syncDelayMs });
-    scheduler.handleDecodedChunk(makeChunk(nowUs(), 0));
+    // 1s of lead so the earlier start is not clamped up to "now"
+    scheduler.handleDecodedChunk(makeChunk(nowUs() + 1_000_000, 0));
     scheduler.processAudioQueue();
 
     const src = ctx.startedSources[0];
-    // playbackTime = ctxTime + 0.2 ; scheduleTime = playbackTime - 0.05
+    // playbackTime = ctxTime + 1 ; scheduleTime = playbackTime - 0.05
     expect(src.started!).toBeCloseTo(
-      ctx.currentTime + HEADROOM_SEC - syncDelayMs / 1000,
+      ctx.currentTime + 1 - syncDelayMs / 1000,
       6,
     );
   });
@@ -371,7 +374,7 @@ describe("AudioScheduler scheduling math", () => {
     scheduler.processAudioQueue();
 
     const src = ctx.startedSources[0];
-    expect(src.started!).toBeCloseTo(ctx.currentTime + 2 + HEADROOM_SEC, 6);
+    expect(src.started!).toBeCloseTo(ctx.currentTime + 2, 6);
   });
 });
 
