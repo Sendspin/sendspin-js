@@ -10,6 +10,7 @@ import type {
   ControllerCommand,
   ControllerCommands,
   CorrectionMode,
+  PairMethod,
 } from "./types";
 
 // Platform detection utilities
@@ -123,6 +124,9 @@ export class SendspinPlayer {
       reconnect: config.reconnect,
       onStateChange: config.onStateChange,
       onPairing: config.onPairing,
+      onPairingPin: config.onPairingPin,
+      minPinLength: config.minPinLength,
+      staticPin: config.staticPin,
       suite: config.suite,
       unpairedAccess: config.unpairedAccess,
       longTermPsks: config.longTermPsks,
@@ -348,6 +352,29 @@ export class SendspinPlayer {
   /** Rotate the Pairing PSK, returning the new value (null without storage). */
   rotatePairingPsk(): string | null {
     return this.core.rotatePairingPsk();
+  }
+
+  /**
+   * Operator gesture that opens the static-PIN pairing window (~5 minutes,
+   * admits one attempt). Required before each static PIN pairing attempt.
+   */
+  openPairingWindow(): void {
+    this.core.openPairingWindow();
+  }
+
+  /** Cancel an in-progress pairing attempt (sends pair/abort user_cancelled). */
+  cancelPairing(): void {
+    this.core.cancelPairing();
+  }
+
+  /** Whether a PIN pairing method is in terminal lockout (10 failures). */
+  isPairingLockedOut(method: PairMethod): boolean {
+    return this.core.isPairingLockedOut(method);
+  }
+
+  /** Local operator action that exits terminal lockout for a PIN method. */
+  clearPairingLockout(method: PairMethod): void {
+    this.core.clearPairingLockout(method);
   }
 
   // Get current correction mode

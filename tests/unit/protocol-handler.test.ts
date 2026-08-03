@@ -19,7 +19,7 @@ import type { StreamHandler } from "../../src/internal-types";
 function makeHelloContext(overrides: Partial<HelloContext> = {}): HelloContext {
   return {
     trustLevel: () => "none",
-    pairingAvailable: () => true,
+    pairMethods: () => [{ method: "pairing_psk" }],
     unpairedAccess: true,
     ...overrides,
   };
@@ -252,7 +252,7 @@ describe("ProtocolHandler extra", () => {
     });
 
     it("omits pairing_psk from supported_pair_methods when pairing is unavailable", () => {
-      helloContext = makeHelloContext({ pairingAvailable: () => false });
+      helloContext = makeHelloContext({ pairMethods: () => [] });
       const handler = makeHandler();
       handler.sendClientHello();
 

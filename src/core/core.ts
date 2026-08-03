@@ -18,6 +18,7 @@ import { Identity } from "./noise/identity";
 import { PskStore } from "./noise/psk";
 import { SendspinTransport } from "./transport";
 import type { HandshakeInfo } from "./transport";
+import { SUITES } from "./noise/suites";
 import { PairingManager } from "./pairing";
 import { base64urlEncode, base64urlDecode } from "./noise/base64url";
 import type {
@@ -25,6 +26,7 @@ import type {
   DecodedAudioChunk,
   StreamFormat,
   GoodbyeReason,
+  PairMethod,
   PlayerState,
   ControllerCommand,
   ControllerCommands,
@@ -123,12 +125,24 @@ export class SendspinCore implements StreamHandler {
       pskStore: this.pskStore,
       serverId: () => this.handshakeInfo?.serverId ?? "",
       matchedCategory: () => this.handshakeInfo?.category ?? "sentinel",
+      handshakeHash: () => this.transport.handshakeHash,
+      aeadSeal: (key, plaintext) =>
+        SUITES[config.suite ?? "chacha"].aeadEncrypt(
+          key,
+          0n,
+          new Uint8Array(0),
+          plaintext,
+        ),
+      storage: config.storage ?? null,
+      onPin: config.onPairingPin ?? null,
+      minPinLength: config.minPinLength,
+      staticPin: config.staticPin,
       onEvent: (e, d) => this.config.onPairing?.(e, d),
     });
 
     const helloContext = {
       trustLevel: () => this.handshakeInfo?.trustLevel ?? "none",
-      pairingAvailable: () => this.hasStorage,
+      pairMethods: () => (this.hasStorage ? this.pairing.descriptors() : []),
       unpairedAccess: config.unpairedAccess ?? true,
     };
 
@@ -166,6 +180,21 @@ export class SendspinCore implements StreamHandler {
       );
       if (!consumed) this.protocolHandler.handleServerMessage(msg as never);
       return;
+    }
+    if (msg.type === "server/pair-init") {
+      return this.pairing.onPairInit(
+        (msg.payload ?? {}) as { nonce_A?: string; pin_length?: number },
+      );
+    }
+    if (msg.type === "server/pair-auth") {
+      return this.pairing.onPairAuth(
+        (msg.payload ?? {}) as { pake_msg_1?: string },
+      );
+    }
+    if (msg.type === "server/pair-confirm") {
+      return this.pairing.onPairConfirm(
+        (msg.payload ?? {}) as { server_kc?: string },
+      );
     }
     if (msg.type === "server/pair-finalize")
       return this.pairing.onPairFinalize();
@@ -442,6 +471,29 @@ export class SendspinCore implements StreamHandler {
     if (!this.hasStorage) return null;
     this.pskStore.rotatePairingPsk();
     return this.pairingPsk;
+  }
+
+  /**
+   * Operator gesture that opens the static-PIN pairing window (~5 minutes,
+   * admits one attempt). Required before each static PIN pairing attempt.
+   */
+  openPairingWindow(): void {
+    this.pairing.openPairingWindow();
+  }
+
+  /** Cancel an in-progress pairing attempt (sends pair/abort user_cancelled). */
+  cancelPairing(): void {
+    this.pairing.cancelPairing();
+  }
+
+  /** Whether a PIN pairing method is in terminal lockout (10 failures). */
+  isPairingLockedOut(method: PairMethod): boolean {
+    return this.pairing.isLockedOut(method);
+  }
+
+  /** Local operator action that exits terminal lockout for a PIN method. */
+  clearPairingLockout(method: PairMethod): void {
+    this.pairing.clearLockout(method);
   }
 
   get timeSyncInfo(): { synced: boolean; offset: number; error: number } {

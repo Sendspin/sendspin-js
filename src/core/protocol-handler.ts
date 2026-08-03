@@ -10,6 +10,7 @@ import type {
   GoodbyeReason,
   GroupUpdate,
   MessageType,
+  PairMethodDescriptor,
   ServerCommand,
   ServerMessage,
   ServerState,
@@ -42,7 +43,8 @@ export interface MessageSender {
 
 export interface HelloContext {
   trustLevel(): "user" | "none";
-  pairingAvailable(): boolean;
+  /** Pairing-method descriptors for client/hello ([] = pairing unavailable). */
+  pairMethods(): PairMethodDescriptor[];
   unpairedAccess: boolean;
 }
 
@@ -312,9 +314,7 @@ export class ProtocolHandler {
         name: this.clientName,
         supported_roles: ["player@v1", "controller@v1", "metadata@v1"],
         trust_level: this.helloContext.trustLevel(),
-        supported_pair_methods: this.helloContext.pairingAvailable()
-          ? [{ method: "pairing_psk" }]
-          : [],
+        supported_pair_methods: this.helloContext.pairMethods(),
         unpaired_access: { enabled: this.helloContext.unpairedAccess },
         device_info: {
           product_name: "Web Browser",

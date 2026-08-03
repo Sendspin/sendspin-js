@@ -19,6 +19,12 @@ export enum MessageType {
   SERVER_INIT = "server/init",
   NOISE_HANDSHAKE = "noise/handshake",
   SERVER_ACTIVATE = "server/activate",
+  CLIENT_PAIR_INIT = "client/pair-init",
+  SERVER_PAIR_INIT = "server/pair-init",
+  SERVER_PAIR_AUTH = "server/pair-auth",
+  CLIENT_PAIR_AUTH = "client/pair-auth",
+  SERVER_PAIR_CONFIRM = "server/pair-confirm",
+  CLIENT_PAIR_CONFIRM = "client/pair-confirm",
   CLIENT_PAIR_FINALIZE = "client/pair-finalize",
   SERVER_PAIR_FINALIZE = "server/pair-finalize",
   PAIR_ABORT = "pair/abort",
@@ -74,7 +80,7 @@ export interface ClientHello {
     name: string;
     supported_roles: string[];
     trust_level: "user" | "none";
-    supported_pair_methods?: Array<{ method: "pairing_psk" }>;
+    supported_pair_methods?: PairMethodDescriptor[];
     unpaired_access: { enabled: boolean };
     device_info?: {
       product_name?: string;
@@ -238,6 +244,20 @@ export interface GroupUpdate {
 
 export type PairMethod = "pairing_psk" | "dynamic_pin" | "static_pin";
 
+/** Out-channels through which a client can convey the dynamic PIN. */
+export type PairOutChannel = "display" | "speaker" | "other";
+
+/** A client/hello pairing-method descriptor. */
+export interface PairMethodDescriptor {
+  method: PairMethod;
+  /** Dynamic PIN only: how the client can surface the derived PIN. */
+  out_channels?: PairOutChannel[];
+  /** Dynamic PIN only: shortest PIN length the client accepts (4-12). */
+  min_pin_length?: number;
+  /** PIN methods only: whether the method is in terminal lockout. */
+  locked_out?: boolean;
+}
+
 export interface ClientInit {
   type: MessageType.CLIENT_INIT;
   payload: { client_id: string; version: number; suite: string };
@@ -262,6 +282,38 @@ export interface ServerActivate {
   };
 }
 
+export interface ClientPairInit {
+  type: MessageType.CLIENT_PAIR_INIT;
+  /** commit_B (SHA-256 of nonce_B) is present in dynamic PIN, absent in static. */
+  payload: { commit_B?: string };
+}
+
+export interface ServerPairInit {
+  type: MessageType.SERVER_PAIR_INIT;
+  payload: { nonce_A: string; pin_length: number };
+}
+
+export interface ServerPairAuth {
+  type: MessageType.SERVER_PAIR_AUTH;
+  payload: { pake_msg_1: string };
+}
+
+export interface ClientPairAuth {
+  type: MessageType.CLIENT_PAIR_AUTH;
+  payload: { pake_msg_2: string };
+}
+
+export interface ServerPairConfirm {
+  type: MessageType.SERVER_PAIR_CONFIRM;
+  payload: { server_kc: string };
+}
+
+export interface ClientPairConfirm {
+  type: MessageType.CLIENT_PAIR_CONFIRM;
+  /** nonce_B (preimage of commit_B) is present in dynamic PIN only. */
+  payload: { client_kc: string; nonce_B?: string };
+}
+
 export interface ClientPairFinalize {
   type: MessageType.CLIENT_PAIR_FINALIZE;
   payload: { long_term_psk: string };
@@ -273,8 +325,12 @@ export interface ServerPairFinalize {
 }
 
 export type PairAbortReason =
+  | "attempt_timeout"
   | "concurrent_attempt"
+  | "locked_out"
   | "method_not_supported"
+  | "pin_length_unacceptable"
+  | "pin_mismatch"
   | "user_cancelled";
 
 export interface PairAbort {
@@ -292,6 +348,9 @@ export type ServerMessage =
   | ServerInit
   | NoiseHandshake
   | ServerActivate
+  | ServerPairInit
+  | ServerPairAuth
+  | ServerPairConfirm
   | ServerPairFinalize
   | ServerUnpair
   | PairAbort
@@ -607,11 +666,30 @@ export interface SendspinCoreConfig {
    */
   longTermPsks?: Array<{ psk: string; serverId?: string }>;
 
-  /** Callback for Pairing PSK lifecycle events. */
+  /** Callback for pairing lifecycle events. */
   onPairing?: (
     event: "started" | "finalized" | "aborted",
     detail?: string,
   ) => void;
+
+  /**
+   * Enables dynamic PIN pairing: called with the PIN the operator must enter
+   * into the server, and with null when the attempt ends (hide the PIN).
+   */
+  onPairingPin?: (pin: string | null) => void;
+
+  /**
+   * Shortest dynamic PIN length this client accepts (4-12). Default 6.
+   * A compliant server always picks at least this length, so the client
+   * aborts only if a misbehaving server proposes a shorter one.
+   */
+  minPinLength?: number;
+
+  /**
+   * Enables static PIN pairing: this device's fixed 8-digit PIN. The pairing
+   * window must be opened with openPairingWindow() before each attempt.
+   */
+  staticPin?: string;
 
   /** Callback when player state changes (local or from server). */
   onStateChange?: (state: {

@@ -166,6 +166,11 @@ const player = new SendspinPlayer({
     // event: "started" | "finalized" | "aborted"
     console.log('Pairing:', event, detail);
   },
+  // Dynamic PIN pairing: show the derived PIN to the operator (null = hide).
+  onPairingPin: (pin) => showPinDialog(pin),
+  minPinLength: 6,            // shortest dynamic PIN this client accepts (4-12)
+  // Static PIN pairing: this device's fixed 8-digit PIN.
+  staticPin: '31415926',
 });
 
 await player.connect();
@@ -174,12 +179,27 @@ await player.connect();
 Unpaired playback authenticates with the well-known Sentinel PSK, so it is
 exposed to an active man-in-the-middle. While it's on by default, you can set `unpairedAccess: false` to require pairing before any playback.
 
+The SDK supports all three pairing methods from the spec:
+
+- **Pairing PSK** (always available): enter `player.pairingPsk` into the server.
+- **Dynamic PIN** (enabled by `onPairingPin`): the server starts pairing, the
+  SDK derives a one-time PIN and passes it to `onPairingPin` for display; the
+  operator enters it into the server.
+- **Static PIN** (enabled by `staticPin`): the operator enters this device's
+  fixed 8-digit PIN into the server, then makes a local gesture that calls
+  `player.openPairingWindow()` (window lasts ~5 minutes, one attempt).
+
 ```typescript
 console.log('Client ID:', player.clientId);      // 43-char base64url pubkey
 console.log('Pairing PSK:', player.pairingPsk);  // base64url string, or null without storage
 
 // Rotate the Pairing PSK (e.g. if it may have leaked)
 const newPsk = player.rotatePairingPsk();
+
+player.openPairingWindow();                      // static PIN: operator gesture
+player.cancelPairing();                          // abort an in-progress attempt
+player.isPairingLockedOut('dynamic_pin');        // terminal lockout after 10 failures
+player.clearPairingLockout('dynamic_pin');       // local operator action that exits lockout
 ```
 
 Enter `player.pairingPsk` into the server to pair this client as trusted.

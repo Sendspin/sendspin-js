@@ -86,6 +86,11 @@ export class SendspinTransport {
     };
   }
 
+  /** The Noise handshake hash h of the current session (PIN pairing binds to it). */
+  get handshakeHash(): Uint8Array {
+    return this.lastHandshakeHash;
+  }
+
   start(): void {
     // Reset per-connection state so a reconnect does not inherit a stale session.
     this.hs = null;

@@ -29,6 +29,7 @@ const STORAGE_KEYS = {
   CORRECTION_MODE: "sendspin-correction-mode",
   RESYNC_THRESHOLD: "sendspin-resync-threshold",
   DEADBAND_THRESHOLD: "sendspin-deadband-threshold",
+  STATIC_PIN: "sendspin-sample-static-pin",
 };
 
 // DOM Elements
@@ -61,6 +62,13 @@ const pairingPskEl = document.getElementById("pairing-psk");
 const rotatePskBtn = document.getElementById("rotate-psk");
 const trustLevelEl = document.getElementById("trust-level");
 const unpairedAccessCheckbox = document.getElementById("unpaired-access");
+const pairingPinGroup = document.getElementById("pairing-pin-group");
+const pairingPinEl = document.getElementById("pairing-pin");
+const cancelPairingBtn = document.getElementById("cancel-pairing");
+const staticPinInput = document.getElementById("static-pin");
+const openPairingWindowBtn = document.getElementById("open-pairing-window");
+const pinLockoutEl = document.getElementById("pin-lockout");
+const clearLockoutBtn = document.getElementById("clear-lockout");
 
 // Status elements
 const connectionStatus = document.getElementById("connection-status");
@@ -232,6 +240,9 @@ function resetStatusDisplay() {
   clientIdEl.textContent = "-";
   pairingPskEl.textContent = "-";
   trustLevelEl.textContent = "-";
+  pairingPinGroup.hidden = true;
+  pairingPinEl.textContent = "-";
+  pinLockoutEl.textContent = "-";
 }
 
 /**
@@ -240,6 +251,18 @@ function resetStatusDisplay() {
 function updatePairingDisplay() {
   clientIdEl.textContent = player.clientId;
   pairingPskEl.textContent = player.pairingPsk ?? "(no storage)";
+  updateLockoutDisplay();
+}
+
+/**
+ * Show which PIN methods are in terminal lockout.
+ */
+function updateLockoutDisplay() {
+  if (!player) return;
+  const locked = ["dynamic_pin", "static_pin"].filter((m) =>
+    player.isPairingLockedOut(m),
+  );
+  pinLockoutEl.textContent = locked.length ? locked.join(", ") : "none";
 }
 
 /**
@@ -256,6 +279,15 @@ function onPairing(event, detail) {
     trustLevelEl.textContent = `aborted (${detail ?? "unknown"})`;
     showToast(`Pairing aborted: ${detail ?? "unknown"}`, "error");
   }
+  updateLockoutDisplay();
+}
+
+/**
+ * Show or hide the dynamic pairing PIN (null = attempt ended).
+ */
+function onPairingPin(pin) {
+  pairingPinGroup.hidden = pin === null;
+  pairingPinEl.textContent = pin ?? "-";
 }
 
 /**
@@ -478,6 +510,11 @@ function loadSettings() {
     minBufferInput.value = sanitizeBufferMs(parseInt(savedMinBuffer, 10), 250);
   }
 
+  const savedStaticPin = localStorage.getItem(STORAGE_KEYS.STATIC_PIN);
+  if (savedStaticPin !== null) {
+    staticPinInput.value = savedStaticPin;
+  }
+
   const savedCorrectionMode = localStorage.getItem(
     STORAGE_KEYS.CORRECTION_MODE,
   );
@@ -645,6 +682,10 @@ async function connect() {
       },
       unpairedAccess: unpairedAccessCheckbox.checked,
       onPairing,
+      onPairingPin,
+      staticPin: /^[0-9]{8}$/.test(staticPinInput.value)
+        ? staticPinInput.value
+        : undefined,
       onStateChange,
     });
 
@@ -863,6 +904,39 @@ function init() {
     player.rotatePairingPsk();
     pairingPskEl.textContent = player.pairingPsk ?? "(no storage)";
     showToast("Pairing PSK rotated", "success");
+  });
+  staticPinInput.addEventListener("change", () => {
+    const pin = staticPinInput.value.trim();
+    if (pin && !/^[0-9]{8}$/.test(pin)) {
+      showToast("Static PIN must be exactly 8 digits", "error");
+      return;
+    }
+    localStorage.setItem(STORAGE_KEYS.STATIC_PIN, pin);
+    if (player) showToast("Static PIN applies on the next connect", "info");
+  });
+  openPairingWindowBtn.addEventListener("click", () => {
+    if (!player) {
+      showToast("Connect first", "error");
+      return;
+    }
+    player.openPairingWindow();
+    showToast("Pairing window open (~5 minutes, one attempt)", "info");
+  });
+  cancelPairingBtn.addEventListener("click", () => {
+    if (!player) return;
+    player.cancelPairing();
+    showToast("Pairing cancelled", "info");
+  });
+  clearLockoutBtn.addEventListener("click", () => {
+    if (!player) {
+      showToast("Connect first", "error");
+      return;
+    }
+    for (const method of ["dynamic_pin", "static_pin"]) {
+      player.clearPairingLockout(method);
+    }
+    updateLockoutDisplay();
+    showToast("PIN lockout cleared", "success");
   });
 
   // Transport control event listeners
