@@ -705,6 +705,7 @@ describe.skipIf(!MASS_SERVER_ROOT)(
         const pairingEvents: string[] = [];
         const first = await connectCore({
           clientName: "Dynamic PIN client",
+          suite: "aesgcm",
           storage,
           onPairingPin: (pin) => {
             if (pin !== null) pins.push(pin);
