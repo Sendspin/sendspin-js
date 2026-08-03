@@ -140,13 +140,27 @@ export class SendspinTransport {
   }
 
   handleRaw(event: MessageEvent): void {
-    try {
-      if (this.state === "transport") {
-        if (typeof event.data === "string") return this.fail(); // unexpected cleartext
+    if (this.state === "transport") {
+      if (typeof event.data === "string") return this.fail(); // unexpected cleartext
+      let plain: Uint8Array;
+      try {
         const bytes = new Uint8Array(event.data as ArrayBuffer);
-        this.onTransportFrame(bytes);
-        return;
+        if (bytes.length > MAX_TRANSPORT_CIPHERTEXT) return this.fail();
+        plain = this.session!.decrypt(bytes); // AEAD failure is a real transport failure
+      } catch {
+        return this.fail();
       }
+      if (plain.length < 1) return this.fail();
+      // A malformed payload or a throwing app callback must not close the socket
+      // or disable reconnect. Log and keep the connection.
+      try {
+        this.dispatchPlain(plain[0], plain.subarray(1), plain);
+      } catch (e) {
+        console.warn("Sendspin: dropped malformed transport message", e);
+      }
+      return;
+    }
+    try {
       if (typeof event.data !== "string") return this.fail(); // handshake is text only
       this.handleHandshakeText(event.data);
     } catch {
@@ -207,13 +221,6 @@ export class SendspinTransport {
     this.clearTimeout();
     this.lastHandshakeHash = this.hs!.handshakeHash;
     this.cb.onHandshakeComplete(this.handshakeInfo!);
-  }
-
-  private onTransportFrame(bytes: Uint8Array): void {
-    if (bytes.length > MAX_TRANSPORT_CIPHERTEXT) return this.fail();
-    const pt = this.session!.decrypt(bytes); // throws => fail (via handleRaw catch)
-    if (pt.length < 1) return this.fail();
-    this.dispatchPlain(pt[0], pt.subarray(1), pt);
   }
 
   /** type: message-type byte; body: bytes after the type byte; full: full plaintext incl type byte. */
