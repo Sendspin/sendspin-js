@@ -428,7 +428,7 @@ export interface SendspinCoreConfig {
    * not-yet-played encoded audio it may send ahead.
    *
    * Defaults to the server's stream-ahead depth at the worst-case byte rate of
-   * the negotiable formats: ~6.5MB when FLAC or PCM is offered, ~2.1MB for
+   * the negotiable formats: ~5.9MB when FLAC or PCM is offered, ~1.9MB for
    * Opus-only. Set this only for clients with a real, smaller buffer.
    */
   bufferCapacity?: number;

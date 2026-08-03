@@ -6,10 +6,6 @@ import type { Codec, SupportedFormat } from "../types";
 // makes bytes the binding limit and starves the buffer on high-rate codecs.
 const BUFFER_DEPTH_SECONDS = 30;
 
-// Cushion on top of the computed worst case so short-term rate spikes (dense
-// passages encode above the track average) never make bytes bind first.
-const BUFFER_CAPACITY_HEADROOM = 1.1;
-
 // FLAC falls back to verbatim frames on incompressible audio, where the frame
 // headers put the stream slightly above raw PCM. Measured at 195.4 kB/s for
 // 48kHz/16-bit stereo (192.0 kB/s raw) with full-scale decorrelated noise.
@@ -115,15 +111,12 @@ function getWireByteRate(format: SupportedFormat): number {
  *
  * The server picks one of the advertised formats, so the capacity is sized for
  * the highest byte rate among them: enough for the full stream-ahead depth even
- * on incompressible FLAC. Over-advertising is harmless — the server's duration
- * horizon still caps how much audio is buffered — while under-advertising costs
- * buffer depth and, with it, resilience to network stalls.
+ * on incompressible FLAC without making bytes the binding limit before the
+ * server's duration horizon.
  *
  * @param formats - Formats advertised in `client/hello`, as returned by `getSupportedFormats`
  */
 export function getDefaultBufferCapacity(formats: SupportedFormat[]): number {
   const worstByteRate = Math.max(...formats.map(getWireByteRate));
-  return Math.ceil(
-    worstByteRate * BUFFER_DEPTH_SECONDS * BUFFER_CAPACITY_HEADROOM,
-  );
+  return Math.ceil(worstByteRate * BUFFER_DEPTH_SECONDS);
 }
