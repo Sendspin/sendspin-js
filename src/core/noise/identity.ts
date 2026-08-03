@@ -23,8 +23,16 @@ export class Identity {
     if (storage) {
       const stored = storage.getItem(SK_KEY);
       if (stored) {
-        const sk = base64urlDecode(stored);
-        return new Identity(sk, kp.publicKey(sk));
+        try {
+          const sk = base64urlDecode(stored);
+          return new Identity(sk, kp.publicKey(sk));
+        } catch {
+          // Corrupt persisted key: fail open with a fresh identity (a new
+          // client_id) rather than making the player unconstructable.
+          console.warn(
+            "Sendspin: stored identity key is invalid, generating a new one",
+          );
+        }
       }
       const fresh = kp.generateKeypair();
       storage.setItem(SK_KEY, base64urlEncode(fresh.privateKey));
