@@ -154,7 +154,7 @@ export class SendspinTransport {
       // A malformed payload or a throwing app callback must not close the socket
       // or disable reconnect. Log and keep the connection.
       try {
-        this.dispatchPlain(plain[0], plain.subarray(1), plain);
+        this.dispatchPlain(plain);
       } catch (e) {
         console.warn("Sendspin: dropped malformed transport message", e);
       }
@@ -223,18 +223,19 @@ export class SendspinTransport {
     this.cb.onHandshakeComplete(this.handshakeInfo!);
   }
 
-  /** type: message-type byte; body: bytes after the type byte; full: full plaintext incl type byte. */
-  private dispatchPlain(
-    type: number,
-    body: Uint8Array,
-    full: Uint8Array,
-  ): void {
+  /** Route one decrypted plaintext frame on its leading message-type byte. */
+  private dispatchPlain(full: Uint8Array): void {
+    const type = full[0];
+    // The body view is built per branch: the binary path below is the hot one
+    // and reads only `full`.
     if (type === 0) {
-      this.handleControl(JSON.parse(dutf8.decode(body)));
+      this.handleControl(JSON.parse(dutf8.decode(full.subarray(1))));
     } else if (type === 2 || type === 3) {
-      this.handleFragment(type, body);
+      this.handleFragment(type, full.subarray(1));
     } else {
-      this.cb.onBinaryMessage(full.slice()); // own ArrayBuffer, type byte intact
+      // full is the decrypt output: exclusively owned, offset 0, exact length,
+      // type byte intact. Hand it over without re-copying.
+      this.cb.onBinaryMessage(full);
     }
   }
 
@@ -265,17 +266,20 @@ export class SendspinTransport {
       return this.fail();
     }
     const origType = this.frag.origType;
-    const data = new Uint8Array(this.frag.size);
-    let off = 0;
+    // Assemble into a size+1 buffer with the type byte at offset 0, so the
+    // binary path can hand it over without a second copy to prepend the type.
+    const assembled = new Uint8Array(this.frag.size + 1);
+    assembled[0] = origType;
+    let off = 1;
     for (const p of this.frag.parts) {
-      data.set(p, off);
+      assembled.set(p, off);
       off += p.length;
     }
     this.frag = null;
     if (origType === 0) {
-      this.handleControl(JSON.parse(dutf8.decode(data)));
+      this.handleControl(JSON.parse(dutf8.decode(assembled.subarray(1))));
     } else {
-      this.cb.onBinaryMessage(concat(Uint8Array.of(origType), data));
+      this.cb.onBinaryMessage(assembled);
     }
   }
 
