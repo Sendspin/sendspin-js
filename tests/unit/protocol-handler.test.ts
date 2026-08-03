@@ -38,7 +38,9 @@ function makeStreamHandler(): StreamHandler &
   } as StreamHandler & Record<string, ReturnType<typeof vi.fn>>;
 }
 
-const msgEvent = (data: unknown): MessageEvent => ({ data }) as MessageEvent;
+// Dispatch a parsed server message through the real entry point.
+const dispatch = (handler: ProtocolHandler, msg: unknown): void =>
+  handler.handleServerMessage(msg as never);
 
 function makeStreamHandlerWithDelay(
   syncDelayMs = 0,
@@ -97,72 +99,43 @@ describe("ProtocolHandler", () => {
     vi.useRealTimers();
   });
 
-  describe("handleMessage routing", () => {
-    it("routes ArrayBuffer data to the binary handler", () => {
-      const buf = new ArrayBuffer(8);
-      handler.handleMessage(msgEvent(buf));
-      expect(streamHandler.handleBinaryMessage).toHaveBeenCalledWith(buf);
-    });
-
-    it("routes Blob data to the binary handler", async () => {
-      const blob = new Blob([new Uint8Array([1, 2, 3])]);
-      handler.handleMessage(msgEvent(blob));
-      await vi.waitFor(() =>
-        expect(streamHandler.handleBinaryMessage).toHaveBeenCalled(),
-      );
-      const arg = streamHandler.handleBinaryMessage.mock.calls[0][0];
-      expect(arg.byteLength).toBe(3);
-    });
-
+  describe("handleServerMessage routing", () => {
     it("ignores a JSON message with an unknown type", () => {
-      handler.handleMessage(msgEvent(JSON.stringify({ type: "server/bogus" })));
+      dispatch(handler, { type: "server/bogus" });
       expect(streamHandler.handleBinaryMessage).not.toHaveBeenCalled();
       expect(streamHandler.handleStreamStart).not.toHaveBeenCalled();
-    });
-
-    it("throws on non-JSON string data (current behavior)", () => {
-      expect(() => handler.handleMessage(msgEvent("not json"))).toThrow();
     });
   });
 
   describe("stream/clear roles filter", () => {
     it("forwards a clear with no roles to the stream handler", () => {
-      handler.handleMessage(
-        msgEvent(JSON.stringify({ type: "stream/clear", payload: {} })),
-      );
+      dispatch(handler, { type: "stream/clear", payload: {} });
       expect(streamHandler.handleStreamClear).toHaveBeenCalledTimes(1);
     });
 
     it("ignores a clear whose roles exclude the player", () => {
-      handler.handleMessage(
-        msgEvent(
-          JSON.stringify({
-            type: "stream/clear",
-            payload: { roles: ["controller"] },
-          }),
-        ),
-      );
+      dispatch(handler, {
+        type: "stream/clear",
+        payload: { roles: ["controller"] },
+      });
       expect(streamHandler.handleStreamClear).not.toHaveBeenCalled();
     });
   });
 
   describe("set_static_delay command", () => {
-    const command = (static_delay_ms: unknown) =>
-      msgEvent(
-        JSON.stringify({
-          type: "server/command",
-          payload: { player: { command: "set_static_delay", static_delay_ms } },
-        }),
-      );
+    const command = (static_delay_ms: unknown) => ({
+      type: "server/command",
+      payload: { player: { command: "set_static_delay", static_delay_ms } },
+    });
 
     it("applies and clamps a valid delay", () => {
-      handler.handleMessage(command(9999));
+      dispatch(handler, command(9999));
       expect(streamHandler.handleSyncDelayChange).toHaveBeenCalledWith(5000);
       expect(onDelayCommand).toHaveBeenCalledWith(5000);
     });
 
     it("ignores a non-finite delay", () => {
-      handler.handleMessage(command("nope"));
+      dispatch(handler, command("nope"));
       expect(streamHandler.handleSyncDelayChange).not.toHaveBeenCalled();
       expect(onDelayCommand).not.toHaveBeenCalled();
     });
@@ -195,14 +168,10 @@ describe("ProtocolHandler extra", () => {
   // Dispatch a server/activate so client/state + time-sync start (the tests
   // below that pre-date server/activate sequencing rely on this).
   const activate = (handler: ProtocolHandler): void =>
-    handler.handleMessage(
-      msgEvent(
-        JSON.stringify({
-          type: "server/activate",
-          payload: { activities: ["playback"] },
-        }),
-      ),
-    );
+    dispatch(handler, {
+      type: "server/activate",
+      payload: { activities: ["playback"] },
+    });
 
   beforeEach(() => {
     vi.useFakeTimers();
@@ -265,9 +234,7 @@ describe("ProtocolHandler extra", () => {
   describe("handleServerHello", () => {
     it("sends client/hello with trust_level and unpaired_access", () => {
       const handler = makeHandler();
-      handler.handleMessage(
-        msgEvent(JSON.stringify({ type: "server/hello", payload: {} })),
-      );
+      dispatch(handler, { type: "server/hello", payload: {} });
       const hello = lastSent(send, "client/hello")!;
       const payload = hello.payload as Record<string, unknown>;
       expect(payload.trust_level).toBe("none");
@@ -276,9 +243,7 @@ describe("ProtocolHandler extra", () => {
 
     it("does not send the initial client/state (deferred to server/activate)", () => {
       const handler = makeHandler();
-      handler.handleMessage(
-        msgEvent(JSON.stringify({ type: "server/hello", payload: {} })),
-      );
+      dispatch(handler, { type: "server/hello", payload: {} });
       expect(lastSent(send, "client/state")).toBeUndefined();
     });
   });
@@ -408,19 +373,21 @@ describe("ProtocolHandler extra", () => {
   });
 
   describe("handleServerCommand volume / mute (spec server/command player object)", () => {
-    const cmd = (player: Record<string, unknown>) =>
-      msgEvent(JSON.stringify({ type: "server/command", payload: { player } }));
+    const cmd = (player: Record<string, unknown>) => ({
+      type: "server/command",
+      payload: { player },
+    });
 
     it("applies a volume command to state and notifies the stream handler", () => {
       const handler = makeHandler();
-      handler.handleMessage(cmd({ command: "volume", volume: 25 }));
+      dispatch(handler, cmd({ command: "volume", volume: 25 }));
       expect(stateManager.volume).toBe(25);
       expect(streamHandler.handleVolumeUpdate).toHaveBeenCalled();
     });
 
     it("calls onVolumeCommand with (volume, muted) when useHardwareVolume", () => {
       const handler = makeHandler({ useHardwareVolume: true, onVolumeCommand });
-      handler.handleMessage(cmd({ command: "volume", volume: 60 }));
+      dispatch(handler, cmd({ command: "volume", volume: 60 }));
       expect(onVolumeCommand).toHaveBeenCalledWith(60, false);
     });
 
@@ -429,14 +396,14 @@ describe("ProtocolHandler extra", () => {
         useHardwareVolume: false,
         onVolumeCommand,
       });
-      handler.handleMessage(cmd({ command: "volume", volume: 60 }));
+      dispatch(handler, cmd({ command: "volume", volume: 60 }));
       expect(onVolumeCommand).not.toHaveBeenCalled();
     });
 
     it("sends a follow-up client/state reflecting the commanded volume", () => {
       const handler = makeHandler();
       send.mockClear();
-      handler.handleMessage(cmd({ command: "volume", volume: 33 }));
+      dispatch(handler, cmd({ command: "volume", volume: 33 }));
       const player = (
         lastSent(send, "client/state")!.payload as Record<string, unknown>
       ).player as Record<string, unknown>;
@@ -446,35 +413,35 @@ describe("ProtocolHandler extra", () => {
     it("ignores a server/command with no player object", () => {
       const handler = makeHandler();
       send.mockClear();
-      handler.handleMessage(
-        msgEvent(JSON.stringify({ type: "server/command", payload: {} })),
-      );
+      dispatch(handler, { type: "server/command", payload: {} });
       expect(streamHandler.handleVolumeUpdate).not.toHaveBeenCalled();
       expect(lastSent(send, "client/state")).toBeUndefined();
     });
   });
 
   describe("stream/end roles filter", () => {
-    const end = (payload: Record<string, unknown>) =>
-      msgEvent(JSON.stringify({ type: "stream/end", payload }));
+    const end = (payload: Record<string, unknown>) => ({
+      type: "stream/end",
+      payload,
+    });
 
     it("ends the stream when roles is omitted", () => {
       const handler = makeHandler();
-      handler.handleMessage(end({}));
+      dispatch(handler, end({}));
       expect(streamHandler.handleStreamEnd).toHaveBeenCalledTimes(1);
       expect(stateManager.isPlaying).toBe(false);
     });
 
     it("ignores a stream/end whose roles exclude player", () => {
       const handler = makeHandler();
-      handler.handleMessage(end({ roles: ["artwork"] }));
+      dispatch(handler, end({ roles: ["artwork"] }));
       expect(streamHandler.handleStreamEnd).not.toHaveBeenCalled();
     });
 
     it("sends a client/state after ending the player stream", () => {
       const handler = makeHandler();
       send.mockClear();
-      handler.handleMessage(end({}));
+      dispatch(handler, end({}));
       expect(lastSent(send, "client/state")).toBeDefined();
     });
   });

@@ -100,23 +100,6 @@ export class ProtocolHandler {
     );
   }
 
-  // Handle WebSocket messages
-  handleMessage(event: MessageEvent): void {
-    if (typeof event.data === "string") {
-      // JSON message
-      const message = JSON.parse(event.data) as ServerMessage;
-      this.handleServerMessage(message);
-    } else if (event.data instanceof ArrayBuffer) {
-      // Binary message (audio chunk)
-      this.streamHandler.handleBinaryMessage(event.data);
-    } else if (event.data instanceof Blob) {
-      // Convert Blob to ArrayBuffer
-      event.data.arrayBuffer().then((buffer) => {
-        this.streamHandler.handleBinaryMessage(buffer);
-      });
-    }
-  }
-
   // Handle server messages
   handleServerMessage(message: ServerMessage): void {
     switch (message.type) {
