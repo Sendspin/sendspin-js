@@ -14,7 +14,6 @@ See the SDK website to see Sendspin JS in action: https://sendspin.github.io/sen
 import { SendspinPlayer } from '@sendspin/sendspin-js';
 
 const player = new SendspinPlayer({
-  playerId: 'my-player-id',
   baseUrl: 'http://your-server:8095',
   clientName: 'My Web Player',
   // Optional: "sync" (default), "quality" (no pitch shifts; not recommended for bad networks),
@@ -77,7 +76,6 @@ sockets.
 ```typescript
 const ws = new WebSocket('ws://your-server:8095/sendspin');
 const player = new SendspinPlayer({
-  playerId: 'my-player',
   clientName: 'My Player',
   webSocket: ws,
 });

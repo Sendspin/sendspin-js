@@ -19,7 +19,6 @@ console.log(`Loading SDK from: ${sdkPath}`);
 // LocalStorage keys
 const STORAGE_KEYS = {
   SERVER_URL: "sendspin-server-url",
-  PLAYER_ID: "sendspin-player-id",
   VOLUME: "sendspin-volume",
   MUTED: "sendspin-muted",
   // Shared with the SDK, which persists the static delay under this key.
@@ -101,18 +100,6 @@ const progressDuration = document.getElementById("progress-duration");
 // Player instance
 let player = null;
 let statusUpdateInterval = null;
-
-/**
- * Generate a unique player ID
- */
-function getPlayerId() {
-  const stored = localStorage.getItem(STORAGE_KEYS.PLAYER_ID);
-  if (stored) return stored;
-
-  const id = "sendspin-js-demo-" + Math.random().toString(36).substring(2, 10);
-  localStorage.setItem(STORAGE_KEYS.PLAYER_ID, id);
-  return id;
-}
 
 /**
  * Get server URL from query params
@@ -663,7 +650,6 @@ async function connect() {
     );
 
     player = new SendspinPlayer({
-      playerId: getPlayerId(),
       baseUrl: serverUrl,
       clientName: "Sendspin Sample Player",
       requiredLeadTimeMs,
@@ -989,7 +975,6 @@ function init() {
   }
 
   console.log("Sendspin Sample Player initialized");
-  console.log("Player ID:", getPlayerId());
   if (isLocalDev) {
     console.log("Development mode: using local SDK build");
   }
