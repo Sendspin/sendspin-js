@@ -29,18 +29,20 @@ export interface CipherSuite {
   hash(data: Uint8Array): Uint8Array;
 }
 
+// 4 zero bytes + 8-byte counter. Reused across calls: every aead* below builds
+// its cipher and consumes the nonce synchronously, so no caller outlives a
+// later write. The leading 4 bytes are never written and stay zero.
+const NONCE = new Uint8Array(12);
+const NONCE_VIEW = new DataView(NONCE.buffer);
+
 function nonceLE(n: bigint): Uint8Array {
-  const nonce = new Uint8Array(12); // 4 zero bytes + 8-byte LE counter
-  const dv = new DataView(nonce.buffer);
-  dv.setBigUint64(4, n, true);
-  return nonce;
+  NONCE_VIEW.setBigUint64(4, n, true);
+  return NONCE;
 }
 
 function nonceBE(n: bigint): Uint8Array {
-  const nonce = new Uint8Array(12); // 4 zero bytes + 8-byte BE counter
-  const dv = new DataView(nonce.buffer);
-  dv.setBigUint64(4, n, false);
-  return nonce;
+  NONCE_VIEW.setBigUint64(4, n, false);
+  return NONCE;
 }
 
 const dh = (priv: Uint8Array, pub: Uint8Array) =>
