@@ -17,14 +17,32 @@ import type { SendspinStorage } from "../types";
  *
  * Estimated from the 40-50ms gap observed between Safari and browsers that do
  * report the property on comparable hardware; it is a stand-in, not a
- * measurement of the current device. Used only when the property is absent, so a
- * reported 0 is taken at face value. Exported for tests.
+ * measurement of the current device. Used only when the property is absent or
+ * unusable, so a reported 0 is taken at face value. Exported for tests.
  */
 export const UNREPORTED_OUTPUT_LATENCY_SEC = 0.04;
 
 const OUTPUT_LATENCY_ALPHA = 0.01;
 const OUTPUT_LATENCY_STORAGE_KEY = "sendspin-output-latency-us";
 const OUTPUT_LATENCY_PERSIST_INTERVAL_MS = 10_000;
+
+/**
+ * Resolve a latency the AudioContext reports, in seconds.
+ *
+ * Falls back when the property is missing or holds a value that cannot be a
+ * latency, so a single bad reading cannot reach the smoother, where it would
+ * stick for the lifetime of the stream.
+ */
+function resolveLatencySec(
+  reportedSec: number | undefined,
+  fallbackSec: number,
+): number {
+  const usable =
+    typeof reportedSec === "number" &&
+    Number.isFinite(reportedSec) &&
+    reportedSec >= 0;
+  return usable ? reportedSec : fallbackSec;
+}
 
 export class OutputLatencyTracker {
   private smoothedOutputLatencyUs: number | null = null;
@@ -64,13 +82,11 @@ export class OutputLatencyTracker {
   /** Get raw output latency in microseconds from AudioContext. */
   getRawUs(audioContext: AudioContext | null): number {
     if (!audioContext) return 0;
-    const baseLatency = audioContext.baseLatency ?? 0;
-    const reportedOutputLatency = audioContext.outputLatency;
-    const outputLatency =
-      typeof reportedOutputLatency === "number" &&
-      Number.isFinite(reportedOutputLatency)
-        ? reportedOutputLatency
-        : UNREPORTED_OUTPUT_LATENCY_SEC;
+    const baseLatency = resolveLatencySec(audioContext.baseLatency, 0);
+    const outputLatency = resolveLatencySec(
+      audioContext.outputLatency,
+      UNREPORTED_OUTPUT_LATENCY_SEC,
+    );
     return (baseLatency + outputLatency) * 1_000_000;
   }
 

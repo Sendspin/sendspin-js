@@ -69,6 +69,23 @@ describe("OutputLatencyTracker", () => {
         6,
       );
     });
+
+    it("substitutes the fallback for an unusable outputLatency reading", () => {
+      const t = new OutputLatencyTracker(null);
+      for (const unusable of [NaN, Infinity, -0.01]) {
+        expect(t.getRawUs(fakeCtx(0.005, unusable))).toBeCloseTo(
+          (0.005 + UNREPORTED_OUTPUT_LATENCY_SEC) * 1_000_000,
+          6,
+        );
+      }
+    });
+
+    it("ignores an unusable baseLatency reading", () => {
+      const t = new OutputLatencyTracker(null);
+      for (const unusable of [NaN, Infinity, -0.01]) {
+        expect(t.getRawUs(fakeCtx(unusable, 0.02))).toBeCloseTo(20000, 6);
+      }
+    });
   });
 
   describe("EMA smoothing", () => {
