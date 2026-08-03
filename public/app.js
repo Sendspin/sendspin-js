@@ -592,6 +592,8 @@ function saveCorrectionMode(mode) {
  * Connect to the Sendspin server
  */
 async function connect() {
+  // Guard re-entry: the Enter-key handler bypasses the disabled connect button.
+  if (player) return;
   const rawUrl = serverUrlInput.value.trim();
 
   if (!rawUrl) {
