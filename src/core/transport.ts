@@ -93,17 +93,7 @@ export class SendspinTransport {
 
   start(): void {
     // Reset per-connection state so a reconnect does not inherit a stale session.
-    this.hs = null;
-    this.session = null;
-    this.matched = null;
-    this.frag = null;
-    this.serverId = "";
-    this.rawServerInit = new Uint8Array(0);
-    this.quiesced = false;
-    this.outboundQueue = [];
-    this.lastHandshakeHash = new Uint8Array(0);
-    this.seenActivate = false;
-    this.effectiveActiveRoles = undefined;
+    this.resetSession();
     const initStr = JSON.stringify({
       type: "client/init",
       payload: {
@@ -116,6 +106,31 @@ export class SendspinTransport {
     this.wsManager.sendText(initStr);
     this.state = "await_server_init";
     this.armTimeout();
+  }
+
+  /** Reset per-connection handshake and session state. */
+  private resetSession(): void {
+    this.hs = null;
+    this.session = null;
+    this.matched = null;
+    this.frag = null;
+    this.serverId = "";
+    this.rawServerInit = new Uint8Array(0);
+    this.quiesced = false;
+    this.outboundQueue = [];
+    this.lastHandshakeHash = new Uint8Array(0);
+    this.seenActivate = false;
+    this.effectiveActiveRoles = undefined;
+  }
+
+  /**
+   * The socket closed. Drop the handshake timer and session so a reconnect
+   * starts clean and no send targets the dead session's keys.
+   */
+  onSocketClosed(): void {
+    this.clearTimeout();
+    this.resetSession();
+    this.state = "idle";
   }
 
   /** Public close: pair/abort and other flows need to tear down the socket. */

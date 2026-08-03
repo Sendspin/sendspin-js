@@ -217,7 +217,7 @@ describe("SendspinCore encryption wiring", () => {
     expect(clientHello.type).toBe("client/hello");
   });
 
-  it("re-runs server/activate after a socket close (reconnect activation reset)", async () => {
+  it("resets the transport session on socket close, so a stale frame is ignored", async () => {
     const ws = new MockWS();
     const core = new SendspinCore({
       webSocket: ws as unknown as WebSocket,
@@ -231,20 +231,22 @@ describe("SendspinCore encryption wiring", () => {
       type: "server/activate",
       payload: { activities: ["playback"], active_roles: ["player@v1"] },
     });
+    expect(
+      clientControlTypes(ws, session).filter((t) => t === "client/state"),
+    ).toHaveLength(1);
 
-    // Socket close -> onTransportClose -> resetActivation (session stays intact).
-    ws.onclose?.();
+    // Socket close resets the transport session (state back to idle). A reconnect
+    // must re-handshake before any frame is decrypted again.
+    ws.close();
 
-    // A second activate must re-run (guard was reset), sending client/state again.
+    // A frame on the now-dead session is not decrypted or dispatched, so no
+    // further client/state is produced.
+    const before = ws.sent.length;
     serverSend(ws, session, {
       type: "server/activate",
       payload: { activities: ["playback"], active_roles: ["player@v1"] },
     });
-
-    const states = clientControlTypes(ws, session).filter(
-      (t) => t === "client/state",
-    );
-    expect(states).toHaveLength(2);
+    expect(ws.sent.length).toBe(before);
 
     core.disconnect(); // clear the periodic state/time-sync intervals
   });

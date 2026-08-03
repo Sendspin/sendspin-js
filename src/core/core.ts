@@ -207,6 +207,10 @@ export class SendspinCore implements StreamHandler {
   }
 
   private onTransportClose(): void {
+    // Drop the transport's handshake timer and stale session so a reconnect
+    // starts clean and a synchronous send from onConnectionOpen can't emit a
+    // frame under the dead session's keys.
+    this.transport.onSocketClosed();
     this.protocolHandler.stopTimeSync();
     this.protocolHandler.resetActivation();
     this.pairing.reset();
