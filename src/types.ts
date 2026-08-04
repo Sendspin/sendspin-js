@@ -286,7 +286,7 @@ export interface ServerActivate {
 export interface ClientPairInit {
   type: MessageType.CLIENT_PAIR_INIT;
   /** commit_B (SHA-256 of nonce_B) is present in dynamic PIN, absent in static. */
-  payload: { commit_B?: string };
+  payload: { pairing_index: number; commit_B?: string };
 }
 
 export interface ServerPairInit {
