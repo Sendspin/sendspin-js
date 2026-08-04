@@ -134,12 +134,12 @@ describe("PairingManager (pairing_psk)", () => {
     expect(store.lookup(pskId(ltPsk))?.serverId).toBe("SERVER_ID");
   });
 
-  it("aborts an unsupported method and closes", () => {
+  it("aborts an unsupported method and keeps the connection open", () => {
     const { sent, close, mgr } = setup();
     mgr.onActivate(["pairing"], "static_pin"); // not configured
     expect(sent[0]!.type).toBe("pair/abort");
     expect(sent[0]!.payload!.reason).toBe("method_not_supported");
-    expect(close).toHaveBeenCalledTimes(1);
+    expect(close).not.toHaveBeenCalled();
   });
 
   it("rejects a PIN method when the matched PSK is the Pairing PSK", () => {
@@ -417,7 +417,7 @@ describe("PairingManager (dynamic_pin)", () => {
     expect(close).toHaveBeenCalled();
   });
 
-  it("aborts with pin_mismatch on a low-order server share", () => {
+  it("fails closed on a low-order server share", () => {
     const ctx = setup({ category: "sentinel", onPin: vi.fn() });
     ctx.mgr.onActivate(["pairing"], "dynamic_pin");
     ctx.mgr.onPairInit({
@@ -427,9 +427,8 @@ describe("PairingManager (dynamic_pin)", () => {
     ctx.mgr.onPairAuth({
       pake_msg_1: base64urlEncode(new Uint8Array(32)), // u = 0
     });
-    expect(lastOfType(ctx.sent, "pair/abort")!.payload!.reason).toBe(
-      "pin_mismatch",
-    );
+    expect(lastOfType(ctx.sent, "pair/abort")).toBeUndefined();
+    expect(ctx.close).toHaveBeenCalledOnce();
   });
 
   it("fails closed on out-of-order pairing messages", () => {
@@ -549,6 +548,14 @@ describe("PairingManager (static_pin)", () => {
     ctx.mgr.onActivate(["pairing"], "static_pin");
     const inits = ctx.sent.filter((m) => m.type === "client/pair-init");
     expect(inits).toHaveLength(1);
+  });
+
+  it("reset closes a pre-opened pairing window", () => {
+    const ctx = staticSetup();
+    ctx.mgr.openPairingWindow();
+    ctx.mgr.reset();
+    ctx.mgr.onActivate(["pairing"], "static_pin");
+    expect(lastOfType(ctx.sent, "client/pair-init")).toBeUndefined();
   });
 });
 

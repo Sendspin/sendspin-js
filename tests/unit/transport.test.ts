@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { harness, completeHandshake } from "./transport-harness";
 import { SUITES } from "../../src/core/noise/suites";
 import { HandshakeState, MSG1, MSG2 } from "../../src/core/noise/handshake";
@@ -117,5 +117,17 @@ describe("SendspinTransport", () => {
       }),
     } as MessageEvent);
     expect(h.ws.disconnected).toBe(true);
+  });
+
+  it("closes when the next handshake message times out", () => {
+    vi.useFakeTimers();
+    try {
+      const h = harness();
+      h.transport.start();
+      vi.advanceTimersByTime(30_000);
+      expect(h.ws.disconnected).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

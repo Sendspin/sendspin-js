@@ -2,12 +2,19 @@ import type { SendspinStorage } from "./types";
 import { Identity } from "./core/noise/identity";
 import { PskStore } from "./core/noise/psk";
 import { base64urlEncode } from "./core/noise/base64url";
+import {
+  encodePairingToken,
+  type PairingTokenVersion,
+} from "./core/noise/pairing-token";
 
 export interface SendspinClientIdentity {
   /** The client's stable identity id (base64url X25519 public key). */
   clientId: string;
   /** The client's Pairing PSK (base64url), or null without storage. */
   pairingPsk: string | null;
+  /** The version 0 pairing token, or null without storage. */
+  pairingToken: string | null;
+  getPairingToken(version?: PairingTokenVersion): string | null;
 }
 
 /**
@@ -27,10 +34,19 @@ export function loadSendspinClientIdentity(
     resolved = localStorage;
   }
   const identity = Identity.loadOrCreate(resolved);
+  const pairingPsk = resolved
+    ? base64urlEncode(new PskStore(resolved).getOrCreatePairingPsk())
+    : null;
+  const getPairingToken = (
+    version: PairingTokenVersion = "0",
+  ): string | null =>
+    pairingPsk
+      ? encodePairingToken(identity.clientId, pairingPsk, version)
+      : null;
   return {
     clientId: identity.clientId,
-    pairingPsk: resolved
-      ? base64urlEncode(new PskStore(resolved).getOrCreatePairingPsk())
-      : null,
+    pairingPsk,
+    pairingToken: getPairingToken(),
+    getPairingToken,
   };
 }

@@ -183,7 +183,7 @@ exposed to an active man-in-the-middle. While it's on by default, you can set `u
 
 The SDK supports all three pairing methods from the spec:
 
-- **Pairing PSK** (always available): enter `player.pairingPsk` into the server.
+- **Pairing PSK** (always available): transfer the client-bound pairing token.
 - **Dynamic PIN** (enabled by `onPairingPin`): the server starts pairing, the
   SDK derives a one-time PIN and passes it to `onPairingPin` for display; the
   operator enters it into the server.
@@ -192,8 +192,9 @@ The SDK supports all three pairing methods from the spec:
   `player.openPairingWindow()` (window lasts ~5 minutes, one attempt).
 
 ```typescript
-console.log('Client ID:', player.clientId);      // 43-char base64url pubkey
-console.log('Pairing PSK:', player.pairingPsk);  // base64url string, or null without storage
+console.log('Client ID:', player.clientId);              // 43-char base64url pubkey
+console.log('Pairing token:', player.pairingToken);      // spec version 0, or null without storage
+console.log('Music Assistant token:', player.getPairingToken('1'));
 
 // Rotate the Pairing PSK (e.g. if it may have leaked)
 const newPsk = player.rotatePairingPsk();
@@ -204,10 +205,10 @@ player.isPairingLockedOut('dynamic_pin');        // terminal lockout after 10 fa
 player.clearPairingLockout('dynamic_pin');       // local operator action that exits lockout
 ```
 
-Enter `player.pairingPsk` into the server to pair this client as trusted.
+Enter `player.getPairingToken('1')` into Music Assistant to pair this client as trusted. `player.pairingToken` is the version 0 token defined by the audited specification.
 Identity and pairing require `storage` (defaults to `localStorage`); without
-it, `clientId` is still generated per session but `pairingPsk` and
-`rotatePairingPsk()` return `null`.
+it, `clientId` is still generated per session but `pairingPsk`,
+`pairingToken`, `getPairingToken()`, and `rotatePairingPsk()` return `null`.
 
 Apps that key their own state on the client id can read it before a player
 exists. A player built afterwards on the same storage adopts this identity.
@@ -215,7 +216,8 @@ exists. A player built afterwards on the same storage adopts this identity.
 ```typescript
 import { loadSendspinClientIdentity } from '@sendspin/sendspin-js';
 
-const { clientId, pairingPsk } = loadSendspinClientIdentity();
+const { clientId, pairingPsk, pairingToken, getPairingToken } = loadSendspinClientIdentity();
+console.log('Music Assistant token:', getPairingToken('1'));
 ```
 
 ### Core + scheduler as separate layers

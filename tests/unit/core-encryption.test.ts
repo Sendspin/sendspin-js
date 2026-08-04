@@ -370,16 +370,23 @@ describe("SendspinCore encryption wiring", () => {
     expect(events).not.toContain("finalized");
   });
 
-  it("exposes a 43-char pairingPsk that rotates", () => {
+  it("exposes bound pairing tokens that rotate with the Pairing PSK", () => {
     const core = new SendspinCore({
       webSocket: new MockWS() as unknown as WebSocket,
       storage: memStorage(),
     });
     const psk = core.pairingPsk;
+    const token = core.pairingToken;
     expect(psk).toHaveLength(43);
+    expect(token).toHaveLength(107);
+    expect(token).toMatch(/^SP:0/);
+    const musicAssistantToken = core.getPairingToken("1");
+    expect(musicAssistantToken).toHaveLength(107);
+    expect(musicAssistantToken).toBe(`SP:1${token!.slice(4)}`);
     const rotated = core.rotatePairingPsk();
     expect(rotated).toHaveLength(43);
     expect(rotated).not.toBe(psk);
+    expect(core.pairingToken).not.toBe(token);
   });
 
   it("returns null pairing credentials without storage", () => {
@@ -388,6 +395,8 @@ describe("SendspinCore encryption wiring", () => {
       storage: null,
     });
     expect(core.pairingPsk).toBeNull();
+    expect(core.pairingToken).toBeNull();
+    expect(core.getPairingToken("1")).toBeNull();
     expect(core.rotatePairingPsk()).toBeNull();
   });
 });

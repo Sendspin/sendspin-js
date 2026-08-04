@@ -291,7 +291,7 @@ export class PairingManager {
     try {
       this.cpace.derive(peerShare);
     } catch (e) {
-      if (e instanceof CPaceError) return this.abort("pin_mismatch");
+      if (e instanceof CPaceError) return this.fail();
       throw e;
     }
     this.phase = "await-confirm";
@@ -415,13 +415,13 @@ export class PairingManager {
 
   /**
    * Send pair/abort with reason and discard state. The connection stays open
-   * for a retry. Only method_not_supported (like concurrent_attempt) closes it.
+   * for a retry. Only concurrent_attempt closes it.
    */
   private abort(reason: PairAbortReason): void {
     this.clearAttempt();
     this.deps.sendControl({ type: "pair/abort", payload: { reason } });
     this.deps.onEvent?.("aborted", reason);
-    if (reason === "method_not_supported") this.deps.close();
+    if (reason === "concurrent_attempt") this.deps.close();
   }
 
   /** Protocol violation or malformed field: fail closed without an abort reason. */

@@ -22,6 +22,10 @@ import { SUITES } from "./noise/suites";
 import { PairingManager } from "./pairing";
 import { getSupportedFormats } from "./codec-support";
 import { base64urlEncode, base64urlDecode } from "./noise/base64url";
+import {
+  encodePairingToken,
+  type PairingTokenVersion,
+} from "./noise/pairing-token";
 import type {
   SendspinCoreConfig,
   DecodedAudioChunk,
@@ -473,6 +477,17 @@ export class SendspinCore implements StreamHandler {
   get pairingPsk(): string | null {
     return this.hasStorage
       ? base64urlEncode(this.pskStore.getOrCreatePairingPsk())
+      : null;
+  }
+
+  get pairingToken(): string | null {
+    return this.getPairingToken();
+  }
+
+  getPairingToken(version: PairingTokenVersion = "0"): string | null {
+    const pairingPsk = this.pairingPsk;
+    return pairingPsk
+      ? encodePairingToken(this.clientId, pairingPsk, version)
       : null;
   }
 

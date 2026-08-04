@@ -57,7 +57,7 @@ const groupVolumeValue = document.getElementById("group-volume-value");
 const groupMuteBtn = document.getElementById("group-mute-btn");
 const groupMuteIcon = document.getElementById("group-mute-icon");
 const clientIdEl = document.getElementById("client-id");
-const pairingPskEl = document.getElementById("pairing-psk");
+const pairingTokenEl = document.getElementById("pairing-token");
 const rotatePskBtn = document.getElementById("rotate-psk");
 const trustLevelEl = document.getElementById("trust-level");
 const unpairedAccessCheckbox = document.getElementById("unpaired-access");
@@ -225,7 +225,7 @@ function resetStatusDisplay() {
   progressCurrent.textContent = "--:--";
   progressDuration.textContent = "--:--";
   clientIdEl.textContent = "-";
-  pairingPskEl.textContent = "-";
+  pairingTokenEl.textContent = "-";
   trustLevelEl.textContent = "-";
   pairingPinGroup.hidden = true;
   pairingPinEl.textContent = "-";
@@ -237,8 +237,32 @@ function resetStatusDisplay() {
  */
 function updatePairingDisplay() {
   clientIdEl.textContent = player.clientId;
-  pairingPskEl.textContent = player.pairingPsk ?? "(no storage)";
+  pairingTokenEl.textContent = pairingTokenForDisplay();
+  const pairingAvailable = hasPairingApi();
+  rotatePskBtn.disabled = !pairingAvailable;
+  openPairingWindowBtn.disabled = !pairingAvailable;
+  cancelPairingBtn.disabled = !pairingAvailable;
+  clearLockoutBtn.disabled = !pairingAvailable;
+  staticPinInput.disabled = !pairingAvailable;
   updateLockoutDisplay();
+}
+
+function hasPairingApi() {
+  return (
+    typeof player?.getPairingToken === "function" &&
+    typeof player.rotatePairingPsk === "function" &&
+    typeof player.isPairingLockedOut === "function" &&
+    typeof player.clearPairingLockout === "function" &&
+    typeof player.openPairingWindow === "function" &&
+    typeof player.cancelPairing === "function"
+  );
+}
+
+function pairingTokenForDisplay() {
+  if (!hasPairingApi()) {
+    return "(SDK update required)";
+  }
+  return player.getPairingToken("1") ?? "(no storage)";
 }
 
 /**
@@ -246,6 +270,10 @@ function updatePairingDisplay() {
  */
 function updateLockoutDisplay() {
   if (!player) return;
+  if (!hasPairingApi()) {
+    pinLockoutEl.textContent = "(SDK update required)";
+    return;
+  }
   const locked = ["dynamic_pin", "static_pin"].filter((m) =>
     player.isPairingLockedOut(m),
   );
@@ -890,9 +918,13 @@ function init() {
   });
   rotatePskBtn.addEventListener("click", () => {
     if (!player) return;
+    if (!hasPairingApi()) {
+      showToast("Update the SDK to use pairing controls", "error");
+      return;
+    }
     player.rotatePairingPsk();
-    pairingPskEl.textContent = player.pairingPsk ?? "(no storage)";
-    showToast("Pairing PSK rotated", "success");
+    pairingTokenEl.textContent = pairingTokenForDisplay();
+    showToast("Pairing token rotated", "success");
   });
   staticPinInput.addEventListener("change", () => {
     const pin = staticPinInput.value.trim();
@@ -908,17 +940,29 @@ function init() {
       showToast("Connect first", "error");
       return;
     }
+    if (!hasPairingApi()) {
+      showToast("Update the SDK to use pairing controls", "error");
+      return;
+    }
     player.openPairingWindow();
     showToast("Pairing window open (~5 minutes, one attempt)", "info");
   });
   cancelPairingBtn.addEventListener("click", () => {
     if (!player) return;
+    if (!hasPairingApi()) {
+      showToast("Update the SDK to use pairing controls", "error");
+      return;
+    }
     player.cancelPairing();
     showToast("Pairing cancelled", "info");
   });
   clearLockoutBtn.addEventListener("click", () => {
     if (!player) {
       showToast("Connect first", "error");
+      return;
+    }
+    if (!hasPairingApi()) {
+      showToast("Update the SDK to use pairing controls", "error");
       return;
     }
     for (const method of ["dynamic_pin", "static_pin"]) {
