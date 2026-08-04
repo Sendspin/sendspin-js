@@ -36,35 +36,6 @@ function detectIsCastRuntime(): boolean {
   return /CrKey/i.test(navigator.userAgent);
 }
 
-function detectIsSafari(): boolean {
-  if (typeof navigator === "undefined") return false;
-  const ua = navigator.userAgent;
-  return /Safari/i.test(ua) && !/Chrome/i.test(ua);
-}
-
-function detectIsMac(): boolean {
-  if (typeof navigator === "undefined") return false;
-  return /Macintosh/i.test(navigator.userAgent);
-}
-
-function detectIsWindows(): boolean {
-  if (typeof navigator === "undefined") return false;
-  return /Windows/i.test(navigator.userAgent);
-}
-
-/**
- * Get platform-specific default static delay in milliseconds.
- * Based on testing across various platforms and browsers.
- */
-function getDefaultSyncDelay(): number {
-  if (detectIsIOS()) return 250;
-  if (detectIsAndroid()) return 200;
-  if (detectIsMac()) return detectIsSafari() ? 190 : 150;
-  if (detectIsWindows()) return 250;
-  // Linux and others
-  return 200;
-}
-
 // Add a small cushion beyond the measured buffered runway so delayed timer
 // delivery does not cut playback off just before the last scheduled audio ends.
 const DISCONNECT_PLAYBACK_RESET_GRACE_MS = 250;
@@ -110,11 +81,9 @@ export class SendspinPlayer {
       productName: config.productName,
       webSocket: config.webSocket,
       codecs: config.codecs,
-      bufferCapacity:
-        config.bufferCapacity ??
-        (outputMode === "media-element" ? 1024 * 1024 * 5 : 1024 * 1024 * 1.5),
+      bufferCapacity: config.bufferCapacity,
       syncDelay: config.syncDelay,
-      defaultSyncDelay: getDefaultSyncDelay(),
+      defaultSyncDelay: config.defaultSyncDelay,
       storage,
       requiredLeadTimeMs: config.requiredLeadTimeMs,
       minBufferMs: config.minBufferMs,
@@ -160,7 +129,9 @@ export class SendspinPlayer {
 
     this.core.onStreamStart = (format, isFormatUpdate) => {
       this.scheduler.initAudioContext();
-      this.scheduler.resumeAudioContext();
+      void this.scheduler.resumeAudioContext().catch((error) => {
+        console.warn("Sendspin: Failed to resume AudioContext:", error);
+      });
       if (!isFormatUpdate) {
         this.scheduler.clearBuffers();
       }
@@ -232,6 +203,15 @@ export class SendspinPlayer {
       },
       runwaySec * 1000 + DISCONNECT_PLAYBACK_RESET_GRACE_MS,
     );
+  }
+
+  /**
+   * Initialize and resume audio playback. Call this directly from a click or
+   * tap handler, before any other await, to satisfy browser autoplay policies.
+   */
+  async unlock(): Promise<void> {
+    this.scheduler.initAudioContext();
+    await this.scheduler.resumeAudioContext();
   }
 
   // Connect to Sendspin server
@@ -431,10 +411,4 @@ export { SendspinDecoder } from "./audio/decoder";
 export { AudioScheduler } from "./audio/scheduler";
 
 // Export platform detection utilities
-export {
-  detectIsAndroid,
-  detectIsIOS,
-  detectIsMobile,
-  detectIsCastRuntime,
-  getDefaultSyncDelay,
-};
+export { detectIsAndroid, detectIsIOS, detectIsMobile, detectIsCastRuntime };

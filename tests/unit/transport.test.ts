@@ -16,6 +16,16 @@ const concat = (a: Uint8Array, b: Uint8Array) => {
 };
 
 describe("SendspinTransport", () => {
+  it("drops control messages sent before the handshake completes", () => {
+    const h = harness();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    h.transport.sendControl({ type: "client/state", payload: {} });
+
+    expect(h.ws.sentBinary).toHaveLength(0);
+    warn.mockRestore();
+  });
+
   it("completes the Sentinel handshake and round-trips control + audio + fragments", () => {
     const h = harness();
     const { serverSession, serverId } = completeHandshake(h);

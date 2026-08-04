@@ -23,7 +23,7 @@ import type {
 import type { StreamHandler } from "../internal-types";
 import type { StateManager } from "./state-manager";
 import { TimeSyncManager } from "./time-sync-manager";
-import { getSupportedFormats } from "./codec-support";
+import { getDefaultBufferCapacity, getSupportedFormats } from "./codec-support";
 import { clampSyncDelayMs } from "../sync-delay";
 
 // Constants
@@ -31,6 +31,18 @@ const STATE_UPDATE_INTERVAL = 5000; // 5 seconds
 
 const DEFAULT_REQUIRED_LEAD_TIME_MS = 250;
 const DEFAULT_MIN_BUFFER_MS = 250;
+
+type PlayerStatePayload = NonNullable<ClientState["payload"]["player"]>;
+
+// Snapshot of the diffable player fields. supported_commands is static, sent
+// only in the initial full state, so it is not tracked here.
+interface SentPlayerState {
+  volume: number;
+  muted: boolean;
+  static_delay_ms: number;
+  required_lead_time_ms: number;
+  min_buffer_ms: number;
+}
 
 function assertBufferMs(value: number, name: string): void {
   if (!isFinite(value) || value < 0) {
@@ -66,7 +78,7 @@ export class ProtocolHandler {
   private clientName: string;
   private productName?: string;
   private codecs: Codec[];
-  private bufferCapacity: number;
+  private bufferCapacity: number | undefined;
   private requiredLeadTimeMs: number;
   private minBufferMs: number;
   private useHardwareVolume: boolean;
@@ -77,6 +89,11 @@ export class ProtocolHandler {
   private activated = false;
   private activeRoles: Set<string> | null = null;
   private pairingSuspended = false;
+
+  // Last player payload sent to the current server connection, or null when no
+  // full state has been sent yet. Cleared on (re)connect so the first send is
+  // full again.
+  private lastSentPlayer: SentPlayerState | null = null;
 
   constructor(
     private sender: MessageSender,
@@ -89,7 +106,9 @@ export class ProtocolHandler {
     this.clientName = config.clientName ?? "Sendspin Player";
     this.productName = config.productName;
     this.codecs = config.codecs ?? ["opus", "flac", "pcm"];
-    this.bufferCapacity = config.bufferCapacity ?? 1024 * 1024 * 5; // 5MB default
+    // Left undefined so the capacity is derived from the formats actually
+    // advertised in client/hello (see sendClientHello).
+    this.bufferCapacity = config.bufferCapacity;
     this.requiredLeadTimeMs =
       config.requiredLeadTimeMs ?? DEFAULT_REQUIRED_LEAD_TIME_MS;
     assertBufferMs(this.requiredLeadTimeMs, "requiredLeadTimeMs");
@@ -322,6 +341,7 @@ export class ProtocolHandler {
 
   // client_id and version live in client/init, not the hello.
   sendClientHello(): void {
+    const supportedFormats = getSupportedFormats(this.codecs);
     const hello: ClientHello = {
       type: "client/hello" as MessageType.CLIENT_HELLO,
       payload: {
@@ -339,12 +359,15 @@ export class ProtocolHandler {
             "Unknown",
         },
         "player@v1_support": {
-          supported_formats: getSupportedFormats(this.codecs),
-          buffer_capacity: this.bufferCapacity,
+          supported_formats: supportedFormats,
+          buffer_capacity:
+            this.bufferCapacity ?? getDefaultBufferCapacity(supportedFormats),
           supported_commands: ["volume", "mute"],
         },
       },
     };
+    // Reset so the first client/state after connect is a full snapshot.
+    this.lastSentPlayer = null;
     this.sender.sendControl(hello);
   }
 
@@ -360,7 +383,8 @@ export class ProtocolHandler {
     this.sendStateUpdate();
   }
 
-  // Send state update
+  // Send state update. The first send after a (re)connect is a full snapshot;
+  // later sends are deltas carrying only changed fields, which the server merges.
   // When skipHardwareRead is true, use stateManager values instead of reading from hardware.
   // This avoids race conditions when responding to volume commands.
   sendStateUpdate(skipHardwareRead = false): void {
@@ -380,14 +404,35 @@ export class ProtocolHandler {
       available: true,
     };
     if (this.activeRoles === null || this.activeRoles.has("player@v1")) {
-      payload.player = {
+      const current: SentPlayerState = {
         volume,
         muted,
         static_delay_ms: staticDelayMs,
         required_lead_time_ms: this.requiredLeadTimeMs,
         min_buffer_ms: this.minBufferMs,
-        supported_commands: ["set_static_delay"],
       };
+
+      const last = this.lastSentPlayer;
+      if (last === null) {
+        // Full state: every field plus the static supported_commands.
+        payload.player = {
+          ...current,
+          supported_commands: ["set_static_delay"],
+        };
+      } else {
+        // Delta: only changed fields.
+        const player: PlayerStatePayload = {};
+        if (current.static_delay_ms !== last.static_delay_ms)
+          player.static_delay_ms = current.static_delay_ms;
+        if (current.volume !== last.volume) player.volume = current.volume;
+        if (current.muted !== last.muted) player.muted = current.muted;
+        if (current.required_lead_time_ms !== last.required_lead_time_ms)
+          player.required_lead_time_ms = current.required_lead_time_ms;
+        if (current.min_buffer_ms !== last.min_buffer_ms)
+          player.min_buffer_ms = current.min_buffer_ms;
+        payload.player = player;
+      }
+      this.lastSentPlayer = current;
     }
 
     const message: ClientState = {

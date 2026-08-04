@@ -112,11 +112,12 @@ export interface ClientState {
   payload: {
     available: boolean;
     player?: {
-      volume: number;
-      muted: boolean;
-      static_delay_ms: number;
-      required_lead_time_ms: number;
-      min_buffer_ms: number;
+      // Full initial state includes all fields; deltas include only changed fields.
+      static_delay_ms?: number;
+      volume?: number;
+      muted?: boolean;
+      required_lead_time_ms?: number;
+      min_buffer_ms?: number;
       supported_commands?: string[];
     };
   };
@@ -557,7 +558,12 @@ export interface SendspinCoreConfig {
   codecs?: Codec[];
 
   /**
-   * Buffer capacity in bytes. Defaults to 5MB for media-element, 1.5MB for direct.
+   * Buffer capacity in bytes, advertised to the server as the amount of
+   * not-yet-played encoded audio it may send ahead.
+   *
+   * Defaults to the server's stream-ahead depth at the worst-case byte rate of
+   * the negotiable formats: ~5.9MB when FLAC or PCM is offered, ~1.9MB for
+   * Opus-only. Set this only for clients with a real, smaller buffer.
    */
   bufferCapacity?: number;
 
@@ -575,7 +581,12 @@ export interface SendspinCoreConfig {
    * Allowed range: 0-5000.
    * Runtime update behavior depends on the active correction mode settings.
    * Falls back to a persisted value, then `defaultSyncDelay`, then 0.
-   * SendspinPlayer supplies a browser/platform-specific heuristic as that default.
+   *
+   * The default of 0 means audio leaves the audio output port at the instant the
+   * server stamped it for, matching the protocol default. Only set this to
+   * compensate for latency the SDK cannot see (an amplifier, external speakers,
+   * a Bluetooth link), not for browser output latency, which is measured and
+   * compensated automatically via `useOutputLatencyCompensation`.
    *
    * Server-commanded delays (set_static_delay) are persisted via `storage` and
    * restored on the next connect. Passing `syncDelay` explicitly overrides any
@@ -585,7 +596,7 @@ export interface SendspinCoreConfig {
 
   /**
    * Fallback static delay used when neither `syncDelay` nor a persisted value
-   * is available. SendspinPlayer sets this to a platform-specific heuristic.
+   * is available. Defaults to 0.
    * @internal
    */
   defaultSyncDelay?: number;

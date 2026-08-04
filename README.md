@@ -39,8 +39,12 @@ const player = new SendspinPlayer({
   }
 });
 
-// Connect to server
-await player.connect();
+const connectButton = document.querySelector<HTMLButtonElement>('#connect')!;
+connectButton.addEventListener('click', async () => {
+  // Keep this as the first awaited work in the click/tap handler.
+  await player.unlock();
+  await player.connect();
+});
 
 // Local volume control (affects this player only)
 player.setVolume(80);
@@ -65,6 +69,9 @@ player.sendCommand('switch');  // Switch group
 player.disconnect('user_request');
 ```
 
+Call `unlock()` directly from a click or tap handler, before any other awaited
+work, so the browser can initialize or resume audio during the user gesture.
+
 ## Advanced configuration
 
 ### Bring your own WebSocket
@@ -80,6 +87,7 @@ const player = new SendspinPlayer({
   clientName: 'My Player',
   webSocket: ws,
 });
+await player.unlock();
 await player.connect();
 ```
 

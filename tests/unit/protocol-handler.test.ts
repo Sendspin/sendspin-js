@@ -232,6 +232,29 @@ describe("ProtocolHandler extra", () => {
       const payload = hello.payload as Record<string, unknown>;
       expect(payload.supported_pair_methods).toEqual([]);
     });
+
+    it("advertises a buffer capacity covering the stream-ahead depth", () => {
+      const handler = makeHandler({ codecs: ["pcm"] });
+      handler.sendClientHello();
+
+      const support = (
+        lastSent(send, "client/hello")!.payload as Record<string, unknown>
+      )["player@v1_support"] as Record<string, unknown>;
+      // 30s of 48kHz/16-bit stereo PCM, the worst case among the pcm formats.
+      expect(support.buffer_capacity as number).toBeGreaterThanOrEqual(
+        48000 * 2 * 2 * 30,
+      );
+    });
+
+    it("uses an explicit buffer capacity when configured", () => {
+      const handler = makeHandler({ codecs: ["pcm"], bufferCapacity: 123_456 });
+      handler.sendClientHello();
+
+      const support = (
+        lastSent(send, "client/hello")!.payload as Record<string, unknown>
+      )["player@v1_support"] as Record<string, unknown>;
+      expect(support.buffer_capacity).toBe(123_456);
+    });
   });
 
   describe("handleServerHello", () => {
@@ -426,6 +449,7 @@ describe("ProtocolHandler extra", () => {
           getExternalVolume,
         });
         stateManager.volume = 77;
+        getExternalVolume.mockClear();
         send.mockClear();
 
         handler.sendStateUpdate(true);
@@ -437,6 +461,84 @@ describe("ProtocolHandler extra", () => {
         expect(player.volume).toBe(77);
         expect(player.muted).toBe(false);
       });
+    });
+  });
+
+  describe("delta client/state (spec: full then changed-only)", () => {
+    it("sends the full player payload on the first state after connect", () => {
+      const handler = makeHandler();
+      handler.sendClientHello();
+      handler.sendStateUpdate();
+
+      const player = (
+        lastSent(send, "client/state")!.payload as Record<string, unknown>
+      ).player as Record<string, unknown>;
+      expect(player).toMatchObject({
+        volume: expect.any(Number),
+        muted: expect.any(Boolean),
+        static_delay_ms: expect.any(Number),
+        required_lead_time_ms: expect.any(Number),
+        min_buffer_ms: expect.any(Number),
+        supported_commands: ["set_static_delay"],
+      });
+    });
+
+    it("sends the full player payload when state changed before client/hello", () => {
+      const handler = makeHandler();
+      stateManager.volume = 42;
+      handler.sendStateUpdate();
+      send.mockClear();
+
+      handler.sendClientHello();
+      handler.sendStateUpdate();
+
+      const player = (
+        lastSent(send, "client/state")!.payload as Record<string, unknown>
+      ).player as Record<string, unknown>;
+      expect(player).toMatchObject({
+        volume: 42,
+        muted: expect.any(Boolean),
+        static_delay_ms: expect.any(Number),
+        required_lead_time_ms: expect.any(Number),
+        min_buffer_ms: expect.any(Number),
+        supported_commands: ["set_static_delay"],
+      });
+    });
+
+    it("sends only the changed field on the next update", () => {
+      const handler = makeHandler();
+      handler.sendClientHello();
+      handler.sendStateUpdate();
+      send.mockClear();
+
+      stateManager.volume = 42;
+      handler.sendStateUpdate();
+
+      const player = (
+        lastSent(send, "client/state")!.payload as Record<string, unknown>
+      ).player as Record<string, unknown>;
+      expect(Object.keys(player)).toEqual(["volume"]);
+      expect(player.volume).toBe(42);
+    });
+
+    it("resets to a full payload after a reconnect", () => {
+      const handler = makeHandler();
+      handler.sendClientHello();
+      handler.sendStateUpdate();
+      stateManager.volume = 42;
+      handler.sendStateUpdate();
+      send.mockClear();
+
+      // Reconnect: a fresh server has no prior state to merge into.
+      handler.sendClientHello();
+      handler.sendStateUpdate();
+
+      const player = (
+        lastSent(send, "client/state")!.payload as Record<string, unknown>
+      ).player as Record<string, unknown>;
+      expect(player.supported_commands).toEqual(["set_static_delay"]);
+      expect(player.required_lead_time_ms).toBeTypeOf("number");
+      expect(player.min_buffer_ms).toBeTypeOf("number");
     });
   });
 

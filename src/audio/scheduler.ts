@@ -45,7 +45,6 @@ const RATE_CORRECTION_FIRM = 0.005;
 
 // EMA weight for the sync error. Lower smooths clock noise but slows drift response. Exported only for tests.
 export const SYNC_ERROR_ALPHA = 0.05;
-const SCHEDULE_HEADROOM_SEC = 0.2;
 const SCHEDULE_HORIZON_PRECISE_SEC = 20;
 const SCHEDULE_HORIZON_GOOD_SEC = 8;
 const SCHEDULE_HORIZON_POOR_SEC = 4;
@@ -237,6 +236,16 @@ export class AudioScheduler {
       .immediateDelayCutover;
   }
 
+  /**
+   * Smoothed baseLatency + outputLatency in seconds: how long audio handed to
+   * the renderer takes to reach the output port. Read on every scheduling pass
+   * (even with compensation disabled) because the clock source needs it to keep
+   * both of its clocks in the render-clock domain.
+   */
+  private measurePlayoutLatencySec(): number {
+    return this.latencyTracker.getSmoothedUs(this.audioContext) / 1_000_000;
+  }
+
   private getTargetScheduledHorizonSec(): number {
     if (this.isCastRuntime) {
       return CAST_SCHEDULE_HORIZON_SEC;
@@ -333,8 +342,9 @@ export class AudioScheduler {
       return;
     }
 
+    const playoutLatencySec = this.measurePlayoutLatencySec();
     const { audioContextTimeSec, audioContextRawTimeSec, nowMs, nowUs } =
-      this.clockSource.getTimingSnapshot(this.audioContext);
+      this.clockSource.getTimingSnapshot(this.audioContext, playoutLatencySec);
     this.pruneExpiredScheduledSources(audioContextRawTimeSec);
     if (this.getScheduledAheadSec(audioContextRawTimeSec) <= 0) {
       this.recorrectionMonitor.resetCheckState();
@@ -343,7 +353,7 @@ export class AudioScheduler {
     }
 
     const outputLatencySec = this.useOutputLatencyCompensation
-      ? this.latencyTracker.getSmoothedUs(this.audioContext) / 1_000_000
+      ? playoutLatencySec
       : 0;
     const targetPlaybackTime = this.computeTargetPlaybackTime(
       this.lastScheduledServerTime,
@@ -593,13 +603,8 @@ export class AudioScheduler {
 
   async resumeAudioContext(): Promise<void> {
     if (this.audioContext && this.audioContext.state === "suspended") {
-      try {
-        await this.audioContext.resume();
-        console.log("Sendspin: AudioContext resumed");
-      } catch (e) {
-        console.warn("Sendspin: Failed to resume AudioContext:", e);
-        return;
-      }
+      await this.audioContext.resume();
+      console.log("Sendspin: AudioContext resumed");
       if (this.audioBufferQueue.length > 0) this.scheduleQueueProcessing();
       if (this.usesRecorrectionMonitor) this.recorrectionMonitor.start();
     }
@@ -801,16 +806,20 @@ export class AudioScheduler {
     this.audioBufferQueue.sort((a, b) => a.serverTime - b.serverTime);
     if (!this.timeFilter.is_synchronized) return;
 
+    const playoutLatencySec = this.measurePlayoutLatencySec();
     const {
       audioContextTimeSec: audioContextTime,
       audioContextRawTimeSec,
       nowMs,
       nowUs,
-    } = this.clockSource.getTimingSnapshot(this.audioContext);
+    } = this.clockSource.getTimingSnapshot(
+      this.audioContext,
+      playoutLatencySec,
+    );
     this.pruneExpiredScheduledSources(audioContextRawTimeSec);
 
     const outputLatencySec = this.useOutputLatencyCompensation
-      ? this.latencyTracker.getSmoothedUs(this.audioContext) / 1_000_000
+      ? playoutLatencySec
       : 0;
     const syncDelaySec = this.syncDelayMs / 1000;
     const targetScheduledHorizonSec = this.getTargetScheduledHorizonSec();
@@ -1020,6 +1029,16 @@ export class AudioScheduler {
     this.emitStatusLog(nowMs);
   }
 
+  /**
+   * AudioContext time at which a chunk must be started so its first sample
+   * leaves the audio output port at the instant the server stamped it for.
+   *
+   * `audioContextTime` is the render clock, the same domain `source.start()`
+   * takes; audio handed to the renderer becomes audible one output latency
+   * later, so that latency is subtracted. Chunks whose target has already passed
+   * are dropped by the caller rather than shifted forward, which would render
+   * them late.
+   */
   private computeTargetPlaybackTime(
     serverTimeUs: number,
     audioContextTime: number,
@@ -1028,9 +1047,7 @@ export class AudioScheduler {
   ): number {
     const chunkClientTimeUs = this.timeFilter.computeClientTime(serverTimeUs);
     const deltaSec = (chunkClientTimeUs - nowUs) / 1_000_000;
-    return (
-      audioContextTime + deltaSec + SCHEDULE_HEADROOM_SEC - outputLatencySec
-    );
+    return audioContextTime + deltaSec - outputLatencySec;
   }
 
   startAudioElement(): void {

@@ -687,6 +687,7 @@ async function connect() {
       onStateChange,
     });
 
+    await player.unlock();
     await player.connect();
     updatePairingDisplay();
 

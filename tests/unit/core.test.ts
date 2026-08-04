@@ -54,6 +54,22 @@ function activateController(core: SendspinCore): void {
   });
 }
 
+// Activate the player role so client/state sends, dropping the initial state.
+function activatePlayer(
+  core: SendspinCore,
+  send: ReturnType<typeof vi.fn>,
+): void {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (core as any).routeControl({
+    type: "server/activate",
+    payload: {
+      activities: ["playback"],
+      active_roles: ["player@v1"],
+    },
+  });
+  send.mockClear();
+}
+
 function seedMetadata(
   core: SendspinCore,
   timestampUs: number,
@@ -304,6 +320,10 @@ describe("SendspinCore command + state forwarding", () => {
     core = new SendspinCore({ baseUrl: "http://h" });
   });
 
+  afterEach(() => {
+    core._stateManager.clearAllIntervals();
+  });
+
   it("forwards a controller command with command name and params merged", () => {
     const send = spySend(core);
     activateController(core);
@@ -319,16 +339,18 @@ describe("SendspinCore command + state forwarding", () => {
 
   it("setVolume clamps in state manager and sends a client/state update", () => {
     const send = spySend(core);
-    core.setVolume(150);
+    activatePlayer(core, send);
+    core.setVolume(-10);
 
-    expect(core.volume).toBe(100); // clamped 0-100
+    expect(core.volume).toBe(0); // clamped 0-100
     expect(send).toHaveBeenCalledTimes(1);
     expect(send.mock.calls[0][0].type).toBe("client/state");
-    expect(send.mock.calls[0][0].payload.player.volume).toBe(100);
+    expect(send.mock.calls[0][0].payload.player.volume).toBe(0);
   });
 
   it("setMuted updates state and sends a client/state update", () => {
     const send = spySend(core);
+    activatePlayer(core, send);
     core.setMuted(true);
 
     expect(core.muted).toBe(true);
@@ -352,10 +374,15 @@ describe("SendspinCore.setSyncDelay", () => {
     core = new SendspinCore({ baseUrl: "http://h" });
   });
 
+  afterEach(() => {
+    core._stateManager.clearAllIntervals();
+  });
+
   it("clamps the delay, updates getSyncDelayMs, fires callback, and sends state", () => {
     const cb = vi.fn();
     core.onSyncDelayChange = cb;
     const send = spySend(core);
+    activatePlayer(core, send);
 
     core.setSyncDelay(99999); // clamp to 5000
 
