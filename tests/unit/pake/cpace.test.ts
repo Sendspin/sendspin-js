@@ -22,17 +22,36 @@ function toHex(b: Uint8Array): string {
 
 const utf8 = (s: string) => new TextEncoder().encode(s);
 
-// draft-irtf-cfrg-cpace-13 appendix B.1 (X25519, SHA-512) test vectors.
+// draft-irtf-cfrg-cpace-21 appendix B.1 (X25519, SHA-512) test vectors.
 const DRAFT = {
   prs: utf8("Password"),
-  ci: hex("6f630b425f726573706f6e6465720b415f696e69746961746f72"),
+  ci: hex("0b415f696e69746961746f720b425f726573706f6e646572"),
   sid: hex("7e4b4791d6a8ef019b936c79fb7f2c57"),
-  g: "64e8099e3ea682cfdc5cb665c057ebb514d06bf23ebc9f743b51b82242327074",
+  ada: utf8("ADa"),
+  adb: utf8("ADb"),
+  g: "d04bf6d41f6a289632a2e929fa29bebd51092512a7829fdde7d314b62f05a73f",
   ya: hex("21b4f4bd9e64ed355c3eb676a28ebedaf6d8f17bdc365995b319097153044080"),
-  Ya: "1b02dad6dbd29a07b6d28c9e04cb2f184f0734350e32bb7e62ff9dbcfdb63d15",
+  Ya: "1d13c89278cdadd826f6d8d7f887701430f8380ddc17611cdd6dc989ce0c9f32",
   yb: hex("848b0779ff415f0af4ea14df9dd1d3c29ac41d836c7808896c4eba19c51ac40a"),
-  Yb: "20cda5955f82c4931545bcbf40758ce1010d7db4db2a907013d79c7a8fcf957f",
+  Yb: "248cccf6d5cdc3646f0ad593f9e6cef4e69d4945f8372e623512ecea32185623",
+  isk:
+    "6e19b875f7a561d6b3ca3dbb9ef42ac55de3e717881018204b8922b4d5e53bb2" +
+    "aa82c300bea7b65d2b671da71922ddf6472301b79bc270adfa8bf413285f2263",
 };
+
+function draftPair(): [CPace, CPace] {
+  const opts = {
+    prs: DRAFT.prs,
+    sid: DRAFT.sid,
+    ci: DRAFT.ci,
+    ada: DRAFT.ada,
+    adb: DRAFT.adb,
+  } as const;
+  return [
+    CPace.start({ role: "initiator", scalar: DRAFT.ya, ...opts }),
+    CPace.start({ role: "responder", scalar: DRAFT.yb, ...opts }),
+  ];
+}
 
 describe("prependLen / lvCat", () => {
   it("uses LEB128 length prefixes", () => {
@@ -48,8 +67,8 @@ describe("prependLen / lvCat", () => {
 describe("generator calculation (draft B.1)", () => {
   it("builds the generator string with correct zero padding", () => {
     const gs = generatorString(DRAFT.prs, DRAFT.ci, DRAFT.sid);
-    // lv(DSI=8) + lv(PRS=8) + lv(zpad=109) + lv(CI=26) + lv(sid=16)
-    expect(gs.length).toBe(9 + 9 + 110 + 27 + 17);
+    // lv(DSI=8) + lv(PRS=8) + lv(zpad=109) + lv(CI=24) + lv(sid=16)
+    expect(gs.length).toBe(9 + 9 + 110 + 25 + 17);
     expect(toHex(gs.slice(0, 9))).toBe("084350616365323535");
   });
 
@@ -59,28 +78,30 @@ describe("generator calculation (draft B.1)", () => {
     );
   });
 
-  it("computes the draft public shares and agrees on K", () => {
-    const a = CPace.start({
-      role: "initiator",
-      prs: DRAFT.prs,
-      sid: DRAFT.sid,
-      ci: DRAFT.ci,
-      scalar: DRAFT.ya,
-    });
-    const b = CPace.start({
-      role: "responder",
-      prs: DRAFT.prs,
-      sid: DRAFT.sid,
-      ci: DRAFT.ci,
-      scalar: DRAFT.yb,
-    });
+  it("computes the draft public shares and ISK", () => {
+    const [a, b] = draftPair();
     expect(toHex(a.publicShare)).toBe(DRAFT.Ya);
     expect(toHex(b.publicShare)).toBe(DRAFT.Yb);
     a.derive(b.publicShare);
     b.derive(a.publicShare);
-    // Mutual confirmation closes the loop over the same ISK.
+    expect(toHex(a.isk)).toBe(DRAFT.isk);
+    expect(toHex(b.isk)).toBe(DRAFT.isk);
+  });
+
+  it("closes mutual confirmation over the draft ISK", () => {
+    const [a, b] = draftPair();
+    a.derive(b.publicShare);
+    b.derive(a.publicShare);
     expect(b.verify(a.tag())).toBe(true);
     expect(a.verify(b.tag())).toBe(true);
+  });
+});
+
+describe("derive()", () => {
+  it("consumes the scalar, so a second call is refused", () => {
+    const [, b] = draftPair();
+    b.derive(hex(DRAFT.Ya));
+    expect(() => b.derive(hex(DRAFT.Ya))).toThrow(CPaceError);
   });
 });
 
@@ -102,6 +123,16 @@ describe("associated data (reflected-MAC protection)", () => {
     // Identical shares, but ADa != ADb makes Ta != Tb.
     expect(toHex(a.tag())).not.toBe(toHex(b.tag()));
     // The initiator's own tag must not verify as the peer's (no reflection).
+    expect(a.verify(a.tag())).toBe(false);
+  });
+
+  it("refuses verification when both sides carry the same (Y, AD)", () => {
+    // Empty ADs plus a shared scalar make the expected peer tag the own tag,
+    // which an attacker could echo back.
+    const opts = { prs: DRAFT.prs, sid: DRAFT.sid, scalar: DRAFT.yb } as const;
+    const a = CPace.start({ role: "initiator", ...opts });
+    const b = CPace.start({ role: "responder", ...opts });
+    a.derive(b.publicShare);
     expect(a.verify(a.tag())).toBe(false);
   });
 

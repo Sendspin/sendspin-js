@@ -10,9 +10,11 @@ export const MAX_PIN_DIGITS = 12;
 export const DEFAULT_MIN_PIN_DIGITS = 6;
 export const STATIC_PIN_DIGITS = 8;
 
+const STATIC_PIN_RE = new RegExp(`^[0-9]{${STATIC_PIN_DIGITS}}$`);
+
 /** Whether pin is exactly 8 decimal digits, as the static-PIN method requires. */
 export function isValidStaticPin(pin: string): boolean {
-  return new RegExp(`^[0-9]{${STATIC_PIN_DIGITS}}$`).test(pin);
+  return STATIC_PIN_RE.test(pin);
 }
 
 /** Fresh 32-byte CSPRNG nonce (nonce_A or nonce_B). */

@@ -1,6 +1,6 @@
-// CPACE-X25519-SHA512 (draft-irtf-cfrg-cpace) in initiator-responder mode with
-// the explicit mutual-confirmation flow (MCF) of §9.4. The Sendspin server is
-// role A (initiator) and the client is role B (responder).
+// CPACE-X25519-SHA512 (draft-irtf-cfrg-cpace-21) in initiator-responder mode
+// with the explicit mutual-confirmation flow (MCF) of §10.4. The Sendspin
+// server is role A (initiator) and the client is role B (responder).
 
 import { x25519 } from "@noble/curves/ed25519";
 import { sha512 } from "@noble/hashes/sha2";
@@ -122,20 +122,20 @@ export function calculateGenerator(
   return elligator2(decodeU(genHash));
 }
 
-function scalarMult(scalar: Uint8Array, point: Uint8Array): Uint8Array {
-  return x25519.scalarMult(scalar, point);
-}
-
 /** X25519 scalar mult that rejects a result encoding the identity (low order). */
-function scalarMultVfy(scalar: Uint8Array, point: Uint8Array): Uint8Array {
+function scalarMultVfy(
+  scalar: Uint8Array,
+  point: Uint8Array,
+  what: string,
+): Uint8Array {
   let shared: Uint8Array;
   try {
-    shared = scalarMult(scalar, point);
+    shared = x25519.scalarMult(scalar, point);
   } catch {
-    throw new CPaceError("peer share encodes a low-order point");
+    throw new CPaceError(`${what} encodes a low-order point`);
   }
   if (shared.every((b) => b === 0)) {
-    throw new CPaceError("peer share encodes a low-order point");
+    throw new CPaceError(`${what} encodes a low-order point`);
   }
   return shared;
 }
@@ -159,16 +159,19 @@ export class CPace {
   private initiatorShare: Uint8Array | null = null;
   private responderShare: Uint8Array | null = null;
   private iskValue: Uint8Array | null = null;
+  /** Consumed by derive(), which may run only once per exchange. */
+  private scalar: Uint8Array | null;
 
   private constructor(
     private role: CPaceRole,
-    private scalar: Uint8Array,
+    scalar: Uint8Array,
     private sid: Uint8Array,
     private ada: Uint8Array,
     private adb: Uint8Array,
     generator: Uint8Array,
   ) {
-    this.publicShare = scalarMult(this.scalar, generator);
+    this.scalar = scalar;
+    this.publicShare = scalarMultVfy(scalar, generator, "generator");
   }
 
   /** Begin a CPace run, sampling a scalar and computing the public share. */
@@ -204,12 +207,17 @@ export class CPace {
 
   /** Ingest the peer's public share, deriving the confirmation MAC key. */
   derive(peerShare: Uint8Array): void {
+    if (!this.scalar) {
+      throw new CPaceError("derive() may only be called once");
+    }
+    const scalar = this.scalar;
+    this.scalar = null;
     if (peerShare.length !== SHARE_SIZE) {
       throw new CPaceError(
         `peer share must be ${SHARE_SIZE} bytes, got ${peerShare.length}`,
       );
     }
-    const shared = scalarMultVfy(this.scalar, peerShare);
+    const shared = scalarMultVfy(scalar, peerShare, "peer share");
     if (this.role === "initiator") {
       this.initiatorShare = this.publicShare;
       this.responderShare = peerShare;
@@ -242,7 +250,11 @@ export class CPace {
 
   /** Whether peerTag matches the peer's expected confirmation tag. */
   verify(peerTag: Uint8Array): boolean {
-    return constantTimeEqual(peerTag, this.mac(false));
+    const expected = this.mac(false);
+    // With the same (Y, AD) on both sides the tag this side would accept is the
+    // tag it published, which an attacker can echo back without knowing the PRS.
+    if (constantTimeEqual(expected, this.mac(true))) return false;
+    return constantTimeEqual(peerTag, expected);
   }
 
   private mac(own: boolean): Uint8Array {
