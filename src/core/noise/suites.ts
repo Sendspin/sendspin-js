@@ -29,9 +29,7 @@ export interface CipherSuite {
   hash(data: Uint8Array): Uint8Array;
 }
 
-// 4 zero bytes + 8-byte counter. Reused across calls: every aead* below builds
-// its cipher and consumes the nonce synchronously, so no caller outlives a
-// later write. The leading 4 bytes are never written and stay zero.
+// Shared across calls because every aead* below consumes it synchronously.
 const NONCE = new Uint8Array(12);
 const NONCE_VIEW = new DataView(NONCE.buffer);
 
