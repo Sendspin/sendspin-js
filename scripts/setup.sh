@@ -5,11 +5,13 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-AIOSENDSPIN_REF="9212f920e8fbaf9ad357b43835bd32cc386e73b8"
+# Temporary until aiosendspin cuts a release with pairing support.
+AIOSENDSPIN_REF="main"
 
 python3 -m venv .venv
 .venv/bin/pip install --upgrade pip
-.venv/bin/pip install \
+# Force the reinstall because pip skips an already-installed git URL at the same version.
+.venv/bin/pip install --force-reinstall \
   "aiosendspin[server] @ git+https://github.com/Sendspin/aiosendspin.git@${AIOSENDSPIN_REF}"
 
 yarn install --frozen-lockfile
