@@ -7,7 +7,7 @@ import {
   lvCat,
   prependLen,
 } from "../../../src/core/pake/cpace";
-import { derivePin } from "../../../src/core/pake/pin";
+import { commitNonce, derivePin } from "../../../src/core/pake/pin";
 
 function hex(s: string): Uint8Array {
   const out = new Uint8Array(s.length / 2);
@@ -170,6 +170,13 @@ describe("aiosendspin interop vector (empty-AD primitive)", () => {
 
   it("derives the expected PIN", () => {
     expect(derivePin(h, nonceA, nonceB, 6)).toBe("899599");
+  });
+
+  // Domain-separated, so a bare SHA-256 of the nonce is not the commitment.
+  it("commits a nonce under the pair-commit label", () => {
+    expect(toHex(commitNonce(nonceB))).toBe(
+      "c31ebe8c0282c9f764f4d67046eabdec64fccc2015bb9d2041ccf6501f35962e",
+    );
   });
 
   it("matches the reference generator, shares, and confirmation tags", () => {
