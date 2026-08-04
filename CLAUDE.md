@@ -51,10 +51,9 @@ Then browse to http://localhost:6001
 
 ## Testing
 
-Tests in `tests/unit/` and `tests/e2e/`. E2E spawns a real aiosendspin server
-from `.venv` at the repo root (path is hardcoded in the helper). Run
-`./scripts/setup.sh` once to bootstrap, then `yarn test`. One suite:
-`npx vitest run tests/unit`.
+Tests in `tests/unit/` and `tests/e2e/`. E2E spawns the pinned upstream
+aiosendspin server from `.venv` at the repo root. Run `./scripts/setup.sh`
+once to bootstrap, then `yarn test`. One suite: `npx vitest run tests/unit`.
 
 ## Key SDK Features and Configuration
 

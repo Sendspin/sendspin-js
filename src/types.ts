@@ -110,8 +110,8 @@ export interface ClientTime {
 export interface ClientState {
   type: MessageType.CLIENT_STATE;
   payload: {
+    available: boolean;
     player?: {
-      state: "synchronized" | "error";
       volume: number;
       muted: boolean;
       static_delay_ms: number;

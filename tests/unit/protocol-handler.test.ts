@@ -170,7 +170,10 @@ describe("ProtocolHandler extra", () => {
   const activate = (handler: ProtocolHandler): void =>
     dispatch(handler, {
       type: "server/activate",
-      payload: { activities: ["playback"] },
+      payload: {
+        activities: ["playback"],
+        active_roles: ["player@v1"],
+      },
     });
 
   beforeEach(() => {
@@ -287,6 +290,36 @@ describe("ProtocolHandler extra", () => {
       expect(lastSent(send, "client/state")).toBeUndefined();
     });
 
+    it("sends state immediately when the active roles change", () => {
+      const handler = makeHandler();
+      dispatch(handler, {
+        type: "server/activate",
+        payload: { activities: [], active_roles: [] },
+      });
+      send.mockClear();
+
+      activate(handler);
+
+      const state = lastSent(send, "client/state")!;
+      expect((state.payload as Record<string, unknown>).player).toBeDefined();
+    });
+
+    it("suspends periodic traffic until pairing ends", () => {
+      const handler = makeHandler();
+      activate(handler);
+      send.mockClear();
+
+      handler.suspendForPairing();
+      handler.sendStateUpdate();
+      handler.sendCommand("play", undefined as never);
+      vi.advanceTimersByTime(5000);
+      expect(lastSent(send, "client/state")).toBeUndefined();
+      expect(lastSent(send, "client/command")).toBeUndefined();
+
+      activate(handler);
+      expect(lastSent(send, "client/state")).toBeDefined();
+    });
+
     it("re-sends the initial client/state on activate after resetActivation", () => {
       const handler = makeHandler();
       activate(handler);
@@ -298,7 +331,26 @@ describe("ProtocolHandler extra", () => {
   });
 
   describe("sendStateUpdate message shape (spec client/state player object)", () => {
-    it("reports volume in 0-100 and the player operational state", () => {
+    it("omits player state while the role is inactive", () => {
+      const handler = makeHandler();
+      dispatch(handler, {
+        type: "server/activate",
+        payload: { activities: [], active_roles: [] },
+      });
+
+      const state = lastSent(send, "client/state")!;
+      expect((state.payload as Record<string, unknown>).player).toBeUndefined();
+    });
+
+    it("reports top-level availability", () => {
+      const handler = makeHandler();
+      handler.sendStateUpdate();
+
+      const state = lastSent(send, "client/state")!;
+      expect((state.payload as Record<string, unknown>).available).toBe(true);
+    });
+
+    it("reports volume without the legacy player state", () => {
       const handler = makeHandler();
       stateManager.volume = 42;
       handler.sendStateUpdate();
@@ -307,7 +359,7 @@ describe("ProtocolHandler extra", () => {
       const player = (state.payload as Record<string, unknown>)
         .player as Record<string, unknown>;
       expect(player.volume).toBe(42);
-      expect(player.state).toBe("synchronized");
+      expect(player.state).toBeUndefined();
       expect(player.muted).toBe(false);
     });
 

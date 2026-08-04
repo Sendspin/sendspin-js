@@ -250,8 +250,10 @@ Then browse to http://localhost:6001
 
 ## Testing
 
-The E2E tests run against a real [aiosendspin](https://pypi.org/project/aiosendspin/)
-server, so they need a Python virtualenv at `.venv`. Bootstrap it once:
+The E2E tests run directly against
+[aiosendspin](https://github.com/Sendspin/aiosendspin) at immutable commit
+`9212f920e8fbaf9ad357b43835bd32cc386e73b8`. This upstream commit adds the
+current version 0 Pairing Token format. Bootstrap the `.venv` once:
 
 ```
 ./scripts/setup.sh

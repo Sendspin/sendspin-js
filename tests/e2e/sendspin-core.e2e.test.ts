@@ -40,10 +40,7 @@ async function waitFor(
   }
 }
 
-// SKIPPED: encryption is now mandatory (Noise KKpsk2), but the pinned aiosendspin
-// build has no crypto support, so there is no plaintext path to connect with.
-// Re-enable and pin to an encryption-capable aiosendspin once available.
-describe.skip("SendspinCore E2E (aiosendspin)", () => {
+describe("SendspinCore E2E (aiosendspin)", () => {
   let server: AiosendspinServer;
   let core: SendspinCore | null = null;
   let externalWs: WebSocket | null = null;
@@ -75,20 +72,23 @@ describe.skip("SendspinCore E2E (aiosendspin)", () => {
     } = {},
   ): Promise<SendspinCore> {
     core = new SendspinCore({
-      baseUrl: `http://127.0.0.1:${server.port}`,
+      baseUrl: server.url,
       clientName: "E2E Test Player",
       codecs: config.codecs ?? ["pcm"],
       syncDelay: config.syncDelay,
       onStateChange: config.onStateChange,
     });
+    await server.trustUnpaired(core.clientId);
 
     // Start both: the SDK connecting and the server waiting for the client
-    const [, clientId] = await Promise.all([
+    const [, status] = await Promise.all([
       core.connect(),
       server.waitForClient(),
     ]);
 
-    expect(clientId).toBeTruthy();
+    expect(status.client_id).toBe(core.clientId);
+    expect(status.psk_category).toBe("sentinel");
+    expect(status.active_roles).toContain("player@v1");
 
     // Give the protocol handler a moment to process server/hello
     await new Promise((r) => setTimeout(r, 100));
@@ -108,7 +108,7 @@ describe.skip("SendspinCore E2E (aiosendspin)", () => {
     });
 
     it("connects with external WebSocket", async () => {
-      const ws = new WebSocket(`ws://127.0.0.1:${server.port}/sendspin`);
+      const ws = new WebSocket(server.url);
       externalWs = ws;
 
       // Wait for the WebSocket to open before passing it to SendspinCore
@@ -123,13 +123,15 @@ describe.skip("SendspinCore E2E (aiosendspin)", () => {
         clientName: "External WS Player",
         codecs: ["pcm"],
       });
+      await server.trustUnpaired(core.clientId);
 
-      const [, clientId] = await Promise.all([
+      const [, status] = await Promise.all([
         core.connect(),
         server.waitForClient(),
       ]);
 
-      expect(clientId).toBeTruthy();
+      expect(status.client_id).toBe(core.clientId);
+      expect(status.active_roles).toContain("player@v1");
       await new Promise((r) => setTimeout(r, 100));
       expect(core.isConnected).toBe(true);
     });

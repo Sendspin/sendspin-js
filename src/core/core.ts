@@ -117,6 +117,7 @@ export class SendspinCore implements StreamHandler {
           this.handshakeInfo = info;
           // Drop any pending pairing PSK a re-handshake would otherwise strand.
           this.pairing.reset();
+          this.protocolHandler.resetActivation();
         },
         onControlMessage: (msg) => this.routeControl(msg),
         onBinaryMessage: (bytes) =>
@@ -180,6 +181,9 @@ export class SendspinCore implements StreamHandler {
         activities?: string[];
         selected_pair_method?: string;
       };
+      if (p.activities?.includes("pairing")) {
+        this.protocolHandler.suspendForPairing();
+      }
       const consumed = this.pairing.onActivate(
         p.activities ?? [],
         p.selected_pair_method,

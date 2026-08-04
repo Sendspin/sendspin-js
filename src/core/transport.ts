@@ -375,7 +375,8 @@ export class SendspinTransport {
       return;
     }
     this.clearTimeout();
-    this.flushOutbound();
+    this.quiesced = false;
+    this.outboundQueue = [];
     this.cb.onControlMessage(msg);
   }
 
@@ -395,16 +396,10 @@ export class SendspinTransport {
     this.close();
   }
 
-  private flushOutbound(): void {
-    this.quiesced = false;
-    const q = this.outboundQueue;
-    this.outboundQueue = [];
-    for (const m of q) this.encryptSend(m);
-  }
-
-  // Held during a re-handshake. Only periodic traffic, so client/hello can still
-  // flow (queuing it would deadlock the post-re-handshake server/activate).
+  // Hold normal traffic during a re-handshake. client/hello must still flow or
+  // the post-re-handshake server/activate would deadlock.
   private static readonly QUIESCED_TYPES = new Set([
+    "client/command",
     "client/time",
     "client/state",
   ]);

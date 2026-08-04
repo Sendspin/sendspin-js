@@ -12,6 +12,7 @@ import type {
   MessageType,
   PairMethodDescriptor,
   ServerCommand,
+  ServerActivate,
   ServerMessage,
   ServerState,
   ServerTime,
@@ -74,6 +75,8 @@ export class ProtocolHandler {
   private getExternalVolume?: () => { volume: number; muted: boolean };
   private timeSyncManager: TimeSyncManager;
   private activated = false;
+  private activeRoles: Set<string> | null = null;
+  private pairingSuspended = false;
 
   constructor(
     private sender: MessageSender,
@@ -113,7 +116,7 @@ export class ProtocolHandler {
         break;
 
       case "server/activate":
-        this.handleServerActivate();
+        this.handleServerActivate(message as ServerActivate);
         break;
 
       case "server/time":
@@ -155,8 +158,21 @@ export class ProtocolHandler {
 
   // Handle server/activate: start the initial client/state, time-sync, and
   // periodic state updates. Guarded so a repeat activate is a no-op.
-  private handleServerActivate(): void {
-    if (this.activated) return;
+  private handleServerActivate(message: ServerActivate): void {
+    this.pairingSuspended = false;
+    let rolesChanged = false;
+    if (message.payload.active_roles !== undefined) {
+      const nextRoles = new Set(message.payload.active_roles);
+      rolesChanged =
+        this.activeRoles === null ||
+        nextRoles.size !== this.activeRoles.size ||
+        [...nextRoles].some((role) => !this.activeRoles!.has(role));
+      this.activeRoles = nextRoles;
+    }
+    if (this.activated) {
+      if (rolesChanged) this.sendStateUpdate();
+      return;
+    }
     this.activated = true;
     this.sendStateUpdate();
     this.timeSyncManager.startAndSchedule();
@@ -183,13 +199,25 @@ export class ProtocolHandler {
     this.timeSyncManager.stop();
   }
 
+  suspendForPairing(): void {
+    this.pairingSuspended = true;
+    this.activated = false;
+    this.activeRoles = new Set();
+    this.timeSyncManager.stop();
+    this.stateManager.clearStateUpdateInterval();
+  }
+
   /**
    * Clear the activate guard so the next server/activate (e.g. after a reconnect on a
    * reused handler) restarts time-sync and state updates.
    * @internal called by SendspinCore on transport close, not part of the public API.
    */
   resetActivation(): void {
+    this.pairingSuspended = false;
     this.activated = false;
+    this.activeRoles = null;
+    this.timeSyncManager.stop();
+    this.stateManager.clearStateUpdateInterval();
   }
 
   private handleStreamStart(message: StreamStart): void {
@@ -338,6 +366,7 @@ export class ProtocolHandler {
   // When skipHardwareRead is true, use stateManager values instead of reading from hardware.
   // This avoids race conditions when responding to volume commands.
   sendStateUpdate(skipHardwareRead = false): void {
+    if (this.pairingSuspended) return;
     let volume = this.stateManager.volume;
     let muted = this.stateManager.muted;
     if (!skipHardwareRead && this.useHardwareVolume && this.getExternalVolume) {
@@ -349,19 +378,23 @@ export class ProtocolHandler {
     const syncDelayMs = this.streamHandler.getSyncDelayMs();
     const staticDelayMs = clampSyncDelayMs(syncDelayMs);
 
+    const payload: ClientState["payload"] = {
+      available: true,
+    };
+    if (this.activeRoles === null || this.activeRoles.has("player@v1")) {
+      payload.player = {
+        volume,
+        muted,
+        static_delay_ms: staticDelayMs,
+        required_lead_time_ms: this.requiredLeadTimeMs,
+        min_buffer_ms: this.minBufferMs,
+        supported_commands: ["set_static_delay"],
+      };
+    }
+
     const message: ClientState = {
       type: "client/state" as MessageType.CLIENT_STATE,
-      payload: {
-        player: {
-          state: this.stateManager.playerState,
-          volume,
-          muted,
-          static_delay_ms: staticDelayMs,
-          required_lead_time_ms: this.requiredLeadTimeMs,
-          min_buffer_ms: this.minBufferMs,
-          supported_commands: ["set_static_delay"],
-        },
-      },
+      payload,
     };
     this.sender.sendControl(message);
   }
@@ -381,6 +414,7 @@ export class ProtocolHandler {
     command: T,
     params: ControllerCommands[T],
   ): void {
+    if (this.pairingSuspended) return;
     this.sender.sendControl({
       type: "client/command" as MessageType.CLIENT_COMMAND,
       payload: {
