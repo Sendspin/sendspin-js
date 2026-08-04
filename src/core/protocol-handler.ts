@@ -64,7 +64,7 @@ export interface ProtocolHandlerConfig {
 
 export class ProtocolHandler {
   private clientName: string;
-  private productName: string;
+  private productName?: string;
   private codecs: Codec[];
   private bufferCapacity: number;
   private requiredLeadTimeMs: number;
@@ -87,9 +87,7 @@ export class ProtocolHandler {
     config: ProtocolHandlerConfig = {},
   ) {
     this.clientName = config.clientName ?? "Sendspin Player";
-    // Servers may treat product_name "Web Browser" as their own built-in web
-    // player and skip pairing setup, so default to the library name.
-    this.productName = config.productName ?? "Sendspin JS";
+    this.productName = config.productName;
     this.codecs = config.codecs ?? ["opus", "flac", "pcm"];
     this.bufferCapacity = config.bufferCapacity ?? 1024 * 1024 * 5; // 5MB default
     this.requiredLeadTimeMs =

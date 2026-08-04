@@ -541,7 +541,7 @@ export interface SendspinCoreConfig {
   /** Human-readable name for this player. Auto-generated if not provided. */
   clientName?: string;
 
-  /** Product name advertised in client/hello. Defaults to "Sendspin JS". */
+  /** Product name advertised in client/hello. Omitted when not set. */
   productName?: string;
 
   /**
