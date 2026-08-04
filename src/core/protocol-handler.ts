@@ -212,10 +212,10 @@ export class ProtocolHandler {
    * reused handler) restarts time-sync and state updates.
    * @internal called by SendspinCore on transport close, not part of the public API.
    */
-  resetActivation(): void {
+  resetActivation(preserveActiveRoles = false): void {
     this.pairingSuspended = false;
     this.activated = false;
-    this.activeRoles = null;
+    if (!preserveActiveRoles) this.activeRoles = null;
     this.timeSyncManager.stop();
     this.stateManager.clearStateUpdateInterval();
   }
@@ -414,7 +414,8 @@ export class ProtocolHandler {
     command: T,
     params: ControllerCommands[T],
   ): void {
-    if (this.pairingSuspended) return;
+    if (this.pairingSuspended || !this.activeRoles?.has("controller@v1"))
+      return;
     this.sender.sendControl({
       type: "client/command" as MessageType.CLIENT_COMMAND,
       payload: {

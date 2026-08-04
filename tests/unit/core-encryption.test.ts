@@ -173,6 +173,12 @@ function rehandshakeTo(
   };
 }
 
+function binaryFrames(ws: MockWS): Uint8Array[] {
+  return ws.sent.filter(
+    (frame): frame is Uint8Array => frame instanceof Uint8Array,
+  );
+}
+
 describe("SendspinCore encryption wiring", () => {
   it("sends client/init on open with the identity client_id", async () => {
     const ws = new MockWS();
@@ -368,6 +374,77 @@ describe("SendspinCore encryption wiring", () => {
     // A late server/pair-finalize is now a no-op: nothing persists, no event.
     serverSend(ws, s2.session, { type: "server/pair-finalize" });
     expect(events).not.toContain("finalized");
+  });
+
+  it("retains a controller command across re-handshake when the role remains active", async () => {
+    const ws = new MockWS();
+    const longTermPsk = new Uint8Array(32).fill(77);
+    const core = new SendspinCore({
+      webSocket: ws as unknown as WebSocket,
+      storage: memStorage(),
+      longTermPsks: [{ psk: base64urlEncode(longTermPsk) }],
+    });
+    await core.connect();
+    const { serverSession, server, clientId, priorHash } =
+      completeHandshake(ws);
+
+    serverSend(ws, serverSession, { type: "server/hello", payload: {} });
+    for (const frame of binaryFrames(ws)) serverSession.decrypt(frame);
+    serverSend(ws, serverSession, {
+      type: "server/activate",
+      payload: {
+        activities: ["playback"],
+        active_roles: ["controller@v1"],
+      },
+    });
+    const oldFrames = binaryFrames(ws);
+    for (let index = 1; index < oldFrames.length; index++) {
+      serverSession.decrypt(oldFrames[index]);
+    }
+
+    const rehandshake = rehandshakeTo(
+      ws,
+      serverSession,
+      priorHash,
+      server,
+      clientId,
+      longTermPsk,
+    );
+    const newSessionStart = binaryFrames(ws).length;
+    core.sendCommand("play", undefined);
+    expect(binaryFrames(ws)).toHaveLength(newSessionStart);
+
+    serverSend(ws, rehandshake.session, { type: "server/hello", payload: {} });
+    const helloFrame = binaryFrames(ws)[newSessionStart];
+    expect(
+      JSON.parse(
+        new TextDecoder().decode(
+          rehandshake.session.decrypt(helloFrame).subarray(1),
+        ),
+      ).type,
+    ).toBe("client/hello");
+
+    const activationStart = binaryFrames(ws).length;
+    serverSend(ws, rehandshake.session, {
+      type: "server/activate",
+      payload: {
+        activities: ["playback"],
+        active_roles: ["controller@v1"],
+      },
+    });
+    const types = binaryFrames(ws)
+      .slice(activationStart)
+      .map((frame) =>
+        JSON.parse(
+          new TextDecoder().decode(
+            rehandshake.session.decrypt(frame).subarray(1),
+          ),
+        ),
+      )
+      .map((message) => message.type);
+    expect(types).toContain("client/state");
+    expect(types).toContain("client/command");
+    core.disconnect();
   });
 
   it("exposes bound pairing tokens that rotate with the Pairing PSK", () => {

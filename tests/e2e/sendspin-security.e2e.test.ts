@@ -291,24 +291,28 @@ describe("Sendspin encryption and pairing E2E (aiosendspin)", () => {
     expect(socket.readyState).toBe(WebSocket.CLOSED);
   });
 
-  it("reports player state immediately when live trust activates the role", async () => {
+  it("reports exact player state when live trust activates the role", async () => {
     const connection = await connect({
       clientName: "Live trust client",
       unpairedAccess: true,
     });
-    const started = new Promise<void>((resolve) => {
-      connection.core.onStreamStart = () => resolve();
-    });
+    connection.core.setVolume(42);
 
     const trusted = await server.trustUnpaired(connection.core.clientId);
     expect(trusted.active_roles).toContain("player@v1");
-    await server.streamStart();
-    await Promise.race([
-      started,
-      new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error("Stream did not start")), 2_000),
-      ),
-    ]);
+    const state = await server.waitForClientState(connection.core.clientId, 42);
+    expect(state).toEqual({
+      available: true,
+      player: {
+        volume: 42,
+        muted: false,
+        static_delay_ms: 0,
+        required_lead_time_ms: 250,
+        min_buffer_ms: 250,
+        supported_commands: ["set_static_delay"],
+      },
+    });
+    expect(state.player).not.toHaveProperty("state");
   });
 
   it("rejects a malformed Pairing PSK token", async () => {

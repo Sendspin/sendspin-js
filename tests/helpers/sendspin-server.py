@@ -149,6 +149,38 @@ class HarnessServer:
         await self.server.trust_unpaired(client_id)
         return await self.status(client_id)
 
+    async def wait_client_state(
+        self,
+        client_id: str,
+        expected_volume: int,
+        timeout_ms: int,
+    ) -> dict[str, Any]:
+        """Wait until public upstream state reflects the expected player update."""
+        async with asyncio.timeout(timeout_ms / 1000):
+            while True:
+                client = self.server.get_client(client_id) if self.server else None
+                role = client.role("player@v1") if client is not None else None
+                if (
+                    client is not None
+                    and client.is_connected
+                    and role is not None
+                    and role.get_player_volume() == expected_volume
+                ):
+                    return {
+                        "available": client.available,
+                        "player": {
+                            "volume": role.get_player_volume(),
+                            "muted": role.get_player_muted(),
+                            "static_delay_ms": role.get_static_delay_ms(),
+                            "required_lead_time_ms": role.required_lead_time_ms,
+                            "min_buffer_ms": role.min_buffer_ms,
+                            "supported_commands": [
+                                command.value for command in role.state_supported_commands
+                            ],
+                        },
+                    }
+                await asyncio.sleep(0.01)
+
     async def pair_with_token(self, token_value: str) -> dict[str, Any]:
         client_id = self._connected_client_id()
         try:
@@ -329,6 +361,12 @@ async def dispatch(server: HarnessServer, command: str, args: dict[str, Any]) ->
         return await server.status(args.get("client_id"))
     if command == "trust_unpaired":
         return await server.trust_unpaired(str(args["client_id"]))
+    if command == "wait_client_state":
+        return await server.wait_client_state(
+            str(args["client_id"]),
+            int(args["expected_volume"]),
+            int(args.get("timeout_ms", 10000)),
+        )
     if command == "pair_token":
         return await server.pair_with_token(str(args["token"]))
     if command == "begin_pin":

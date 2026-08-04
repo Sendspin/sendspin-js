@@ -526,8 +526,37 @@ describe("ProtocolHandler extra", () => {
   });
 
   describe("sendCommand", () => {
+    it("suppresses commands until the controller role is active", () => {
+      const handler = makeHandler();
+      dispatch(handler, {
+        type: "server/activate",
+        payload: { activities: [], active_roles: [] },
+      });
+      send.mockClear();
+      handler.sendCommand("play", undefined as never);
+      expect(lastSent(send, "client/command")).toBeUndefined();
+
+      dispatch(handler, {
+        type: "server/activate",
+        payload: {
+          activities: ["playback"],
+          active_roles: ["controller@v1"],
+        },
+      });
+      send.mockClear();
+      handler.sendCommand("play", undefined as never);
+      expect(lastSent(send, "client/command")).toBeDefined();
+    });
+
     it("wraps a parameterless controller command", () => {
       const handler = makeHandler();
+      dispatch(handler, {
+        type: "server/activate",
+        payload: {
+          activities: ["playback"],
+          active_roles: ["controller@v1"],
+        },
+      });
       handler.sendCommand("play", undefined as never);
       const cmd = lastSent(send, "client/command")!;
       const controller = (cmd.payload as Record<string, unknown>)
@@ -537,6 +566,13 @@ describe("ProtocolHandler extra", () => {
 
     it("merges volume params into the controller command", () => {
       const handler = makeHandler();
+      dispatch(handler, {
+        type: "server/activate",
+        payload: {
+          activities: ["playback"],
+          active_roles: ["controller@v1"],
+        },
+      });
       handler.sendCommand("volume", { volume: 55 });
       const controller = (
         lastSent(send, "client/command")!.payload as Record<string, unknown>

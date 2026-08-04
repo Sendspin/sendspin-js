@@ -375,9 +375,17 @@ export class SendspinTransport {
       return;
     }
     this.clearTimeout();
+    const queuedCommands =
+      !msg.payload.activities.includes("pairing") &&
+      this.effectiveActiveRoles?.includes("controller@v1")
+        ? this.outboundQueue.filter(
+            (queued) => (queued as { type?: string }).type === "client/command",
+          )
+        : [];
     this.quiesced = false;
     this.outboundQueue = [];
     this.cb.onControlMessage(msg);
+    for (const command of queuedCommands) this.encryptSend(command);
   }
 
   private handleUnpair(): void {

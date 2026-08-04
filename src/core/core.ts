@@ -114,10 +114,11 @@ export class SendspinCore implements StreamHandler {
       },
       {
         onHandshakeComplete: (info) => {
+          const isRehandshake = this.handshakeInfo !== null;
           this.handshakeInfo = info;
           // Drop any pending pairing PSK a re-handshake would otherwise strand.
           this.pairing.reset();
-          this.protocolHandler.resetActivation();
+          this.protocolHandler.resetActivation(isRehandshake);
         },
         onControlMessage: (msg) => this.routeControl(msg),
         onBinaryMessage: (bytes) =>
@@ -221,6 +222,7 @@ export class SendspinCore implements StreamHandler {
     // starts clean and a synchronous send from onConnectionOpen can't emit a
     // frame under the dead session's keys.
     this.transport.onSocketClosed();
+    this.handshakeInfo = null;
     this.protocolHandler.stopTimeSync();
     this.protocolHandler.resetActivation();
     this.pairing.reset();

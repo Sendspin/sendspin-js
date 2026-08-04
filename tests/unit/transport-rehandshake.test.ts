@@ -88,7 +88,7 @@ function deliverActivate(
 }
 
 describe("transport re-handshake", () => {
-  it("promotes trust and drops queued traffic before playback activation", () => {
+  it("retains a queued command when playback restores the controller role", () => {
     const { h, newServerSession } = setupRehandshake();
     expect(h.transport.handshakeInfo?.trustLevel).toBe("user");
 
@@ -114,7 +114,30 @@ describe("transport re-handshake", () => {
       "client/hello",
     );
 
+    deliverActivate(
+      h,
+      newServerSession,
+      ["playback"],
+      ["player@v1", "controller@v1"],
+    );
+    expect(fakeWsSend(h).binary.length).toBe(before + 2);
+    const command = newServerSession.decrypt(fakeWsSend(h).binary.at(-1)!);
+    expect(JSON.parse(new TextDecoder().decode(command.subarray(1))).type).toBe(
+      "client/command",
+    );
+  });
+
+  it("drops a queued command when the controller role stays inactive", () => {
+    const { h, newServerSession } = setupRehandshake();
+    const before = fakeWsSend(h).binary.length;
+    h.transport.sendControl({
+      type: "client/command",
+      payload: { controller: { command: "play" } },
+    });
+    h.transport.sendControl({ type: "client/hello", payload: { name: "Cli" } });
+
     deliverActivate(h, newServerSession, ["playback"], ["player@v1"]);
+
     expect(fakeWsSend(h).binary.length).toBe(before + 1);
   });
 

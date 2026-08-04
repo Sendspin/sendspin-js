@@ -43,6 +43,17 @@ function markTransportReady(core: SendspinCore): void {
   (core as any).transport.state = "transport";
 }
 
+function activateController(core: SendspinCore): void {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (core as any).routeControl({
+    type: "server/activate",
+    payload: {
+      activities: ["playback"],
+      active_roles: ["controller@v1"],
+    },
+  });
+}
+
 function seedMetadata(
   core: SendspinCore,
   timestampUs: number,
@@ -295,12 +306,15 @@ describe("SendspinCore command + state forwarding", () => {
 
   it("forwards a controller command with command name and params merged", () => {
     const send = spySend(core);
+    activateController(core);
+    send.mockClear();
     core.sendCommand("volume", { volume: 42 });
 
     expect(send).toHaveBeenCalledTimes(1);
     const msg = send.mock.calls[0][0];
     expect(msg.type).toBe("client/command");
     expect(msg.payload.controller).toEqual({ command: "volume", volume: 42 });
+    core.disconnect();
   });
 
   it("setVolume clamps in state manager and sends a client/state update", () => {

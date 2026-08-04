@@ -30,10 +30,56 @@ export type PinWaitResult =
   | PairingResult
   | { status: "pin_requested" | "timeout" };
 
+export interface ReceivedClientState {
+  available: boolean;
+  player: {
+    volume: number;
+    muted: boolean;
+    static_delay_ms: number;
+    required_lead_time_ms: number;
+    min_buffer_ms: number;
+    supported_commands: string[];
+  };
+}
+
 interface CommandResponse<T> {
   ok: boolean;
   result?: T;
   error?: string;
+}
+
+export interface KillableProcess {
+  exitCode: number | null;
+  signalCode: NodeJS.Signals | null;
+  kill(signal: NodeJS.Signals): boolean;
+}
+
+export async function awaitProcessExit(
+  proc: KillableProcess,
+  done: Promise<void>,
+  timeoutMs: number,
+): Promise<void> {
+  const waitForExit = () =>
+    new Promise<boolean>((resolveExited) => {
+      let settled = false;
+      const finish = (value: boolean) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolveExited(value);
+      };
+      const timer = setTimeout(() => finish(false), timeoutMs);
+      void done.then(() => finish(true));
+    });
+  if (await waitForExit()) return;
+  if (proc.exitCode === null && proc.signalCode === null) {
+    if (!proc.kill("SIGKILL")) {
+      throw new Error("Failed to deliver SIGKILL to child process");
+    }
+  }
+  if (!(await waitForExit())) {
+    throw new Error("Child process did not exit after SIGKILL");
+  }
 }
 
 export class AiosendspinServer {
@@ -92,8 +138,7 @@ export class AiosendspinServer {
         resolveDone();
       };
       proc.once("error", (error) => {
-        this.failProcess(`spawn failed: ${error.message}`);
-        settle();
+        this.failProcess(`child process error: ${error.message}`);
       });
       proc.once("exit", (code, signal) => {
         if (code !== 0 && !this.procError) {
@@ -205,6 +250,22 @@ export class AiosendspinServer {
     return this.sendCommand("trust_unpaired", { client_id: clientId });
   }
 
+  waitForClientState(
+    clientId: string,
+    expectedVolume: number,
+    timeoutMs = 10_000,
+  ): Promise<ReceivedClientState> {
+    return this.sendCommand(
+      "wait_client_state",
+      {
+        client_id: clientId,
+        expected_volume: expectedVolume,
+        timeout_ms: timeoutMs,
+      },
+      timeoutMs + 1_000,
+    );
+  }
+
   async pairWithToken(token: string): Promise<PairingResult> {
     return this.sendCommand<PairingResult>("pair_token", { token }, 35_000);
   }
@@ -269,22 +330,7 @@ export class AiosendspinServer {
       }
     }
     if (done) {
-      await new Promise<void>((resolveDone) => {
-        let settled = false;
-        const finish = () => {
-          if (settled) return;
-          settled = true;
-          clearTimeout(timer);
-          resolveDone();
-        };
-        const timer = setTimeout(() => {
-          if (proc.exitCode === null && proc.signalCode === null) {
-            proc.kill("SIGKILL");
-          }
-          finish();
-        }, 3_000);
-        void done.then(finish);
-      });
+      await awaitProcessExit(proc, done, 3_000);
     }
     this.rl?.close();
     this.rl = null;
