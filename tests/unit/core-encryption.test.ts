@@ -380,9 +380,7 @@ describe("SendspinCore encryption wiring", () => {
     expect(psk).toHaveLength(43);
     expect(token).toHaveLength(107);
     expect(token).toMatch(/^SP:0/);
-    const musicAssistantToken = core.getPairingToken("1");
-    expect(musicAssistantToken).toHaveLength(107);
-    expect(musicAssistantToken).toBe(`SP:1${token!.slice(4)}`);
+    expect("getPairingToken" in core).toBe(false);
     const rotated = core.rotatePairingPsk();
     expect(rotated).toHaveLength(43);
     expect(rotated).not.toBe(psk);
@@ -396,7 +394,7 @@ describe("SendspinCore encryption wiring", () => {
     });
     expect(core.pairingPsk).toBeNull();
     expect(core.pairingToken).toBeNull();
-    expect(core.getPairingToken("1")).toBeNull();
+    expect("getPairingToken" in core).toBe(false);
     expect(core.rotatePairingPsk()).toBeNull();
   });
 });

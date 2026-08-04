@@ -249,7 +249,8 @@ function updatePairingDisplay() {
 
 function hasPairingApi() {
   return (
-    typeof player?.getPairingToken === "function" &&
+    player !== null &&
+    "pairingToken" in player &&
     typeof player.rotatePairingPsk === "function" &&
     typeof player.isPairingLockedOut === "function" &&
     typeof player.clearPairingLockout === "function" &&
@@ -262,7 +263,7 @@ function pairingTokenForDisplay() {
   if (!hasPairingApi()) {
     return "(SDK update required)";
   }
-  return player.getPairingToken("1") ?? "(no storage)";
+  return player.pairingToken ?? "(no storage)";
 }
 
 /**

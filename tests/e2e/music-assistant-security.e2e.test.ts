@@ -392,31 +392,6 @@ async function connectCore(options: ConnectCoreOptions): Promise<{
   return { core, socket, textFrames, binaryFrames };
 }
 
-function encodePairingToken(
-  clientId: string,
-  pairingPsk: string,
-  version: "0" | "1",
-): string {
-  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
-  const payload = Buffer.concat([
-    Buffer.from(clientId, "base64url"),
-    Buffer.from(pairingPsk, "base64url"),
-  ]);
-  let bits = 0;
-  let value = 0;
-  let body = "";
-  for (const byte of payload) {
-    value = (value << 8) | byte;
-    bits += 8;
-    while (bits >= 5) {
-      body += alphabet[(value >>> (bits - 5)) & 31];
-      bits -= 5;
-    }
-  }
-  if (bits > 0) body += alphabet[(value << (5 - bits)) & 31];
-  return `SP:${version}${body.replaceAll("2", "9")}`;
-}
-
 function staticPin(): string {
   return randomInt(0, 100_000_000).toString().padStart(8, "0");
 }
@@ -550,10 +525,10 @@ describe.skipIf(!MASS_SERVER_ROOT)(
     );
 
     it(
-      "rejects a pairing token bound to another client",
+      "rejects a bare Pairing PSK",
       async () => {
         const connection = await connectCore({
-          clientName: "Wrong token client ID",
+          clientName: "Bare Pairing PSK client",
         });
         const clientId = connection.core.clientId;
         try {
@@ -562,14 +537,10 @@ describe.skipIf(!MASS_SERVER_ROOT)(
             "config/players/setup",
             { player_id: clientId },
           );
-          const token = encodePairingToken(
-            randomBytes(32).toString("base64url"),
-            connection.core.pairingPsk!,
-            "1",
-          );
+          expect(step.step_id).toBe("enter_token");
           step = await server.api<SetupFlowStepResult>("config/flows/submit", {
             flow_id: step.flow_id,
-            values: { pairing_token: token },
+            values: { pairing_token: connection.core.pairingPsk },
           });
           expect(step.step_id).toBe("enter_token");
           expect(step.errors).toBeTruthy();
@@ -586,10 +557,10 @@ describe.skipIf(!MASS_SERVER_ROOT)(
     );
 
     it(
-      "terminates the connection when a bound token carries the wrong PSK",
+      "rejects the normative version 0 Pairing PSK token",
       async () => {
         const connection = await connectCore({
-          clientName: "Wrong token PSK",
+          clientName: "Version 0 Pairing PSK client",
         });
         const clientId = connection.core.clientId;
         try {
@@ -598,100 +569,21 @@ describe.skipIf(!MASS_SERVER_ROOT)(
             "config/players/setup",
             { player_id: clientId },
           );
-          const token = encodePairingToken(
-            clientId,
-            randomBytes(32).toString("base64url"),
-            "1",
-          );
+          expect(step.step_id).toBe("enter_token");
+          expect(connection.core.pairingToken).toMatch(/^SP:0/);
           step = await server.api<SetupFlowStepResult>("config/flows/submit", {
             flow_id: step.flow_id,
-            values: { pairing_token: token },
+            values: { pairing_token: connection.core.pairingToken },
           });
           expect(step.step_id).toBe("enter_token");
           expect(step.errors).toBeTruthy();
-          await waitForClose(connection.socket);
+          expect((await server.player(clientId))?.needs_setup).toBe(true);
+          expect(connection.socket.readyState).toBe(WebSocket.OPEN);
           expect(await server.hasPairingRecord(clientId)).toBe(false);
           await server.api("config/flows/abort", { flow_id: step.flow_id });
         } finally {
           connection.core.disconnect();
           connection.socket.close();
-        }
-      },
-      TEST_TIMEOUT_MS,
-    );
-
-    it(
-      "pairs with a bound Pairing PSK token and reconnects with long-term trust",
-      async () => {
-        const storage = memoryStorage();
-        const pairingEvents: string[] = [];
-        const first = await connectCore({
-          clientName: "Pairing PSK client",
-          storage,
-          onPairing: (event) => pairingEvents.push(event),
-        });
-        const clientId = first.core.clientId;
-        try {
-          await waitFor(async () => (await server.player(clientId)) !== null);
-          expect((await server.player(clientId))?.needs_setup).toBe(true);
-
-          let step = await server.api<SetupFlowStepResult>(
-            "config/players/setup",
-            { player_id: clientId },
-          );
-          expect(step.step_id).toBe("enter_token");
-
-          step = await server.api<SetupFlowStepResult>("config/flows/submit", {
-            flow_id: step.flow_id,
-            values: { pairing_token: first.core.pairingPsk },
-          });
-          expect(step.step_id).toBe("enter_token");
-          expect(step.errors).toBeTruthy();
-
-          const versionZero = first.core.pairingToken!;
-          step = await server.api<SetupFlowStepResult>("config/flows/submit", {
-            flow_id: step.flow_id,
-            values: { pairing_token: versionZero },
-          });
-          expect(step.step_id).toBe("enter_token");
-          expect(step.errors).toBeTruthy();
-
-          const token = first.core.getPairingToken("1")!;
-          step = await server.api<SetupFlowStepResult>("config/flows/submit", {
-            flow_id: step.flow_id,
-            values: { pairing_token: token },
-          });
-          expect(step.type).toBe("finish");
-          await waitFor(() => pairingEvents.includes("finalized"));
-          await waitFor(async () => {
-            const player = await server.player(clientId);
-            return player?.needs_setup === false && player.available;
-          });
-          expect(await server.securityStatus(clientId)).toBe(
-            "security_status_paired",
-          );
-          expect(await server.hasPairingRecord(clientId)).toBe(true);
-        } finally {
-          first.core.disconnect();
-          first.socket.close();
-        }
-
-        const reconnected = await connectCore({
-          clientName: "Pairing PSK client",
-          storage,
-        });
-        try {
-          expect(reconnected.core.clientId).toBe(clientId);
-          await waitFor(async () => {
-            const player = await server.player(clientId);
-            return player?.needs_setup === false && player.available;
-          });
-          expect(await server.securityStatus(clientId)).toBe(
-            "security_status_paired",
-          );
-        } finally {
-          reconnected.core.disconnect();
-          reconnected.socket.close();
         }
       },
       TEST_TIMEOUT_MS,
@@ -999,9 +891,13 @@ describe.skipIf(!MASS_SERVER_ROOT)(
       "preserves long-term pairing across a Music Assistant restart",
       async () => {
         const storage = memoryStorage();
+        const pins: string[] = [];
         const first = await connectCore({
           clientName: "Restart persistence client",
           storage,
+          onPairingPin: (pin) => {
+            if (pin !== null) pins.push(pin);
+          },
         });
         const clientId = first.core.clientId;
         try {
@@ -1010,11 +906,16 @@ describe.skipIf(!MASS_SERVER_ROOT)(
             "config/players/setup",
             { player_id: clientId },
           );
+          expect(step.step_id).toBe("select_method");
           step = await server.api<SetupFlowStepResult>("config/flows/submit", {
             flow_id: step.flow_id,
-            values: {
-              pairing_token: first.core.getPairingToken("1"),
-            },
+            values: { pairing_method: "pin" },
+          });
+          expect(step.step_id).toBe("enter_pin");
+          await waitFor(() => pins.length === 1);
+          step = await server.api<SetupFlowStepResult>("config/flows/submit", {
+            flow_id: step.flow_id,
+            values: { pairing_pin: pins[0] },
           });
           expect(step.type).toBe("finish");
           await waitFor(async () => {

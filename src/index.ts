@@ -12,7 +12,6 @@ import type {
   CorrectionMode,
   PairMethod,
 } from "./types";
-import type { PairingTokenVersion } from "./core/noise/pairing-token";
 
 // Platform detection utilities
 function detectIsAndroid(): boolean {
@@ -355,10 +354,6 @@ export class SendspinPlayer {
     return this.core.pairingToken;
   }
 
-  getPairingToken(version: PairingTokenVersion = "0"): string | null {
-    return this.core.getPairingToken(version);
-  }
-
   /** Rotate the Pairing PSK, returning the new value (null without storage). */
   rotatePairingPsk(): string | null {
     return this.core.rotatePairingPsk();
@@ -432,7 +427,6 @@ export { SendspinTimeFilter } from "./core/time-filter";
 export { SendspinCore } from "./core/core";
 export { loadSendspinClientIdentity } from "./client-identity";
 export type { SendspinClientIdentity } from "./client-identity";
-export type { PairingTokenVersion } from "./core/noise/pairing-token";
 export { SendspinDecoder } from "./audio/decoder";
 export { AudioScheduler } from "./audio/scheduler";
 

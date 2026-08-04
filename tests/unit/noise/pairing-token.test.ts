@@ -14,7 +14,6 @@ describe("pairing token", () => {
       encodePairingToken(
         base64urlEncode(clientKey),
         base64urlEncode(pairingPsk),
-        "0",
       ),
     ).toBe(
       "SP:0AAAQEAYEAUDAOCAJBIFQYDIOB4IBCEQTCQKRMFYYDENBWHA5DYP6BYPC4PSOLZXH5DU6V97M5XXO74HR6LZ7J5PW674PT6X37T6757Y",
