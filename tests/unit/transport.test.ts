@@ -130,4 +130,18 @@ describe("SendspinTransport", () => {
       vi.useRealTimers();
     }
   });
+
+  it("drops the handshake timeout when the socket closes", () => {
+    vi.useFakeTimers();
+    try {
+      const h = harness();
+      h.transport.start(); // arms the handshake timeout
+      h.transport.onSocketClosed();
+      // A surviving timeout would call disconnect(), which turns off reconnect.
+      vi.advanceTimersByTime(120_000);
+      expect(h.ws.disconnected).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
