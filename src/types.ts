@@ -317,7 +317,8 @@ export interface ClientPairConfirm {
 
 export interface ClientPairFinalize {
   type: MessageType.CLIENT_PAIR_FINALIZE;
-  payload: { long_term_psk: string };
+  /** long_term_psk in the Pairing PSK flow, wrapped_psk when a PIN method sealed it. */
+  payload: { long_term_psk: string } | { wrapped_psk: string };
 }
 
 export interface ServerPairFinalize {
