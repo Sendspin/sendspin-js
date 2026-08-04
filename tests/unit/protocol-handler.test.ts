@@ -1,17 +1,29 @@
 /**
  * Unit tests for ProtocolHandler message routing and command handling.
  *
- * Uses a real StateManager (pure) with mocked WebSocketManager, StreamHandler
+ * Uses a real StateManager (pure) with a stubbed MessageSender, StreamHandler
  * and time filter so message dispatch, the static-delay guard, and the
  * stream/clear roles filter can be asserted directly.
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { ProtocolHandler } from "../../src/core/protocol-handler";
+import {
+  ProtocolHandler,
+  type HelloContext,
+  type MessageSender,
+} from "../../src/core/protocol-handler";
 import { StateManager } from "../../src/core/state-manager";
-import type { WebSocketManager } from "../../src/core/websocket-manager";
 import type { SendspinTimeFilter } from "../../src/core/time-filter";
 import type { StreamHandler } from "../../src/internal-types";
+
+function makeHelloContext(overrides: Partial<HelloContext> = {}): HelloContext {
+  return {
+    trustLevel: () => "none",
+    pairMethods: () => [{ method: "pairing_psk" }],
+    unpairedAccess: true,
+    ...overrides,
+  };
+}
 
 function makeStreamHandler(): StreamHandler &
   Record<string, ReturnType<typeof vi.fn>> {
@@ -26,7 +38,9 @@ function makeStreamHandler(): StreamHandler &
   } as StreamHandler & Record<string, ReturnType<typeof vi.fn>>;
 }
 
-const msgEvent = (data: unknown): MessageEvent => ({ data }) as MessageEvent;
+// Dispatch a parsed server message through the real entry point.
+const dispatch = (handler: ProtocolHandler, msg: unknown): void =>
+  handler.handleServerMessage(msg as never);
 
 function makeStreamHandlerWithDelay(
   syncDelayMs = 0,
@@ -67,15 +81,12 @@ describe("ProtocolHandler", () => {
     streamHandler = makeStreamHandler();
     stateManager = new StateManager();
     onDelayCommand = vi.fn();
-    const wsManager = {
-      send,
-      isConnected: () => true,
-    } as unknown as WebSocketManager;
+    const sender: MessageSender = { sendControl: send };
     const timeFilter = { update: vi.fn() } as unknown as SendspinTimeFilter;
 
     handler = new ProtocolHandler(
-      "player-1",
-      wsManager,
+      sender,
+      makeHelloContext(),
       streamHandler,
       stateManager,
       timeFilter,
@@ -88,72 +99,43 @@ describe("ProtocolHandler", () => {
     vi.useRealTimers();
   });
 
-  describe("handleMessage routing", () => {
-    it("routes ArrayBuffer data to the binary handler", () => {
-      const buf = new ArrayBuffer(8);
-      handler.handleMessage(msgEvent(buf));
-      expect(streamHandler.handleBinaryMessage).toHaveBeenCalledWith(buf);
-    });
-
-    it("routes Blob data to the binary handler", async () => {
-      const blob = new Blob([new Uint8Array([1, 2, 3])]);
-      handler.handleMessage(msgEvent(blob));
-      await vi.waitFor(() =>
-        expect(streamHandler.handleBinaryMessage).toHaveBeenCalled(),
-      );
-      const arg = streamHandler.handleBinaryMessage.mock.calls[0][0];
-      expect(arg.byteLength).toBe(3);
-    });
-
+  describe("handleServerMessage routing", () => {
     it("ignores a JSON message with an unknown type", () => {
-      handler.handleMessage(msgEvent(JSON.stringify({ type: "server/bogus" })));
+      dispatch(handler, { type: "server/bogus" });
       expect(streamHandler.handleBinaryMessage).not.toHaveBeenCalled();
       expect(streamHandler.handleStreamStart).not.toHaveBeenCalled();
-    });
-
-    it("throws on non-JSON string data (current behavior)", () => {
-      expect(() => handler.handleMessage(msgEvent("not json"))).toThrow();
     });
   });
 
   describe("stream/clear roles filter", () => {
     it("forwards a clear with no roles to the stream handler", () => {
-      handler.handleMessage(
-        msgEvent(JSON.stringify({ type: "stream/clear", payload: {} })),
-      );
+      dispatch(handler, { type: "stream/clear", payload: {} });
       expect(streamHandler.handleStreamClear).toHaveBeenCalledTimes(1);
     });
 
     it("ignores a clear whose roles exclude the player", () => {
-      handler.handleMessage(
-        msgEvent(
-          JSON.stringify({
-            type: "stream/clear",
-            payload: { roles: ["controller"] },
-          }),
-        ),
-      );
+      dispatch(handler, {
+        type: "stream/clear",
+        payload: { roles: ["controller"] },
+      });
       expect(streamHandler.handleStreamClear).not.toHaveBeenCalled();
     });
   });
 
   describe("set_static_delay command", () => {
-    const command = (static_delay_ms: unknown) =>
-      msgEvent(
-        JSON.stringify({
-          type: "server/command",
-          payload: { player: { command: "set_static_delay", static_delay_ms } },
-        }),
-      );
+    const command = (static_delay_ms: unknown) => ({
+      type: "server/command",
+      payload: { player: { command: "set_static_delay", static_delay_ms } },
+    });
 
     it("applies and clamps a valid delay", () => {
-      handler.handleMessage(command(9999));
+      dispatch(handler, command(9999));
       expect(streamHandler.handleSyncDelayChange).toHaveBeenCalledWith(5000);
       expect(onDelayCommand).toHaveBeenCalledWith(5000);
     });
 
     it("ignores a non-finite delay", () => {
-      handler.handleMessage(command("nope"));
+      dispatch(handler, command("nope"));
       expect(streamHandler.handleSyncDelayChange).not.toHaveBeenCalled();
       expect(onDelayCommand).not.toHaveBeenCalled();
     });
@@ -166,15 +148,16 @@ describe("ProtocolHandler extra", () => {
   let stateManager: StateManager;
   let onDelayCommand: ReturnType<typeof vi.fn>;
   let onVolumeCommand: ReturnType<typeof vi.fn>;
-  let wsManager: WebSocketManager;
+  let sender: MessageSender;
+  let helloContext: HelloContext;
   let timeFilter: SendspinTimeFilter;
 
   function makeHandler(
     config: ConstructorParameters<typeof ProtocolHandler>[5] = {},
   ): ProtocolHandler {
     return new ProtocolHandler(
-      "player-1",
-      wsManager,
+      sender,
+      helloContext,
       streamHandler,
       stateManager,
       timeFilter,
@@ -182,17 +165,16 @@ describe("ProtocolHandler extra", () => {
     );
   }
 
-  const serverHello = () =>
-    msgEvent(JSON.stringify({ type: "server/hello", payload: {} }));
-
-  function makeReadyHandler(
-    config: ConstructorParameters<typeof ProtocolHandler>[5] = {},
-  ): ProtocolHandler {
-    const handler = makeHandler(config);
-    handler.handleMessage(serverHello());
-    send.mockClear();
-    return handler;
-  }
+  // Dispatch a server/activate so client/state + time-sync start (the tests
+  // below that pre-date server/activate sequencing rely on this).
+  const activate = (handler: ProtocolHandler): void =>
+    dispatch(handler, {
+      type: "server/activate",
+      payload: {
+        activities: ["playback"],
+        active_roles: ["player@v1"],
+      },
+    });
 
   beforeEach(() => {
     vi.useFakeTimers();
@@ -201,10 +183,8 @@ describe("ProtocolHandler extra", () => {
     stateManager = new StateManager();
     onDelayCommand = vi.fn();
     onVolumeCommand = vi.fn();
-    wsManager = {
-      send,
-      isConnected: () => true,
-    } as unknown as WebSocketManager;
+    sender = { sendControl: send };
+    helloContext = makeHelloContext();
     timeFilter = { update: vi.fn() } as unknown as SendspinTimeFilter;
   });
 
@@ -223,10 +203,11 @@ describe("ProtocolHandler extra", () => {
 
       const hello = lastSent(send, "client/hello")!;
       const payload = hello.payload as Record<string, unknown>;
-      expect(payload.client_id).toBe("player-1");
       expect(payload.name).toBe("Living Room");
-      expect(payload.version).toBe(1);
       expect(payload.supported_roles).toContain("player@v1");
+      expect(payload.supported_pair_methods).toEqual([
+        { method: "pairing_psk" },
+      ]);
 
       const support = payload["player@v1_support"] as Record<string, unknown>;
       expect(support.supported_commands).toEqual(["volume", "mute"]);
@@ -240,6 +221,16 @@ describe("ProtocolHandler extra", () => {
         sample_rate: expect.any(Number),
         bit_depth: expect.any(Number),
       });
+    });
+
+    it("omits pairing_psk from supported_pair_methods when pairing is unavailable", () => {
+      helloContext = makeHelloContext({ pairMethods: () => [] });
+      const handler = makeHandler();
+      handler.sendClientHello();
+
+      const hello = lastSent(send, "client/hello")!;
+      const payload = hello.payload as Record<string, unknown>;
+      expect(payload.supported_pair_methods).toEqual([]);
     });
 
     it("advertises a buffer capacity covering the stream-ahead depth", () => {
@@ -267,43 +258,138 @@ describe("ProtocolHandler extra", () => {
   });
 
   describe("handleServerHello", () => {
+    it("sends client/hello with trust_level and unpaired_access", () => {
+      const handler = makeHandler();
+      dispatch(handler, { type: "server/hello", payload: {} });
+      const hello = lastSent(send, "client/hello")!;
+      const payload = hello.payload as Record<string, unknown>;
+      expect(payload.trust_level).toBe("none");
+      expect(payload.unpaired_access).toEqual({ enabled: true });
+    });
+
+    it("advertises the configured product name, omitting it when unset", () => {
+      const dflt = makeHandler();
+      dispatch(dflt, { type: "server/hello", payload: {} });
+      let info = (lastSent(send, "client/hello")!.payload as never)[
+        "device_info"
+      ] as { product_name?: string };
+      expect(info.product_name).toBeUndefined();
+
+      const named = makeHandler({ productName: "My App" });
+      dispatch(named, { type: "server/hello", payload: {} });
+      info = (lastSent(send, "client/hello")!.payload as never)[
+        "device_info"
+      ] as { product_name?: string };
+      expect(info.product_name).toBe("My App");
+    });
+
+    it("does not send the initial client/state (deferred to server/activate)", () => {
+      const handler = makeHandler();
+      dispatch(handler, { type: "server/hello", payload: {} });
+      expect(lastSent(send, "client/state")).toBeUndefined();
+    });
+  });
+
+  describe("handleServerActivate", () => {
     it("sends an initial client/state immediately", () => {
       const handler = makeHandler();
-      handler.handleMessage(
-        msgEvent(JSON.stringify({ type: "server/hello", payload: {} })),
-      );
+      activate(handler);
       expect(lastSent(send, "client/state")).toBeDefined();
     });
 
     it("starts a periodic client/state interval (5s)", () => {
       const handler = makeHandler();
-      handler.handleMessage(
-        msgEvent(JSON.stringify({ type: "server/hello", payload: {} })),
-      );
+      activate(handler);
       send.mockClear();
       vi.advanceTimersByTime(5000);
+      expect(lastSent(send, "client/state")).toBeDefined();
+    });
+
+    it("is a no-op on a repeat activate", () => {
+      const handler = makeHandler();
+      activate(handler);
+      send.mockClear();
+      activate(handler);
+      expect(lastSent(send, "client/state")).toBeUndefined();
+    });
+
+    it("sends state immediately when the active roles change", () => {
+      const handler = makeHandler();
+      dispatch(handler, {
+        type: "server/activate",
+        payload: { activities: [], active_roles: [] },
+      });
+      send.mockClear();
+
+      activate(handler);
+
+      const state = lastSent(send, "client/state")!;
+      expect((state.payload as Record<string, unknown>).player).toBeDefined();
+    });
+
+    it("suspends periodic traffic until pairing ends", () => {
+      const handler = makeHandler();
+      activate(handler);
+      send.mockClear();
+
+      handler.suspendForPairing();
+      handler.sendStateUpdate();
+      handler.sendCommand("play", undefined as never);
+      vi.advanceTimersByTime(5000);
+      expect(lastSent(send, "client/state")).toBeUndefined();
+      expect(lastSent(send, "client/command")).toBeUndefined();
+
+      activate(handler);
+      expect(lastSent(send, "client/state")).toBeDefined();
+    });
+
+    it("re-sends the initial client/state on activate after resetActivation", () => {
+      const handler = makeHandler();
+      activate(handler);
+      send.mockClear();
+      handler.resetActivation();
+      activate(handler);
       expect(lastSent(send, "client/state")).toBeDefined();
     });
   });
 
   describe("sendStateUpdate message shape (spec client/state player object)", () => {
-    it("reports volume in 0-100 and the player operational state", () => {
+    it("omits player state while the role is inactive", () => {
+      const handler = makeHandler();
+      dispatch(handler, {
+        type: "server/activate",
+        payload: { activities: [], active_roles: [] },
+      });
+
+      const state = lastSent(send, "client/state")!;
+      expect((state.payload as Record<string, unknown>).player).toBeUndefined();
+    });
+
+    it("reports top-level availability", () => {
+      const handler = makeHandler();
+      handler.sendStateUpdate();
+
+      const state = lastSent(send, "client/state")!;
+      expect((state.payload as Record<string, unknown>).available).toBe(true);
+    });
+
+    it("reports volume without the legacy player state", () => {
       const handler = makeHandler();
       stateManager.volume = 42;
-      handler.handleMessage(serverHello());
+      handler.sendStateUpdate();
 
       const state = lastSent(send, "client/state")!;
       const player = (state.payload as Record<string, unknown>)
         .player as Record<string, unknown>;
       expect(player.volume).toBe(42);
-      expect(player.state).toBe("synchronized");
+      expect(player.state).toBeUndefined();
       expect(player.muted).toBe(false);
     });
 
     it("includes static_delay_ms clamped to 0-5000", () => {
       streamHandler = makeStreamHandlerWithDelay(9999);
       const handler = makeHandler();
-      handler.handleMessage(serverHello());
+      handler.sendStateUpdate();
 
       const player = (
         lastSent(send, "client/state")!.payload as Record<string, unknown>
@@ -313,7 +399,7 @@ describe("ProtocolHandler extra", () => {
 
     it("declares set_static_delay in player supported_commands", () => {
       const handler = makeHandler();
-      handler.handleMessage(serverHello());
+      handler.sendStateUpdate();
       const player = (
         lastSent(send, "client/state")!.payload as Record<string, unknown>
       ).player as Record<string, unknown>;
@@ -322,7 +408,7 @@ describe("ProtocolHandler extra", () => {
 
     it("includes required_lead_time_ms (spec: always required for players)", () => {
       const handler = makeHandler();
-      handler.handleMessage(serverHello());
+      handler.sendStateUpdate();
       const player = (
         lastSent(send, "client/state")!.payload as Record<string, unknown>
       ).player as Record<string, unknown>;
@@ -331,7 +417,7 @@ describe("ProtocolHandler extra", () => {
 
     it("includes min_buffer_ms (spec: always required for players)", () => {
       const handler = makeHandler();
-      handler.handleMessage(serverHello());
+      handler.sendStateUpdate();
       const player = (
         lastSent(send, "client/state")!.payload as Record<string, unknown>
       ).player as Record<string, unknown>;
@@ -345,7 +431,8 @@ describe("ProtocolHandler extra", () => {
           useHardwareVolume: true,
           getExternalVolume,
         });
-        handler.handleMessage(serverHello());
+        // stateManager would say 100/false; hardware says 30/true.
+        handler.sendStateUpdate();
 
         const player = (
           lastSent(send, "client/state")!.payload as Record<string, unknown>
@@ -357,7 +444,7 @@ describe("ProtocolHandler extra", () => {
 
       it("skips the hardware read and uses stateManager values when skipHardwareRead", () => {
         const getExternalVolume = vi.fn(() => ({ volume: 30, muted: true }));
-        const handler = makeReadyHandler({
+        const handler = makeHandler({
           useHardwareVolume: true,
           getExternalVolume,
         });
@@ -381,13 +468,12 @@ describe("ProtocolHandler extra", () => {
     it("sends the full player payload on the first state after connect", () => {
       const handler = makeHandler();
       handler.sendClientHello();
-      handler.handleMessage(serverHello());
+      handler.sendStateUpdate();
 
       const player = (
         lastSent(send, "client/state")!.payload as Record<string, unknown>
       ).player as Record<string, unknown>;
       expect(player).toMatchObject({
-        state: "synchronized",
         volume: expect.any(Number),
         muted: expect.any(Boolean),
         static_delay_ms: expect.any(Number),
@@ -397,20 +483,19 @@ describe("ProtocolHandler extra", () => {
       });
     });
 
-    it("sends the full player payload when state changes before server hello", () => {
+    it("sends the full player payload when state changed before client/hello", () => {
       const handler = makeHandler();
-      handler.sendClientHello();
       stateManager.volume = 42;
       handler.sendStateUpdate();
       send.mockClear();
 
-      handler.handleMessage(serverHello());
+      handler.sendClientHello();
+      handler.sendStateUpdate();
 
       const player = (
         lastSent(send, "client/state")!.payload as Record<string, unknown>
       ).player as Record<string, unknown>;
       expect(player).toMatchObject({
-        state: "synchronized",
         volume: 42,
         muted: expect.any(Boolean),
         static_delay_ms: expect.any(Number),
@@ -420,20 +505,10 @@ describe("ProtocolHandler extra", () => {
       });
     });
 
-    it("does not send client/state before server hello", () => {
-      const handler = makeHandler();
-      handler.sendClientHello();
-
-      stateManager.volume = 42;
-      handler.sendStateUpdate();
-
-      expect(lastSent(send, "client/state")).toBeUndefined();
-    });
-
     it("sends only the changed field on the next update", () => {
       const handler = makeHandler();
       handler.sendClientHello();
-      handler.handleMessage(serverHello());
+      handler.sendStateUpdate();
       send.mockClear();
 
       stateManager.volume = 42;
@@ -449,7 +524,7 @@ describe("ProtocolHandler extra", () => {
     it("resets to a full payload after a reconnect", () => {
       const handler = makeHandler();
       handler.sendClientHello();
-      handler.handleMessage(serverHello());
+      handler.sendStateUpdate();
       stateManager.volume = 42;
       handler.sendStateUpdate();
       send.mockClear();
@@ -457,7 +532,6 @@ describe("ProtocolHandler extra", () => {
       // Reconnect: a fresh server has no prior state to merge into.
       handler.sendClientHello();
       handler.sendStateUpdate();
-      handler.handleMessage(serverHello());
 
       const player = (
         lastSent(send, "client/state")!.payload as Record<string, unknown>
@@ -469,19 +543,21 @@ describe("ProtocolHandler extra", () => {
   });
 
   describe("handleServerCommand volume / mute (spec server/command player object)", () => {
-    const cmd = (player: Record<string, unknown>) =>
-      msgEvent(JSON.stringify({ type: "server/command", payload: { player } }));
+    const cmd = (player: Record<string, unknown>) => ({
+      type: "server/command",
+      payload: { player },
+    });
 
     it("applies a volume command to state and notifies the stream handler", () => {
       const handler = makeHandler();
-      handler.handleMessage(cmd({ command: "volume", volume: 25 }));
+      dispatch(handler, cmd({ command: "volume", volume: 25 }));
       expect(stateManager.volume).toBe(25);
       expect(streamHandler.handleVolumeUpdate).toHaveBeenCalled();
     });
 
     it("calls onVolumeCommand with (volume, muted) when useHardwareVolume", () => {
       const handler = makeHandler({ useHardwareVolume: true, onVolumeCommand });
-      handler.handleMessage(cmd({ command: "volume", volume: 60 }));
+      dispatch(handler, cmd({ command: "volume", volume: 60 }));
       expect(onVolumeCommand).toHaveBeenCalledWith(60, false);
     });
 
@@ -490,13 +566,14 @@ describe("ProtocolHandler extra", () => {
         useHardwareVolume: false,
         onVolumeCommand,
       });
-      handler.handleMessage(cmd({ command: "volume", volume: 60 }));
+      dispatch(handler, cmd({ command: "volume", volume: 60 }));
       expect(onVolumeCommand).not.toHaveBeenCalled();
     });
 
     it("sends a follow-up client/state reflecting the commanded volume", () => {
-      const handler = makeReadyHandler();
-      handler.handleMessage(cmd({ command: "volume", volume: 33 }));
+      const handler = makeHandler();
+      send.mockClear();
+      dispatch(handler, cmd({ command: "volume", volume: 33 }));
       const player = (
         lastSent(send, "client/state")!.payload as Record<string, unknown>
       ).player as Record<string, unknown>;
@@ -506,34 +583,35 @@ describe("ProtocolHandler extra", () => {
     it("ignores a server/command with no player object", () => {
       const handler = makeHandler();
       send.mockClear();
-      handler.handleMessage(
-        msgEvent(JSON.stringify({ type: "server/command", payload: {} })),
-      );
+      dispatch(handler, { type: "server/command", payload: {} });
       expect(streamHandler.handleVolumeUpdate).not.toHaveBeenCalled();
       expect(lastSent(send, "client/state")).toBeUndefined();
     });
   });
 
   describe("stream/end roles filter", () => {
-    const end = (payload: Record<string, unknown>) =>
-      msgEvent(JSON.stringify({ type: "stream/end", payload }));
+    const end = (payload: Record<string, unknown>) => ({
+      type: "stream/end",
+      payload,
+    });
 
     it("ends the stream when roles is omitted", () => {
       const handler = makeHandler();
-      handler.handleMessage(end({}));
+      dispatch(handler, end({}));
       expect(streamHandler.handleStreamEnd).toHaveBeenCalledTimes(1);
       expect(stateManager.isPlaying).toBe(false);
     });
 
     it("ignores a stream/end whose roles exclude player", () => {
       const handler = makeHandler();
-      handler.handleMessage(end({ roles: ["artwork"] }));
+      dispatch(handler, end({ roles: ["artwork"] }));
       expect(streamHandler.handleStreamEnd).not.toHaveBeenCalled();
     });
 
     it("sends a client/state after ending the player stream", () => {
-      const handler = makeReadyHandler();
-      handler.handleMessage(end({}));
+      const handler = makeHandler();
+      send.mockClear();
+      dispatch(handler, end({}));
       expect(lastSent(send, "client/state")).toBeDefined();
     });
   });
@@ -550,8 +628,37 @@ describe("ProtocolHandler extra", () => {
   });
 
   describe("sendCommand", () => {
+    it("suppresses commands until the controller role is active", () => {
+      const handler = makeHandler();
+      dispatch(handler, {
+        type: "server/activate",
+        payload: { activities: [], active_roles: [] },
+      });
+      send.mockClear();
+      handler.sendCommand("play", undefined as never);
+      expect(lastSent(send, "client/command")).toBeUndefined();
+
+      dispatch(handler, {
+        type: "server/activate",
+        payload: {
+          activities: ["playback"],
+          active_roles: ["controller@v1"],
+        },
+      });
+      send.mockClear();
+      handler.sendCommand("play", undefined as never);
+      expect(lastSent(send, "client/command")).toBeDefined();
+    });
+
     it("wraps a parameterless controller command", () => {
       const handler = makeHandler();
+      dispatch(handler, {
+        type: "server/activate",
+        payload: {
+          activities: ["playback"],
+          active_roles: ["controller@v1"],
+        },
+      });
       handler.sendCommand("play", undefined as never);
       const cmd = lastSent(send, "client/command")!;
       const controller = (cmd.payload as Record<string, unknown>)
@@ -561,6 +668,13 @@ describe("ProtocolHandler extra", () => {
 
     it("merges volume params into the controller command", () => {
       const handler = makeHandler();
+      dispatch(handler, {
+        type: "server/activate",
+        payload: {
+          activities: ["playback"],
+          active_roles: ["controller@v1"],
+        },
+      });
       handler.sendCommand("volume", { volume: 55 });
       const controller = (
         lastSent(send, "client/command")!.payload as Record<string, unknown>

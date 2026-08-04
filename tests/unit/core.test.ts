@@ -28,21 +28,45 @@ const PCM_FORMAT: StreamFormat = {
   bit_depth: 16,
 };
 
+// Capture control messages by replacing the transport's sendControl (the
+// ProtocolHandler's sender), bypassing the not-ready guard for offline tests.
 function spySend(core: SendspinCore): ReturnType<typeof vi.fn> {
   const send = vi.fn();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (core as any).wsManager.send = send;
+  (core as any).transport.sendControl = send;
   return send;
 }
 
-function completeHandshake(
+// Force the transport into transport mode so disconnect() sends a goodbye.
+function markTransportReady(core: SendspinCore): void {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (core as any).transport.state = "transport";
+}
+
+function activateController(core: SendspinCore): void {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (core as any).routeControl({
+    type: "server/activate",
+    payload: {
+      activities: ["playback"],
+      active_roles: ["controller@v1"],
+    },
+  });
+}
+
+// Activate the player role so client/state sends, dropping the initial state.
+function activatePlayer(
   core: SendspinCore,
   send: ReturnType<typeof vi.fn>,
 ): void {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (core as any).protocolHandler.handleMessage({
-    data: JSON.stringify({ type: "server/hello", payload: {} }),
-  } as MessageEvent);
+  (core as any).routeControl({
+    type: "server/activate",
+    payload: {
+      activities: ["playback"],
+      active_roles: ["player@v1"],
+    },
+  });
   send.mockClear();
 }
 
@@ -64,7 +88,7 @@ describe("SendspinCore (offline)", () => {
   let core: SendspinCore;
 
   beforeEach(() => {
-    core = new SendspinCore({ baseUrl: "http://127.0.0.1:9", playerId: "p" });
+    core = new SendspinCore({ baseUrl: "http://127.0.0.1:9" });
   });
 
   describe("sendCommand guard", () => {
@@ -123,7 +147,7 @@ describe("SendspinCore.trackProgress", () => {
   let nowMs: number;
 
   beforeEach(() => {
-    core = new SendspinCore({ baseUrl: "http://127.0.0.1:9", playerId: "p" });
+    core = new SendspinCore({ baseUrl: "http://127.0.0.1:9" });
     nowMs = 1000;
     vi.spyOn(performance, "now").mockImplementation(() => nowMs);
   });
@@ -224,7 +248,7 @@ describe("SendspinCore.getCurrentServerTimeUs", () => {
   afterEach(() => vi.restoreAllMocks());
 
   it("floors performance.now()*1000 and applies the filter offset", () => {
-    const core = new SendspinCore({ baseUrl: "http://h", playerId: "p" });
+    const core = new SendspinCore({ baseUrl: "http://h" });
     // Seed a known offset on the real time filter via one measurement.
     // First measurement sets offset = measurement directly.
     core._timeFilter.update(7000, 500, 1_000_000);
@@ -269,7 +293,7 @@ describe("SendspinCore URL building", () => {
   });
 
   const urlFor = (baseUrl: string): string => {
-    const core = new SendspinCore({ baseUrl, playerId: "p" });
+    const core = new SendspinCore({ baseUrl });
     void core.connect(); // fire-and-forget; promise never resolves with FakeWS
     return captured[captured.length - 1];
   };
@@ -293,7 +317,7 @@ describe("SendspinCore command + state forwarding", () => {
   let core: SendspinCore;
 
   beforeEach(() => {
-    core = new SendspinCore({ baseUrl: "http://h", playerId: "p" });
+    core = new SendspinCore({ baseUrl: "http://h" });
   });
 
   afterEach(() => {
@@ -302,17 +326,20 @@ describe("SendspinCore command + state forwarding", () => {
 
   it("forwards a controller command with command name and params merged", () => {
     const send = spySend(core);
+    activateController(core);
+    send.mockClear();
     core.sendCommand("volume", { volume: 42 });
 
     expect(send).toHaveBeenCalledTimes(1);
     const msg = send.mock.calls[0][0];
     expect(msg.type).toBe("client/command");
     expect(msg.payload.controller).toEqual({ command: "volume", volume: 42 });
+    core.disconnect();
   });
 
   it("setVolume clamps in state manager and sends a client/state update", () => {
     const send = spySend(core);
-    completeHandshake(core, send);
+    activatePlayer(core, send);
     core.setVolume(-10);
 
     expect(core.volume).toBe(0); // clamped 0-100
@@ -323,7 +350,7 @@ describe("SendspinCore command + state forwarding", () => {
 
   it("setMuted updates state and sends a client/state update", () => {
     const send = spySend(core);
-    completeHandshake(core, send);
+    activatePlayer(core, send);
     core.setMuted(true);
 
     expect(core.muted).toBe(true);
@@ -344,7 +371,7 @@ describe("SendspinCore.setSyncDelay", () => {
   let core: SendspinCore;
 
   beforeEach(() => {
-    core = new SendspinCore({ baseUrl: "http://h", playerId: "p" });
+    core = new SendspinCore({ baseUrl: "http://h" });
   });
 
   afterEach(() => {
@@ -355,7 +382,7 @@ describe("SendspinCore.setSyncDelay", () => {
     const cb = vi.fn();
     core.onSyncDelayChange = cb;
     const send = spySend(core);
-    completeHandshake(core, send);
+    activatePlayer(core, send);
 
     core.setSyncDelay(99999); // clamp to 5000
 
@@ -368,7 +395,6 @@ describe("SendspinCore.setSyncDelay", () => {
   it("seeds the initial sync delay from config (clamped)", () => {
     const c2 = new SendspinCore({
       baseUrl: "http://h",
-      playerId: "p",
       syncDelay: 8000,
     });
     expect(c2.getSyncDelayMs()).toBe(5000);
@@ -380,7 +406,6 @@ describe("SendspinCore static delay persistence", () => {
     const storage = makeStorage();
     const core = new SendspinCore({
       baseUrl: "http://h",
-      playerId: "p",
       storage,
     });
 
@@ -395,7 +420,6 @@ describe("SendspinCore static delay persistence", () => {
 
     const core = new SendspinCore({
       baseUrl: "http://h",
-      playerId: "p",
       storage,
     });
 
@@ -408,7 +432,6 @@ describe("SendspinCore static delay persistence", () => {
 
     const core = new SendspinCore({
       baseUrl: "http://h",
-      playerId: "p",
       syncDelay: 100,
       storage,
     });
@@ -419,7 +442,6 @@ describe("SendspinCore static delay persistence", () => {
   it("does not throw or persist when storage is disabled", () => {
     const core = new SendspinCore({
       baseUrl: "http://h",
-      playerId: "p",
       storage: null,
     });
 
@@ -430,7 +452,7 @@ describe("SendspinCore static delay persistence", () => {
 
 describe("SendspinCore.disconnect ordering and idempotency", () => {
   it("resets the time filter on disconnect", () => {
-    const core = new SendspinCore({ baseUrl: "http://h", playerId: "p" });
+    const core = new SendspinCore({ baseUrl: "http://h" });
     core._timeFilter.update(10000, 500, 1_000_000);
     expect(core._timeFilter.is_synchronized).toBe(true);
 
@@ -441,17 +463,16 @@ describe("SendspinCore.disconnect ordering and idempotency", () => {
   });
 
   it("does not send goodbye when never connected", () => {
-    const core = new SendspinCore({ baseUrl: "http://h", playerId: "p" });
+    const core = new SendspinCore({ baseUrl: "http://h" });
     const send = spySend(core);
     core.disconnect("user_request");
     expect(send).not.toHaveBeenCalled();
   });
 
   it("defaults the goodbye reason to restart, but forwards an explicit reason", () => {
-    const core = new SendspinCore({ baseUrl: "http://h", playerId: "p" });
+    const core = new SendspinCore({ baseUrl: "http://h" });
     const send = spySend(core);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (core as any).wsManager.isConnected = () => true;
+    markTransportReady(core);
 
     core.disconnect();
     expect(send).toHaveBeenLastCalledWith(
@@ -471,7 +492,7 @@ describe("SendspinCore.disconnect ordering and idempotency", () => {
   });
 
   it("fires onConnectionClose only via the close handler, not on disconnect()", () => {
-    const core = new SendspinCore({ baseUrl: "http://h", playerId: "p" });
+    const core = new SendspinCore({ baseUrl: "http://h" });
     const cb = vi.fn();
     core.onConnectionClose = cb;
     core.disconnect();
@@ -479,23 +500,14 @@ describe("SendspinCore.disconnect ordering and idempotency", () => {
   });
 });
 
-describe("SendspinCore id fallbacks", () => {
-  it("generates a player_id and client_name when none provided", () => {
+describe("SendspinCore identity fallbacks", () => {
+  it("derives a 43-char base64url clientId and a clientName from it", () => {
     const core = new SendspinCore({ baseUrl: "http://h" });
+    expect(core.clientId).toHaveLength(43);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const cfg = (core as any).config;
-    expect(cfg.playerId).toMatch(/^sendspin-js-[0-9a-z]{1,4}$/);
-    expect(cfg.clientName).toMatch(/^Sendspin JS Client \([0-9a-z]{1,4}\)$/);
-  });
-
-  it("falls back gracefully even when Math.random yields 0 (empty random suffix)", () => {
-    // Math.random()=0 -> (0).toString(36).substring(2,6) === "" -> id "sendspin-js-".
-    const spy = vi.spyOn(Math, "random").mockReturnValue(0);
-    const core = new SendspinCore({ baseUrl: "http://h" });
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const cfg = (core as any).config;
-    spy.mockRestore();
-    // Documents the degenerate id rather than asserting it is "good".
-    expect(cfg.playerId).toBe("sendspin-js-");
+    expect(cfg.clientName).toBe(
+      `Sendspin JS Client (${core.clientId.slice(0, 6)})`,
+    );
   });
 });

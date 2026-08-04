@@ -333,6 +333,77 @@
           </details>
         </section>
 
+        <!-- Pairing Section -->
+        <section class="card" id="pairing-section">
+          <h2>Pairing</h2>
+          <div class="form-group">
+            <label>Client ID</label>
+            <code id="client-id" class="pairing-value">-</code>
+          </div>
+          <div class="form-group">
+            <label>Pairing Token</label>
+            <code id="pairing-token" class="pairing-value">-</code>
+            <button id="rotate-psk" class="btn btn-secondary">Rotate</button>
+            <small
+              >Transfer this version 0 token to a conforming Sendspin
+              server.</small
+            >
+          </div>
+          <div class="form-group" id="pairing-pin-group" hidden>
+            <label>Pairing PIN</label>
+            <code id="pairing-pin" class="pairing-value">-</code>
+            <button id="cancel-pairing" class="btn btn-secondary">
+              Cancel pairing
+            </button>
+            <small
+              >Enter this PIN into the server to complete pairing.</small
+            >
+          </div>
+          <div class="form-group">
+            <label for="static-pin">Static PIN (8 digits)</label>
+            <input
+              type="text"
+              id="static-pin"
+              inputmode="numeric"
+              maxlength="8"
+              placeholder="unset"
+            />
+            <button id="open-pairing-window" class="btn btn-secondary">
+              Open pairing window
+            </button>
+            <small
+              >Optional fixed device PIN; enables static-PIN pairing on the
+              next connect. Open the window (~5 min) before each
+              attempt.</small
+            >
+          </div>
+          <div class="form-group">
+            <label>PIN lockout</label>
+            <span id="pin-lockout" class="status-value">-</span>
+            <button id="clear-lockout" class="btn btn-secondary">
+              Clear lockout
+            </button>
+            <small
+              >A PIN method locks out after 10 failed attempts. Clearing it is
+              a deliberate local action.</small
+            >
+          </div>
+          <div class="form-group">
+            <label>Trust Level</label>
+            <span id="trust-level" class="status-value">-</span>
+          </div>
+          <div class="form-group">
+            <label>
+              <input type="checkbox" id="unpaired-access" checked />
+              Allow unpaired access
+            </label>
+            <small
+              >Admit unpaired (Sentinel-PSK) playback. Applied on
+              connect.</small
+            >
+          </div>
+        </section>
+
         <!-- Status Section -->
         <section class="card" id="status-section">
           <h2>Player Status</h2>

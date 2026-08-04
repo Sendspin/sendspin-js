@@ -66,28 +66,29 @@ describe("SendspinCore E2E (aiosendspin)", () => {
    */
   async function connectCore(
     config: {
-      playerId?: string;
       codecs?: ("pcm" | "opus" | "flac")[];
       syncDelay?: number;
       onStateChange?: any;
     } = {},
   ): Promise<SendspinCore> {
     core = new SendspinCore({
-      baseUrl: `http://127.0.0.1:${server.port}`,
-      playerId: config.playerId ?? "e2e-test-player",
+      baseUrl: server.url,
       clientName: "E2E Test Player",
       codecs: config.codecs ?? ["pcm"],
       syncDelay: config.syncDelay,
       onStateChange: config.onStateChange,
     });
+    await server.trustUnpaired(core.clientId);
 
     // Start both: the SDK connecting and the server waiting for the client
-    const [, clientId] = await Promise.all([
+    const [, status] = await Promise.all([
       core.connect(),
       server.waitForClient(),
     ]);
 
-    expect(clientId).toBeTruthy();
+    expect(status.client_id).toBe(core.clientId);
+    expect(status.psk_category).toBe("sentinel");
+    expect(status.active_roles).toContain("player@v1");
 
     // Give the protocol handler a moment to process server/hello
     await new Promise((r) => setTimeout(r, 100));
@@ -107,7 +108,7 @@ describe("SendspinCore E2E (aiosendspin)", () => {
     });
 
     it("connects with external WebSocket", async () => {
-      const ws = new WebSocket(`ws://127.0.0.1:${server.port}/sendspin`);
+      const ws = new WebSocket(server.url);
       externalWs = ws;
 
       // Wait for the WebSocket to open before passing it to SendspinCore
@@ -119,17 +120,18 @@ describe("SendspinCore E2E (aiosendspin)", () => {
       core = new SendspinCore({
         // @ts-expect-error ws WebSocket is compatible
         webSocket: ws,
-        playerId: "external-ws-player",
         clientName: "External WS Player",
         codecs: ["pcm"],
       });
+      await server.trustUnpaired(core.clientId);
 
-      const [, clientId] = await Promise.all([
+      const [, status] = await Promise.all([
         core.connect(),
         server.waitForClient(),
       ]);
 
-      expect(clientId).toBeTruthy();
+      expect(status.client_id).toBe(core.clientId);
+      expect(status.active_roles).toContain("player@v1");
       await new Promise((r) => setTimeout(r, 100));
       expect(core.isConnected).toBe(true);
     });

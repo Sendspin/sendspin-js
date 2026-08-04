@@ -1,4 +1,4 @@
-import type { ClientMessage, ReconnectConfig } from "../types";
+import type { ReconnectConfig } from "../types";
 
 export class WebSocketManager {
   private ws: WebSocket | null = null;
@@ -280,12 +280,22 @@ export class WebSocketManager {
     }
   }
 
-  // Send message to server (JSON)
-  send(message: ClientMessage): void {
+  // Send a cleartext text frame (handshake only).
+  sendText(data: string): void {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-      this.ws.send(JSON.stringify(message));
+      this.ws.send(data);
     } else {
-      console.warn("Sendspin: Cannot send message, WebSocket not connected");
+      console.warn("Sendspin: Cannot send text, WebSocket not connected");
+    }
+  }
+
+  // Send a binary frame (Noise transport ciphertext).
+  sendBinary(data: Uint8Array): void {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      // TS types Uint8Array as ArrayBufferLike, DOM lib wants ArrayBuffer.
+      this.ws.send(data as Uint8Array<ArrayBuffer>);
+    } else {
+      console.warn("Sendspin: Cannot send binary, WebSocket not connected");
     }
   }
 

@@ -15,6 +15,20 @@ export enum MessageType {
   STREAM_REQUEST_FORMAT = "stream/request-format",
   STREAM_END = "stream/end",
   GROUP_UPDATE = "group/update",
+  CLIENT_INIT = "client/init",
+  SERVER_INIT = "server/init",
+  NOISE_HANDSHAKE = "noise/handshake",
+  SERVER_ACTIVATE = "server/activate",
+  CLIENT_PAIR_INIT = "client/pair-init",
+  SERVER_PAIR_INIT = "server/pair-init",
+  SERVER_PAIR_AUTH = "server/pair-auth",
+  CLIENT_PAIR_AUTH = "client/pair-auth",
+  SERVER_PAIR_CONFIRM = "server/pair-confirm",
+  CLIENT_PAIR_CONFIRM = "client/pair-confirm",
+  CLIENT_PAIR_FINALIZE = "client/pair-finalize",
+  SERVER_PAIR_FINALIZE = "server/pair-finalize",
+  PAIR_ABORT = "pair/abort",
+  SERVER_UNPAIR = "server/unpair",
 }
 
 /**
@@ -23,12 +37,20 @@ export enum MessageType {
  * - 'shutdown': Client is shutting down
  * - 'restart': Client is restarting and will reconnect
  * - 'user_request': User explicitly requested to disconnect
+ * - 'unauthorized': Client failed authentication/pairing
+ * - 'pairing_required': Server requires pairing before continuing
+ * - 'concurrent_attempt': Another pairing attempt is already in progress
+ * - 'unpaired': Server unpaired the client
  */
 export type GoodbyeReason =
   | "another_server"
   | "shutdown"
   | "restart"
-  | "user_request";
+  | "user_request"
+  | "unauthorized"
+  | "pairing_required"
+  | "concurrent_attempt"
+  | "unpaired";
 
 /**
  * Map of controller commands to their required parameters.
@@ -55,10 +77,11 @@ export type ControllerCommand = keyof ControllerCommands;
 export interface ClientHello {
   type: MessageType.CLIENT_HELLO;
   payload: {
-    client_id: string;
     name: string;
-    version: number;
     supported_roles: string[];
+    trust_level: "user" | "none";
+    supported_pair_methods?: PairMethodDescriptor[];
+    unpaired_access: { enabled: boolean };
     device_info?: {
       product_name?: string;
       manufacturer?: string;
@@ -87,9 +110,9 @@ export interface ClientTime {
 export interface ClientState {
   type: MessageType.CLIENT_STATE;
   payload: {
+    available: boolean;
     player?: {
       // Full initial state includes all fields; deltas include only changed fields.
-      state?: "synchronized" | "error";
       static_delay_ms?: number;
       volume?: number;
       muted?: boolean;
@@ -220,8 +243,119 @@ export interface GroupUpdate {
   payload: GroupUpdatePayload;
 }
 
+export type PairMethod = "pairing_psk" | "dynamic_pin" | "static_pin";
+
+/** Out-channels through which a client can convey the dynamic PIN. */
+export type PairOutChannel = "display" | "speaker" | "other";
+
+/** A client/hello pairing-method descriptor. */
+export interface PairMethodDescriptor {
+  method: PairMethod;
+  /** Dynamic PIN only: how the client can surface the derived PIN. */
+  out_channels?: PairOutChannel[];
+  /** Dynamic PIN only: shortest PIN length the client accepts (4-12). */
+  min_pin_length?: number;
+  /** PIN methods only: whether the method is in terminal lockout. */
+  locked_out?: boolean;
+}
+
+export interface ClientInit {
+  type: MessageType.CLIENT_INIT;
+  payload: { client_id: string; version: number; suite: string };
+}
+
+export interface ServerInit {
+  type: MessageType.SERVER_INIT;
+  payload: { server_id: string; version: number };
+}
+
+export interface NoiseHandshake {
+  type: MessageType.NOISE_HANDSHAKE;
+  payload: { data: string };
+}
+
+export interface ServerActivate {
+  type: MessageType.SERVER_ACTIVATE;
+  payload: {
+    activities: Array<"playback" | "pairing" | "management">;
+    active_roles?: string[];
+    selected_pair_method?: PairMethod;
+  };
+}
+
+export interface ClientPairInit {
+  type: MessageType.CLIENT_PAIR_INIT;
+  /** commit_B (SHA-256 of nonce_B) is present in dynamic PIN, absent in static. */
+  payload: { pairing_index: number; commit_B?: string };
+}
+
+export interface ServerPairInit {
+  type: MessageType.SERVER_PAIR_INIT;
+  payload: { nonce_A: string; pin_length: number };
+}
+
+export interface ServerPairAuth {
+  type: MessageType.SERVER_PAIR_AUTH;
+  payload: { pake_msg_1: string };
+}
+
+export interface ClientPairAuth {
+  type: MessageType.CLIENT_PAIR_AUTH;
+  payload: { pake_msg_2: string };
+}
+
+export interface ServerPairConfirm {
+  type: MessageType.SERVER_PAIR_CONFIRM;
+  payload: { server_kc: string };
+}
+
+export interface ClientPairConfirm {
+  type: MessageType.CLIENT_PAIR_CONFIRM;
+  /** nonce_B (preimage of commit_B) is present in dynamic PIN only. */
+  payload: { client_kc: string; nonce_B?: string };
+}
+
+export interface ClientPairFinalize {
+  type: MessageType.CLIENT_PAIR_FINALIZE;
+  /** long_term_psk in the Pairing PSK flow, wrapped_psk when a PIN method sealed it. */
+  payload: { long_term_psk: string } | { wrapped_psk: string };
+}
+
+export interface ServerPairFinalize {
+  type: MessageType.SERVER_PAIR_FINALIZE;
+  payload: Record<string, never>;
+}
+
+export type PairAbortReason =
+  | "attempt_timeout"
+  | "concurrent_attempt"
+  | "locked_out"
+  | "method_not_supported"
+  | "pin_length_unacceptable"
+  | "pin_mismatch"
+  | "user_cancelled";
+
+export interface PairAbort {
+  type: MessageType.PAIR_ABORT;
+  payload: { reason: PairAbortReason };
+}
+
+export interface ServerUnpair {
+  type: MessageType.SERVER_UNPAIR;
+  payload: Record<string, unknown>;
+}
+
 export type ServerMessage =
   | ServerHello
+  | ServerInit
+  | NoiseHandshake
+  | ServerActivate
+  | ServerPairInit
+  | ServerPairAuth
+  | ServerPairConfirm
+  | ServerPairFinalize
+  | ServerUnpair
+  | PairAbort
   | ServerTime
   | ServerState
   | StreamStart
@@ -400,9 +534,6 @@ export interface ReconnectConfig {
  * Configuration for SendspinCore (protocol + decoding, no playback).
  */
 export interface SendspinCoreConfig {
-  /** Unique player identifier. Auto-generated if not provided. */
-  playerId?: string;
-
   /**
    * Base URL of the Sendspin server (e.g., "http://192.168.1.100:8095").
    * Required unless webSocket is provided.
@@ -411,6 +542,9 @@ export interface SendspinCoreConfig {
 
   /** Human-readable name for this player. Auto-generated if not provided. */
   clientName?: string;
+
+  /** Product name advertised in client/hello. Omitted when not set. */
+  productName?: string;
 
   /**
    * Codecs to use for audio streaming, in priority order.
@@ -528,6 +662,49 @@ export interface SendspinCoreConfig {
    * See {@link ReconnectConfig} for defaults.
    */
   reconnect?: ReconnectConfig;
+
+  /** Preferred Noise cipher suite. Default "chacha". */
+  suite?: "chacha" | "aesgcm";
+
+  /**
+   * Whether to admit unpaired (Sentinel-PSK) playback. Reported in
+   * client/hello.unpaired_access.enabled. Default true.
+   *
+   * Unpaired playback authenticates with the well-known Sentinel PSK, so it is
+   * exposed to an active MITM. Set false to require pairing before any playback.
+   */
+  unpairedAccess?: boolean;
+
+  /**
+   * Pre-provisioned long-term PSK records (base64url psk, optional serverId).
+   * serverId present = stored-pubkey model; omitted = shared-PSK.
+   */
+  longTermPsks?: Array<{ psk: string; serverId?: string }>;
+
+  /** Callback for pairing lifecycle events. */
+  onPairing?: (
+    event: "started" | "finalized" | "aborted",
+    detail?: string,
+  ) => void;
+
+  /**
+   * Enables dynamic PIN pairing: called with the PIN the operator must enter
+   * into the server, and with null when the attempt ends (hide the PIN).
+   */
+  onPairingPin?: (pin: string | null) => void;
+
+  /**
+   * Shortest dynamic PIN length this client accepts (4-12). Default 6.
+   * A compliant server always picks at least this length, so the client
+   * aborts only if a misbehaving server proposes a shorter one.
+   */
+  minPinLength?: number;
+
+  /**
+   * Enables static PIN pairing: this device's fixed 8-digit PIN. The pairing
+   * window must be opened with openPairingWindow() before each attempt.
+   */
+  staticPin?: string;
 
   /** Callback when player state changes (local or from server). */
   onStateChange?: (state: {

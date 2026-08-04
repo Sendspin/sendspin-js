@@ -10,6 +10,7 @@ import type {
   ControllerCommand,
   ControllerCommands,
   CorrectionMode,
+  PairMethod,
 } from "./types";
 
 // Platform detection utilities
@@ -75,9 +76,9 @@ export class SendspinPlayer {
     // Create core (protocol + decoding). It resolves the effective initial
     // delay, so read it back below for the scheduler's starting value.
     this.core = new SendspinCore({
-      playerId: config.playerId,
       baseUrl: config.baseUrl,
       clientName: config.clientName,
+      productName: config.productName,
       webSocket: config.webSocket,
       codecs: config.codecs,
       bufferCapacity: config.bufferCapacity,
@@ -92,6 +93,13 @@ export class SendspinPlayer {
       getExternalVolume: config.getExternalVolume,
       reconnect: config.reconnect,
       onStateChange: config.onStateChange,
+      onPairing: config.onPairing,
+      onPairingPin: config.onPairingPin,
+      minPinLength: config.minPinLength,
+      staticPin: config.staticPin,
+      suite: config.suite,
+      unpairedAccess: config.unpairedAccess,
+      longTermPsks: config.longTermPsks,
     });
 
     const syncDelay = this.core.getSyncDelayMs();
@@ -312,6 +320,48 @@ export class SendspinPlayer {
     return this.core.isConnected;
   }
 
+  /** The client's stable identity id (base64url X25519 public key). */
+  get clientId(): string {
+    return this.core.clientId;
+  }
+
+  /** The client's Pairing PSK (base64url) for the operator to enter server-side. Null without storage. */
+  get pairingPsk(): string | null {
+    return this.core.pairingPsk;
+  }
+
+  get pairingToken(): string | null {
+    return this.core.pairingToken;
+  }
+
+  /** Rotate the Pairing PSK, returning the new value (null without storage). */
+  rotatePairingPsk(): string | null {
+    return this.core.rotatePairingPsk();
+  }
+
+  /**
+   * Operator gesture that opens the static-PIN pairing window (~5 minutes,
+   * admits one attempt). Required before each static PIN pairing attempt.
+   */
+  openPairingWindow(): void {
+    this.core.openPairingWindow();
+  }
+
+  /** Cancel an in-progress pairing attempt (sends pair/abort user_cancelled). */
+  cancelPairing(): void {
+    this.core.cancelPairing();
+  }
+
+  /** Whether a PIN pairing method is in terminal lockout (10 failures). */
+  isPairingLockedOut(method: PairMethod): boolean {
+    return this.core.isPairingLockedOut(method);
+  }
+
+  /** Local operator action that exits terminal lockout for a PIN method. */
+  clearPairingLockout(method: PairMethod): void {
+    this.core.clearPairingLockout(method);
+  }
+
   // Get current correction mode
   get correctionMode(): CorrectionMode {
     return this.scheduler.correctionMode;
@@ -355,6 +405,8 @@ export class SendspinPlayer {
 export * from "./types";
 export { SendspinTimeFilter } from "./core/time-filter";
 export { SendspinCore } from "./core/core";
+export { loadSendspinClientIdentity } from "./client-identity";
+export type { SendspinClientIdentity } from "./client-identity";
 export { SendspinDecoder } from "./audio/decoder";
 export { AudioScheduler } from "./audio/scheduler";
 

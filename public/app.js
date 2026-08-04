@@ -19,7 +19,6 @@ console.log(`Loading SDK from: ${sdkPath}`);
 // LocalStorage keys
 const STORAGE_KEYS = {
   SERVER_URL: "sendspin-server-url",
-  PLAYER_ID: "sendspin-player-id",
   VOLUME: "sendspin-volume",
   MUTED: "sendspin-muted",
   // Shared with the SDK, which persists the static delay under this key.
@@ -29,6 +28,7 @@ const STORAGE_KEYS = {
   CORRECTION_MODE: "sendspin-correction-mode",
   RESYNC_THRESHOLD: "sendspin-resync-threshold",
   DEADBAND_THRESHOLD: "sendspin-deadband-threshold",
+  STATIC_PIN: "sendspin-sample-static-pin",
 };
 
 // DOM Elements
@@ -56,6 +56,18 @@ const groupVolumeSlider = document.getElementById("group-volume-slider");
 const groupVolumeValue = document.getElementById("group-volume-value");
 const groupMuteBtn = document.getElementById("group-mute-btn");
 const groupMuteIcon = document.getElementById("group-mute-icon");
+const clientIdEl = document.getElementById("client-id");
+const pairingTokenEl = document.getElementById("pairing-token");
+const rotatePskBtn = document.getElementById("rotate-psk");
+const trustLevelEl = document.getElementById("trust-level");
+const unpairedAccessCheckbox = document.getElementById("unpaired-access");
+const pairingPinGroup = document.getElementById("pairing-pin-group");
+const pairingPinEl = document.getElementById("pairing-pin");
+const cancelPairingBtn = document.getElementById("cancel-pairing");
+const staticPinInput = document.getElementById("static-pin");
+const openPairingWindowBtn = document.getElementById("open-pairing-window");
+const pinLockoutEl = document.getElementById("pin-lockout");
+const clearLockoutBtn = document.getElementById("clear-lockout");
 
 // Status elements
 const connectionStatus = document.getElementById("connection-status");
@@ -88,18 +100,6 @@ const progressDuration = document.getElementById("progress-duration");
 // Player instance
 let player = null;
 let statusUpdateInterval = null;
-
-/**
- * Generate a unique player ID
- */
-function getPlayerId() {
-  const stored = localStorage.getItem(STORAGE_KEYS.PLAYER_ID);
-  if (stored) return stored;
-
-  const id = "sendspin-js-demo-" + Math.random().toString(36).substring(2, 10);
-  localStorage.setItem(STORAGE_KEYS.PLAYER_ID, id);
-  return id;
-}
 
 /**
  * Get server URL from query params
@@ -224,6 +224,65 @@ function resetStatusDisplay() {
   progressFill.style.width = "0%";
   progressCurrent.textContent = "--:--";
   progressDuration.textContent = "--:--";
+  clientIdEl.textContent = "-";
+  pairingTokenEl.textContent = "-";
+  trustLevelEl.textContent = "-";
+  pairingPinGroup.hidden = true;
+  pairingPinEl.textContent = "-";
+  pinLockoutEl.textContent = "-";
+}
+
+/**
+ * Populate the pairing panel from the current player instance
+ */
+function updatePairingDisplay() {
+  clientIdEl.textContent = player.clientId;
+  pairingTokenEl.textContent = pairingTokenForDisplay();
+  updateLockoutDisplay();
+}
+
+function isValidStaticPin(pin) {
+  return /^[0-9]{8}$/.test(pin);
+}
+
+function pairingTokenForDisplay() {
+  return player.pairingToken ?? "(no storage)";
+}
+
+/**
+ * Show which PIN methods are in terminal lockout.
+ */
+function updateLockoutDisplay() {
+  if (!player) return;
+  const locked = ["dynamic_pin", "static_pin"].filter((m) =>
+    player.isPairingLockedOut(m),
+  );
+  pinLockoutEl.textContent = locked.length ? locked.join(", ") : "none";
+}
+
+/**
+ * Handle Pairing PSK lifecycle events from the SDK
+ */
+function onPairing(event, detail) {
+  console.log("Pairing event:", event, detail ?? "");
+  if (event === "started") {
+    trustLevelEl.textContent = "pairing...";
+  } else if (event === "finalized") {
+    trustLevelEl.textContent = "user (just paired)";
+    showToast("Pairing complete", "success");
+  } else if (event === "aborted") {
+    trustLevelEl.textContent = `aborted (${detail ?? "unknown"})`;
+    showToast(`Pairing aborted: ${detail ?? "unknown"}`, "error");
+  }
+  updateLockoutDisplay();
+}
+
+/**
+ * Show or hide the dynamic pairing PIN (null = attempt ended).
+ */
+function onPairingPin(pin) {
+  pairingPinGroup.hidden = pin === null;
+  pairingPinEl.textContent = pin ?? "-";
 }
 
 /**
@@ -446,6 +505,11 @@ function loadSettings() {
     minBufferInput.value = sanitizeBufferMs(parseInt(savedMinBuffer, 10), 250);
   }
 
+  const savedStaticPin = localStorage.getItem(STORAGE_KEYS.STATIC_PIN);
+  if (savedStaticPin !== null) {
+    staticPinInput.value = savedStaticPin;
+  }
+
   const savedCorrectionMode = localStorage.getItem(
     STORAGE_KEYS.CORRECTION_MODE,
   );
@@ -536,6 +600,8 @@ function saveCorrectionMode(mode) {
  * Connect to the Sendspin server
  */
 async function connect() {
+  // Guard re-entry: the Enter-key handler bypasses the disabled connect button.
+  if (player) return;
   const rawUrl = serverUrlInput.value.trim();
 
   if (!rawUrl) {
@@ -594,9 +660,9 @@ async function connect() {
     );
 
     player = new SendspinPlayer({
-      playerId: getPlayerId(),
       baseUrl: serverUrl,
       clientName: "Sendspin Sample Player",
+      productName: "Sendspin JS Sample Player",
       requiredLeadTimeMs,
       minBufferMs,
       correctionMode: savedCorrectionMode,
@@ -611,11 +677,19 @@ async function connect() {
         syncDelayInput.value = delayMs;
         showToast(`Server set sync delay to ${delayMs}ms`, "info");
       },
+      unpairedAccess: unpairedAccessCheckbox.checked,
+      // Enables static-PIN pairing only once the field holds a complete PIN.
+      staticPin: isValidStaticPin(staticPinInput.value)
+        ? staticPinInput.value
+        : undefined,
+      onPairing,
+      onPairingPin,
       onStateChange,
     });
 
     await player.unlock();
     await player.connect();
+    updatePairingDisplay();
 
     // Apply saved volume
     player.setVolume(savedVolume);
@@ -824,6 +898,45 @@ function init() {
     const currentMuted = groupMuteIcon.textContent === "🔇";
     player.sendCommand("mute", { mute: !currentMuted });
   });
+  rotatePskBtn.addEventListener("click", () => {
+    if (!player) return;
+    player.rotatePairingPsk();
+    pairingTokenEl.textContent = pairingTokenForDisplay();
+    showToast("Pairing token rotated", "success");
+  });
+  staticPinInput.addEventListener("change", () => {
+    const pin = staticPinInput.value.trim();
+    if (pin && !isValidStaticPin(pin)) {
+      showToast("Static PIN must be exactly 8 digits", "error");
+      return;
+    }
+    localStorage.setItem(STORAGE_KEYS.STATIC_PIN, pin);
+    if (player) showToast("Static PIN applies on the next connect", "info");
+  });
+  openPairingWindowBtn.addEventListener("click", () => {
+    if (!player) {
+      showToast("Connect first", "error");
+      return;
+    }
+    player.openPairingWindow();
+    showToast("Pairing window open (~5 minutes, one attempt)", "info");
+  });
+  cancelPairingBtn.addEventListener("click", () => {
+    if (!player) return;
+    player.cancelPairing();
+    showToast("Pairing cancelled", "info");
+  });
+  clearLockoutBtn.addEventListener("click", () => {
+    if (!player) {
+      showToast("Connect first", "error");
+      return;
+    }
+    for (const method of ["dynamic_pin", "static_pin"]) {
+      player.clearPairingLockout(method);
+    }
+    updateLockoutDisplay();
+    showToast("PIN lockout cleared", "success");
+  });
 
   // Transport control event listeners
   document.querySelectorAll(".transport-btn").forEach((btn) => {
@@ -875,7 +988,6 @@ function init() {
   }
 
   console.log("Sendspin Sample Player initialized");
-  console.log("Player ID:", getPlayerId());
   if (isLocalDev) {
     console.log("Development mode: using local SDK build");
   }

@@ -14,9 +14,9 @@ See the SDK website to see Sendspin JS in action: https://sendspin.github.io/sen
 import { SendspinPlayer } from '@sendspin/sendspin-js';
 
 const player = new SendspinPlayer({
-  playerId: 'my-player-id',
   baseUrl: 'http://your-server:8095',
   clientName: 'My Web Player',
+  productName: 'My App',
   // Optional: "sync" (default), "quality" (no pitch shifts; not recommended for bad networks),
   // or "quality-local" (best for unsynced playback)
   correctionMode: 'sync',
@@ -84,7 +84,6 @@ sockets.
 ```typescript
 const ws = new WebSocket('ws://your-server:8095/sendspin');
 const player = new SendspinPlayer({
-  playerId: 'my-player',
   clientName: 'My Player',
   webSocket: ws,
 });
@@ -156,6 +155,74 @@ player.setRequiredLeadTimeMs(300);
 player.setMinBufferMs(1500);
 ```
 
+### Encryption and pairing
+
+Every connection is encrypted (Noise KKpsk2). By default the SDK connects
+with an unpaired (Sentinel-PSK) identity; pair with a server to upgrade to a
+trusted, per-server long-term PSK.
+
+```typescript
+const player = new SendspinPlayer({
+  baseUrl: 'http://your-server:8095',
+  suite: 'chacha',            // "chacha" (default) or "aesgcm"
+  unpairedAccess: true,       // admit unpaired playback; default true (see note below)
+  longTermPsks: [
+    { psk: 'base64url-psk', serverId: 'optional-server-id' },
+  ],
+  onPairing: (event, detail) => {
+    // event: "started" | "finalized" | "aborted"
+    console.log('Pairing:', event, detail);
+  },
+  // Dynamic PIN pairing: show the derived PIN to the operator (null = hide).
+  onPairingPin: (pin) => showPinDialog(pin),
+  minPinLength: 6,            // shortest dynamic PIN this client accepts (4-12)
+  // Static PIN pairing: this device's fixed 8-digit PIN.
+  staticPin: '31415926',
+});
+
+await player.connect();
+```
+
+Unpaired playback authenticates with the well-known Sentinel PSK, so it is
+exposed to an active man-in-the-middle. While it's on by default, you can set `unpairedAccess: false` to require pairing before any playback.
+
+The SDK supports all three pairing methods from the spec:
+
+- **Pairing PSK** (always available): transfer the client-bound pairing token.
+- **Dynamic PIN** (enabled by `onPairingPin`): the server starts pairing, the
+  SDK derives a one-time PIN and passes it to `onPairingPin` for display; the
+  operator enters it into the server.
+- **Static PIN** (enabled by `staticPin`): the operator enters this device's
+  fixed 8-digit PIN into the server, then makes a local gesture that calls
+  `player.openPairingWindow()` (window lasts ~5 minutes, one attempt).
+
+```typescript
+console.log('Client ID:', player.clientId);              // 43-char base64url pubkey
+console.log('Pairing token:', player.pairingToken);      // spec version 0, or null without storage
+
+// Rotate the Pairing PSK (e.g. if it may have leaked)
+const newPsk = player.rotatePairingPsk();
+
+player.openPairingWindow();                      // static PIN: operator gesture
+player.cancelPairing();                          // abort an in-progress attempt
+player.isPairingLockedOut('dynamic_pin');        // terminal lockout after 10 failures
+player.clearPairingLockout('dynamic_pin');       // local operator action that exits lockout
+```
+
+`player.pairingToken` is the version 0 token defined by the current specification. Music Assistant installations using aiosendspin 7.0.0 do not accept the current token format; use PIN pairing until the backend supports version 0.
+Identity and pairing require `storage` (defaults to `localStorage`); without
+it, `clientId` is still generated per session but `pairingPsk`,
+`pairingToken`, and `rotatePairingPsk()` return `null`.
+
+Apps that key their own state on the client id can read it before a player
+exists. A player built afterwards on the same storage adopts this identity.
+
+```typescript
+import { loadSendspinClientIdentity } from '@sendspin/sendspin-js';
+
+const { clientId, pairingPsk, pairingToken } = loadSendspinClientIdentity();
+```
+
 ### Core + scheduler as separate layers
 
 Apps that need the decoded PCM stream (e.g. visualizers) can use
@@ -188,8 +255,9 @@ Then browse to http://localhost:6001
 
 ## Testing
 
-The E2E tests run against a real [aiosendspin](https://pypi.org/project/aiosendspin/)
-server, so they need a Python virtualenv at `.venv`. Bootstrap it once:
+The E2E tests run directly against
+[aiosendspin](https://github.com/Sendspin/aiosendspin). Bootstrap the `.venv`
+once:
 
 ```
 ./scripts/setup.sh

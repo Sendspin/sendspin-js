@@ -10,7 +10,9 @@ import type {
   GoodbyeReason,
   GroupUpdate,
   MessageType,
+  PairMethodDescriptor,
   ServerCommand,
+  ServerActivate,
   ServerMessage,
   ServerState,
   ServerTime,
@@ -20,7 +22,6 @@ import type {
 } from "../types";
 import type { StreamHandler } from "../internal-types";
 import type { StateManager } from "./state-manager";
-import type { WebSocketManager } from "./websocket-manager";
 import { TimeSyncManager } from "./time-sync-manager";
 import { getDefaultBufferCapacity, getSupportedFormats } from "./codec-support";
 import { clampSyncDelayMs } from "../sync-delay";
@@ -36,7 +37,6 @@ type PlayerStatePayload = NonNullable<ClientState["payload"]["player"]>;
 // Snapshot of the diffable player fields. supported_commands is static, sent
 // only in the initial full state, so it is not tracked here.
 interface SentPlayerState {
-  state: NonNullable<PlayerStatePayload["state"]>;
   volume: number;
   muted: boolean;
   static_delay_ms: number;
@@ -50,8 +50,20 @@ function assertBufferMs(value: number, name: string): void {
   }
 }
 
+export interface MessageSender {
+  sendControl(msg: object): void;
+}
+
+export interface HelloContext {
+  trustLevel(): "user" | "none";
+  /** Pairing-method descriptors for client/hello ([] = pairing unavailable). */
+  pairMethods(): PairMethodDescriptor[];
+  unpairedAccess: boolean;
+}
+
 export interface ProtocolHandlerConfig {
   clientName?: string;
+  productName?: string;
   codecs?: Codec[];
   bufferCapacity?: number;
   requiredLeadTimeMs?: number;
@@ -64,6 +76,7 @@ export interface ProtocolHandlerConfig {
 
 export class ProtocolHandler {
   private clientName: string;
+  private productName?: string;
   private codecs: Codec[];
   private bufferCapacity: number | undefined;
   private requiredLeadTimeMs: number;
@@ -73,7 +86,9 @@ export class ProtocolHandler {
   private onDelayCommand?: (delayMs: number) => void;
   private getExternalVolume?: () => { volume: number; muted: boolean };
   private timeSyncManager: TimeSyncManager;
-  private hasReceivedServerHello = false;
+  private activated = false;
+  private activeRoles: Set<string> | null = null;
+  private pairingSuspended = false;
 
   // Last player payload sent to the current server connection, or null when no
   // full state has been sent yet. Cleared on (re)connect so the first send is
@@ -81,14 +96,15 @@ export class ProtocolHandler {
   private lastSentPlayer: SentPlayerState | null = null;
 
   constructor(
-    private playerId: string,
-    private wsManager: WebSocketManager,
+    private sender: MessageSender,
+    private helloContext: HelloContext,
     private streamHandler: StreamHandler,
     private stateManager: StateManager,
     private timeFilter: SendspinTimeFilter,
     config: ProtocolHandlerConfig = {},
   ) {
     this.clientName = config.clientName ?? "Sendspin Player";
+    this.productName = config.productName;
     this.codecs = config.codecs ?? ["opus", "flac", "pcm"];
     // Left undefined so the capacity is derived from the formats actually
     // advertised in client/hello (see sendClientHello).
@@ -103,34 +119,21 @@ export class ProtocolHandler {
     this.onDelayCommand = config.onDelayCommand;
     this.getExternalVolume = config.getExternalVolume;
     this.timeSyncManager = new TimeSyncManager(
-      wsManager,
+      sender,
       stateManager,
       timeFilter,
     );
   }
 
-  // Handle WebSocket messages
-  handleMessage(event: MessageEvent): void {
-    if (typeof event.data === "string") {
-      // JSON message
-      const message = JSON.parse(event.data) as ServerMessage;
-      this.handleServerMessage(message);
-    } else if (event.data instanceof ArrayBuffer) {
-      // Binary message (audio chunk)
-      this.streamHandler.handleBinaryMessage(event.data);
-    } else if (event.data instanceof Blob) {
-      // Convert Blob to ArrayBuffer
-      event.data.arrayBuffer().then((buffer) => {
-        this.streamHandler.handleBinaryMessage(buffer);
-      });
-    }
-  }
-
   // Handle server messages
-  private handleServerMessage(message: ServerMessage): void {
+  handleServerMessage(message: ServerMessage): void {
     switch (message.type) {
       case "server/hello":
         this.handleServerHello();
+        break;
+
+      case "server/activate":
+        this.handleServerActivate(message as ServerActivate);
         break;
 
       case "server/time":
@@ -163,16 +166,34 @@ export class ProtocolHandler {
     }
   }
 
-  // Handle server hello
+  // Handle server hello: reply with client/hello. client/state and time-sync
+  // are deferred to server/activate.
   private handleServerHello(): void {
     console.log("Sendspin: Connected to server");
-    // Per spec: Send initial client/state immediately after server/hello
-    this.hasReceivedServerHello = true;
+    this.sendClientHello();
+  }
+
+  // Handle server/activate: start the initial client/state, time-sync, and
+  // periodic state updates. Guarded so a repeat activate is a no-op.
+  private handleServerActivate(message: ServerActivate): void {
+    this.pairingSuspended = false;
+    let rolesChanged = false;
+    if (message.payload.active_roles !== undefined) {
+      const nextRoles = new Set(message.payload.active_roles);
+      rolesChanged =
+        this.activeRoles === null ||
+        nextRoles.size !== this.activeRoles.size ||
+        [...nextRoles].some((role) => !this.activeRoles!.has(role));
+      this.activeRoles = nextRoles;
+    }
+    if (this.activated) {
+      if (rolesChanged) this.sendStateUpdate();
+      return;
+    }
+    this.activated = true;
     this.sendStateUpdate();
-    // Start time synchronization with fixed bursts.
     this.timeSyncManager.startAndSchedule();
 
-    // Start periodic state updates
     const stateInterval = globalThis.setInterval(
       () => this.sendStateUpdate(),
       STATE_UPDATE_INTERVAL,
@@ -193,6 +214,27 @@ export class ProtocolHandler {
 
   stopTimeSync(): void {
     this.timeSyncManager.stop();
+  }
+
+  suspendForPairing(): void {
+    this.pairingSuspended = true;
+    this.activated = false;
+    this.activeRoles = new Set();
+    this.timeSyncManager.stop();
+    this.stateManager.clearStateUpdateInterval();
+  }
+
+  /**
+   * Clear the activate guard so the next server/activate (e.g. after a reconnect on a
+   * reused handler) restarts time-sync and state updates.
+   * @internal called by SendspinCore on transport close, not part of the public API.
+   */
+  resetActivation(preserveActiveRoles = false): void {
+    this.pairingSuspended = false;
+    this.activated = false;
+    if (!preserveActiveRoles) this.activeRoles = null;
+    this.timeSyncManager.stop();
+    this.stateManager.clearStateUpdateInterval();
   }
 
   private handleStreamStart(message: StreamStart): void {
@@ -297,18 +339,19 @@ export class ProtocolHandler {
     this.sendStateUpdate(true);
   }
 
-  // Send client hello with player identification
+  // client_id and version live in client/init, not the hello.
   sendClientHello(): void {
     const supportedFormats = getSupportedFormats(this.codecs);
     const hello: ClientHello = {
       type: "client/hello" as MessageType.CLIENT_HELLO,
       payload: {
-        client_id: this.playerId,
         name: this.clientName,
-        version: 1,
         supported_roles: ["player@v1", "controller@v1", "metadata@v1"],
+        trust_level: this.helloContext.trustLevel(),
+        supported_pair_methods: this.helloContext.pairMethods(),
+        unpaired_access: { enabled: this.helloContext.unpairedAccess },
         device_info: {
-          product_name: "Web Browser",
+          product_name: this.productName,
           manufacturer:
             (typeof navigator !== "undefined" && navigator.vendor) || "Unknown",
           software_version:
@@ -324,9 +367,8 @@ export class ProtocolHandler {
       },
     };
     // Reset so the first client/state after connect is a full snapshot.
-    this.hasReceivedServerHello = false;
     this.lastSentPlayer = null;
-    this.wsManager.send(hello);
+    this.sender.sendControl(hello);
   }
 
   setRequiredLeadTimeMs(leadTimeMs: number): void {
@@ -346,8 +388,7 @@ export class ProtocolHandler {
   // When skipHardwareRead is true, use stateManager values instead of reading from hardware.
   // This avoids race conditions when responding to volume commands.
   sendStateUpdate(skipHardwareRead = false): void {
-    if (!this.hasReceivedServerHello) return;
-
+    if (this.pairingSuspended) return;
     let volume = this.stateManager.volume;
     let muted = this.stateManager.muted;
     if (!skipHardwareRead && this.useHardwareVolume && this.getExternalVolume) {
@@ -359,45 +400,51 @@ export class ProtocolHandler {
     const syncDelayMs = this.streamHandler.getSyncDelayMs();
     const staticDelayMs = clampSyncDelayMs(syncDelayMs);
 
-    const current: SentPlayerState = {
-      state: this.stateManager.playerState,
-      volume,
-      muted,
-      static_delay_ms: staticDelayMs,
-      required_lead_time_ms: this.requiredLeadTimeMs,
-      min_buffer_ms: this.minBufferMs,
+    const payload: ClientState["payload"] = {
+      available: true,
     };
+    if (this.activeRoles === null || this.activeRoles.has("player@v1")) {
+      const current: SentPlayerState = {
+        volume,
+        muted,
+        static_delay_ms: staticDelayMs,
+        required_lead_time_ms: this.requiredLeadTimeMs,
+        min_buffer_ms: this.minBufferMs,
+      };
 
-    const last = this.lastSentPlayer;
-    let player: PlayerStatePayload;
-    if (last === null) {
-      // Full state: every field plus the static supported_commands.
-      player = { ...current, supported_commands: ["set_static_delay"] };
-    } else {
-      // Delta: only changed fields.
-      player = {};
-      if (current.state !== last.state) player.state = current.state;
-      if (current.static_delay_ms !== last.static_delay_ms)
-        player.static_delay_ms = current.static_delay_ms;
-      if (current.volume !== last.volume) player.volume = current.volume;
-      if (current.muted !== last.muted) player.muted = current.muted;
-      if (current.required_lead_time_ms !== last.required_lead_time_ms)
-        player.required_lead_time_ms = current.required_lead_time_ms;
-      if (current.min_buffer_ms !== last.min_buffer_ms)
-        player.min_buffer_ms = current.min_buffer_ms;
+      const last = this.lastSentPlayer;
+      if (last === null) {
+        // Full state: every field plus the static supported_commands.
+        payload.player = {
+          ...current,
+          supported_commands: ["set_static_delay"],
+        };
+      } else {
+        // Delta: only changed fields.
+        const player: PlayerStatePayload = {};
+        if (current.static_delay_ms !== last.static_delay_ms)
+          player.static_delay_ms = current.static_delay_ms;
+        if (current.volume !== last.volume) player.volume = current.volume;
+        if (current.muted !== last.muted) player.muted = current.muted;
+        if (current.required_lead_time_ms !== last.required_lead_time_ms)
+          player.required_lead_time_ms = current.required_lead_time_ms;
+        if (current.min_buffer_ms !== last.min_buffer_ms)
+          player.min_buffer_ms = current.min_buffer_ms;
+        payload.player = player;
+      }
+      this.lastSentPlayer = current;
     }
 
     const message: ClientState = {
       type: "client/state" as MessageType.CLIENT_STATE,
-      payload: { player },
+      payload,
     };
-    this.lastSentPlayer = current;
-    this.wsManager.send(message);
+    this.sender.sendControl(message);
   }
 
   // Send goodbye message before disconnecting
   sendGoodbye(reason: GoodbyeReason): void {
-    this.wsManager.send({
+    this.sender.sendControl({
       type: "client/goodbye" as MessageType.CLIENT_GOODBYE,
       payload: {
         reason,
@@ -410,7 +457,9 @@ export class ProtocolHandler {
     command: T,
     params: ControllerCommands[T],
   ): void {
-    this.wsManager.send({
+    if (this.pairingSuspended || !this.activeRoles?.has("controller@v1"))
+      return;
+    this.sender.sendControl({
       type: "client/command" as MessageType.CLIENT_COMMAND,
       payload: {
         controller: {

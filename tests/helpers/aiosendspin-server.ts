@@ -1,269 +1,365 @@
-/**
- * Node.js wrapper around the aiosendspin Python test server.
- *
- * Spawns the Python server as a subprocess and communicates via a
- * line-based stdin/stdout protocol. The real aiosendspin server handles
- * all protocol details (handshake, time sync, codec negotiation, audio
- * encoding, etc.) — no mocking.
- */
-
-import { spawn, type ChildProcess } from "child_process";
-import { createInterface, type Interface } from "readline";
-import { resolve } from "path";
+import { spawn, type ChildProcess } from "node:child_process";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { delimiter, join, resolve } from "node:path";
+import { createInterface, type Interface } from "node:readline";
 
 const PYTHON_BIN = resolve(import.meta.dirname, "../../.venv/bin/python");
 const SERVER_SCRIPT = resolve(import.meta.dirname, "sendspin-server.py");
+const STATE_PREFIX = join(tmpdir(), "sendspin-js-aiosendspin-");
+
+export type PskCategory = "sentinel" | "pairing" | "long_term";
+export type PairMethod = "dynamic_pin" | "pairing_psk" | "static_pin";
+
+export interface ClientStatus {
+  client_id: string | null;
+  connected: boolean;
+  psk_category: PskCategory | null;
+  trust_level: "none" | "user" | null;
+  active_roles: string[];
+  supported_pair_methods: PairMethod[];
+  has_pairing_record: boolean;
+}
+
+export interface PairingResult extends ClientStatus {
+  status: "success" | "aborted" | "rejected" | "error";
+  reason: string | null;
+}
+
+export type PinWaitResult =
+  | PairingResult
+  | { status: "pin_requested" | "timeout" };
+
+export interface ReceivedClientState {
+  accepted_by_strict_parser: boolean;
+  parsed_payload: {
+    available: boolean;
+    player: {
+      volume: number;
+      muted: boolean;
+      static_delay_ms: number;
+      required_lead_time_ms: number;
+      min_buffer_ms: number;
+      supported_commands: string[];
+      state?: string;
+    };
+  };
+  semantic_state: {
+    available: boolean;
+    player: {
+      volume: number;
+      muted: boolean;
+      static_delay_ms: number;
+      required_lead_time_ms: number;
+      min_buffer_ms: number;
+      supported_commands: string[];
+    };
+  };
+}
+
+interface CommandResponse<T> {
+  ok: boolean;
+  result?: T;
+  error?: string;
+}
+
+export interface KillableProcess {
+  exitCode: number | null;
+  signalCode: NodeJS.Signals | null;
+  kill(signal: NodeJS.Signals): boolean;
+}
+
+export async function awaitProcessExit(
+  proc: KillableProcess,
+  done: Promise<void>,
+  timeoutMs: number,
+): Promise<void> {
+  const waitForExit = () =>
+    new Promise<boolean>((resolveExited) => {
+      let settled = false;
+      const finish = (value: boolean) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolveExited(value);
+      };
+      const timer = setTimeout(() => finish(false), timeoutMs);
+      void done.then(() => finish(true));
+    });
+  if (await waitForExit()) return;
+  if (proc.exitCode === null && proc.signalCode === null) {
+    if (!proc.kill("SIGKILL")) {
+      throw new Error("Failed to deliver SIGKILL to child process");
+    }
+  }
+  if (!(await waitForExit())) {
+    throw new Error("Child process did not exit after SIGKILL");
+  }
+}
 
 export class AiosendspinServer {
   private proc: ChildProcess | null = null;
+  private procDone: Promise<void> | null = null;
   private rl: Interface | null = null;
   private responseQueue: Array<{
     resolve: (line: string) => void;
-    reject: (err: Error) => void;
+    reject: (error: Error) => void;
   }> = [];
-  // Responses owed to timed-out reads. The protocol is one line per command,
-  // so a late line belongs to the read that already gave up and must be
-  // dropped rather than handed to the next waiter.
   private staleLines = 0;
-  // Tail of recent stderr lines, dumped into errors so a Python crash surfaces
-  // instead of just a generic readLine timeout.
   private stderrTail: string[] = [];
-  private static STDERR_TAIL_MAX = 50;
-  // Final error after the subprocess dies. Pending and subsequent reads are
-  // rejected with this rather than waiting out their full timeout.
   private procError: Error | null = null;
-  // Set once close() begins so the exit listener treats the resulting exit as
-  // expected and does not poison procError with a misleading message.
-  private closing = false;
+  private stateDir = "";
 
-  /** Port the server is listening on (available after start()). */
   port = 0;
 
-  /**
-   * Start the aiosendspin test server.
-   * Resolves when the server is ready to accept connections.
-   */
+  get url(): string {
+    if (!this.port) throw new Error("Server is not running");
+    return `ws://127.0.0.1:${this.port}/sendspin`;
+  }
+
   async start(): Promise<void> {
-    this.proc = spawn(PYTHON_BIN, [SERVER_SCRIPT], {
+    if (!this.stateDir) this.stateDir = await mkdtemp(STATE_PREFIX);
+    await this.launch();
+  }
+
+  async restart(): Promise<void> {
+    await this.stopProcess();
+    await this.launch();
+  }
+
+  private async launch(): Promise<void> {
+    this.procError = null;
+    this.stderrTail = [];
+    this.staleLines = 0;
+    this.proc = spawn(PYTHON_BIN, [SERVER_SCRIPT, this.stateDir], {
+      env: {
+        HOME: this.stateDir,
+        LANG: process.env.LANG ?? "C.UTF-8",
+        LC_ALL: process.env.LC_ALL ?? process.env.LANG ?? "C.UTF-8",
+        PATH: `${resolve(import.meta.dirname, "../../.venv/bin")}${delimiter}${
+          process.env.PATH ?? "/usr/bin:/bin"
+        }`,
+        PYTHONUNBUFFERED: "1",
+        TMPDIR: tmpdir(),
+      },
       stdio: ["pipe", "pipe", "pipe"],
     });
+    const proc = this.proc;
+    this.procDone = new Promise((resolveDone) => {
+      let settled = false;
+      const settle = () => {
+        if (settled) return;
+        settled = true;
+        resolveDone();
+      };
+      proc.once("error", (error) => {
+        this.failProcess(`child process error: ${error.message}`);
+      });
+      proc.once("exit", (code, signal) => {
+        if (code !== 0 && !this.procError) {
+          this.failProcess(
+            `subprocess exited unexpectedly (code=${code}, signal=${signal})`,
+          );
+        }
+        settle();
+      });
+      proc.once("close", settle);
+    });
 
-    this.rl = createInterface({ input: this.proc.stdout! });
-
-    this.rl.on("line", (line: string) => {
+    this.rl = createInterface({ input: proc.stdout! });
+    this.rl.on("line", (line) => {
       if (this.staleLines > 0) {
         this.staleLines--;
         return;
       }
-      const waiter = this.responseQueue.shift();
-      if (waiter) {
-        waiter.resolve(line);
-      }
+      this.responseQueue.shift()?.resolve(line);
     });
-
-    // Keep a ring of stderr so a Python traceback is visible in the error
-    // surfaced to vitest instead of just a generic readLine timeout.
-    this.proc.stderr!.on("data", (data: Buffer) => {
-      const lines = data.toString("utf8").split("\n");
-      for (const line of lines) {
+    proc.stderr!.on("data", (data: Buffer) => {
+      for (const line of data.toString("utf8").split("\n")) {
         if (!line) continue;
         this.stderrTail.push(line);
-        if (this.stderrTail.length > AiosendspinServer.STDERR_TAIL_MAX) {
-          this.stderrTail.shift();
-        }
+        if (this.stderrTail.length > 50) this.stderrTail.shift();
       }
     });
 
-    // Wrong python path, missing venv, or any other spawn failure would
-    // otherwise hang every readLine for the full timeout.
-    this.proc.on("error", (err: Error) => {
-      this.failProcess(`spawn failed: ${err.message}`);
-    });
-    this.proc.on("exit", (code, signal) => {
-      if (this.closing) return;
-      // Treat any exit before close() as fatal — pending readers can't be
-      // satisfied by a dead subprocess.
-      this.failProcess(
-        `subprocess exited unexpectedly (code=${code}, signal=${signal})`,
-      );
-    });
-
-    // Wait for READY <port>
-    const ready = await this.readLine(10000);
-    const match = ready.match(/^READY (\d+)$/);
-    if (!match) {
-      throw new Error(`Expected READY <port>, got: ${ready}`);
-    }
-    this.port = parseInt(match[1], 10);
+    const ready = JSON.parse(await this.readLine(10_000)) as {
+      ready?: { port?: number };
+    };
+    if (!ready.ready?.port) throw new Error("Server did not report a port");
+    this.port = ready.ready.port;
   }
 
   private formatStderrTail(): string {
-    if (this.stderrTail.length === 0) return "";
-    return `\nstderr tail:\n${this.stderrTail.join("\n")}`;
+    return this.stderrTail.length
+      ? `\nstderr tail:\n${this.stderrTail.join("\n")}`
+      : "";
   }
 
   private failProcess(reason: string): void {
     if (this.procError) return;
     this.procError = new Error(reason + this.formatStderrTail());
-    const queued = this.responseQueue.splice(0);
-    for (const waiter of queued) {
+    for (const waiter of this.responseQueue.splice(0)) {
       waiter.reject(this.procError);
     }
   }
 
-  /** Send a command and wait for the response line. */
-  private async sendCommand(
-    cmd: string,
-    timeoutMs: number = 10000,
-  ): Promise<string> {
-    if (!this.proc?.stdin?.writable) {
-      throw new Error("Server process not running");
-    }
-    this.proc.stdin.write(cmd + "\n");
-    return this.readLine(timeoutMs);
-  }
-
-  /** Read the next line from stdout with a timeout. */
   private readLine(timeoutMs: number): Promise<string> {
     if (this.procError) return Promise.reject(this.procError);
-    return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        // Remove ourselves from the queue and discard the eventual late line.
-        const idx = this.responseQueue.indexOf(waiter);
-        if (idx !== -1) {
-          this.responseQueue.splice(idx, 1);
-          this.staleLines++;
-        }
-        reject(
-          new Error(
-            `Timed out reading from server (${timeoutMs}ms)` +
-              this.formatStderrTail(),
-          ),
-        );
-      }, timeoutMs);
-
+    return new Promise((resolveLine, rejectLine) => {
       const waiter = {
         resolve: (line: string) => {
           clearTimeout(timer);
-          resolve(line);
+          resolveLine(line);
         },
-        reject: (err: Error) => {
+        reject: (error: Error) => {
           clearTimeout(timer);
-          reject(err);
+          rejectLine(error);
         },
       };
-
+      const timer = setTimeout(() => {
+        const index = this.responseQueue.indexOf(waiter);
+        if (index !== -1) {
+          this.responseQueue.splice(index, 1);
+          this.staleLines++;
+        }
+        rejectLine(
+          new Error(`Server command timed out${this.formatStderrTail()}`),
+        );
+      }, timeoutMs);
       this.responseQueue.push(waiter);
     });
   }
 
-  /**
-   * Wait for a client to connect to the server.
-   * Returns the client ID.
-   */
-  async waitForClient(): Promise<string> {
-    const response = await this.sendCommand("WAIT_CLIENT", 10000);
-    const match = response.match(/^CLIENT_CONNECTED (.+)$/);
-    if (!match) {
-      throw new Error(`Expected CLIENT_CONNECTED <id>, got: ${response}`);
+  private async sendCommand<T>(
+    command: string,
+    args: Record<string, unknown> = {},
+    timeoutMs = 10_000,
+  ): Promise<T> {
+    if (!this.proc?.stdin?.writable) throw new Error("Server is not running");
+    this.proc.stdin.write(`${JSON.stringify({ command, args })}\n`);
+    const response = JSON.parse(
+      await this.readLine(timeoutMs),
+    ) as CommandResponse<T>;
+    if (!response.ok) {
+      throw new Error(
+        `${command} failed: ${response.error ?? "unknown error"}` +
+          this.formatStderrTail(),
+      );
     }
-    return match[1];
+    return response.result as T;
   }
 
-  /** Tell the server to start a PCM stream. */
+  waitForClient(timeoutMs = 10_000): Promise<ClientStatus> {
+    return this.sendCommand(
+      "wait_client",
+      { timeout_ms: timeoutMs },
+      timeoutMs + 1_000,
+    );
+  }
+
+  status(clientId?: string): Promise<ClientStatus> {
+    return this.sendCommand("status", { client_id: clientId });
+  }
+
+  trustUnpaired(clientId: string): Promise<ClientStatus> {
+    return this.sendCommand("trust_unpaired", { client_id: clientId });
+  }
+
+  waitForClientState(
+    clientId: string,
+    expectedVolume: number,
+    timeoutMs = 10_000,
+  ): Promise<ReceivedClientState> {
+    return this.sendCommand(
+      "wait_client_state",
+      {
+        client_id: clientId,
+        expected_volume: expectedVolume,
+        timeout_ms: timeoutMs,
+      },
+      timeoutMs + 1_000,
+    );
+  }
+
+  async pairWithToken(token: string): Promise<PairingResult> {
+    return this.sendCommand<PairingResult>("pair_token", { token }, 35_000);
+  }
+
+  async beginPinPairing(method: "dynamic_pin" | "static_pin"): Promise<void> {
+    await this.sendCommand("begin_pin", { method });
+  }
+
+  waitForPinRequest(timeoutMs = 10_000): Promise<PinWaitResult> {
+    return this.sendCommand(
+      "wait_pin",
+      { timeout_ms: timeoutMs },
+      timeoutMs + 1_000,
+    );
+  }
+
+  submitPin(pin: string): Promise<PairingResult> {
+    return this.sendCommand("submit_pin", { pin }, 35_000);
+  }
+
+  async hasPairingRecord(clientId: string): Promise<boolean> {
+    return (await this.status(clientId)).has_pairing_record;
+  }
+
   async streamStart(): Promise<void> {
-    const response = await this.sendCommand("STREAM_START");
-    if (response !== "OK") {
-      throw new Error(`STREAM_START failed: ${response}`);
-    }
+    await this.sendCommand("stream_start");
   }
 
-  /** Tell the server to send audio (sine wave) for the given duration. */
   async sendAudio(durationMs: number): Promise<void> {
-    const response = await this.sendCommand(`SEND_AUDIO ${durationMs}`);
-    if (response !== "OK") {
-      throw new Error(`SEND_AUDIO failed: ${response}`);
-    }
+    await this.sendCommand("send_audio", { duration_ms: durationMs });
   }
 
-  /** Tell the server to send stream/clear (seek). */
   async streamClear(): Promise<void> {
-    const response = await this.sendCommand("STREAM_CLEAR");
-    if (response !== "OK") {
-      throw new Error(`STREAM_CLEAR failed: ${response}`);
-    }
+    await this.sendCommand("stream_clear");
   }
 
-  /** Tell the server to send stream/end. */
   async streamEnd(): Promise<void> {
-    const response = await this.sendCommand("STREAM_END");
-    if (response !== "OK") {
-      throw new Error(`STREAM_END failed: ${response}`);
-    }
+    await this.sendCommand("stream_end");
   }
 
-  /** Tell the server to send a volume command. */
   async setVolume(volume: number): Promise<void> {
-    const response = await this.sendCommand(`VOLUME ${volume}`);
-    if (response !== "OK") {
-      throw new Error(`VOLUME failed: ${response}`);
-    }
+    await this.sendCommand("volume", { volume });
   }
 
-  /** Tell the server to send a mute command. */
   async setMute(muted: boolean): Promise<void> {
-    const response = await this.sendCommand(`MUTE ${muted}`);
-    if (response !== "OK") {
-      throw new Error(`MUTE failed: ${response}`);
-    }
+    await this.sendCommand("mute", { muted });
   }
 
-  /** Tell the server to send a set_static_delay command. */
   async setDelay(delayMs: number): Promise<void> {
-    const response = await this.sendCommand(`SET_DELAY ${delayMs}`);
-    if (response !== "OK") {
-      throw new Error(`SET_DELAY failed: ${response}`);
-    }
+    await this.sendCommand("set_delay", { delay_ms: delayMs });
   }
 
-  /** Gracefully shut down the server. */
-  async close(): Promise<void> {
-    if (!this.proc) return;
-    this.closing = true;
-
-    try {
-      const response = await this.sendCommand("SHUTDOWN", 5000);
-      if (response !== "BYE") {
-        console.warn(`Expected BYE, got: ${response}`);
+  private async stopProcess(): Promise<void> {
+    const proc = this.proc;
+    const done = this.procDone;
+    if (!proc) return;
+    if (proc.exitCode === null && proc.signalCode === null) {
+      try {
+        await this.sendCommand("shutdown", {}, 5_000);
+      } catch {
+        proc.kill("SIGTERM");
       }
-    } catch {
-      // Process may already be dead
     }
-
+    if (done) {
+      await awaitProcessExit(proc, done, 3_000);
+    }
     this.rl?.close();
     this.rl = null;
-
-    // Send SIGTERM, escalate to SIGKILL after 3s. Recheck exitCode after
-    // attaching the listener so a race with a synchronous exit short-circuits.
-    if (this.proc && this.proc.exitCode === null) {
-      this.proc.kill("SIGTERM");
-      const proc = this.proc;
-      await new Promise<void>((resolve) => {
-        const timer = setTimeout(() => {
-          proc.kill("SIGKILL");
-          resolve();
-        }, 3000);
-        proc.on("exit", () => {
-          clearTimeout(timer);
-          resolve();
-        });
-        if (proc.exitCode !== null) {
-          clearTimeout(timer);
-          resolve();
-        }
-      });
-    }
-
     this.proc = null;
+    this.procDone = null;
+    this.port = 0;
+  }
+
+  async close(): Promise<void> {
+    await this.stopProcess();
+    const stateDir = this.stateDir;
+    this.stateDir = "";
+    if (stateDir.startsWith(STATE_PREFIX)) {
+      await rm(stateDir, { recursive: true, force: true });
+    }
   }
 }
