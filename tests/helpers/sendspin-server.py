@@ -14,6 +14,7 @@ from typing import Any
 
 from aiohttp import web
 from aiohttp.test_utils import TestServer as AiohttpTestServer
+from aiosendspin.models.core import ClientStateMessage
 from aiosendspin.models.types import PairMethod
 from aiosendspin.noise.keys import Identity, b64url_decode
 from aiosendspin.noise.pairing import PairingAbortError, PairingAttempt
@@ -25,6 +26,7 @@ from aiosendspin.server import (
     SendspinEvent,
     SendspinServer,
 )
+from aiosendspin.server.connection import SendspinConnection
 
 
 def generate_sine_pcm(
@@ -64,6 +66,8 @@ class HarnessServer:
         self.pin_task: asyncio.Task[dict[str, Any]] | None = None
         self.pin_future: asyncio.Future[str] | None = None
         self.pin_requested: asyncio.Event | None = None
+        self.parsed_client_state: dict[str, Any] | None = None
+        self.parsed_client_state_accepted = False
 
     async def start(self) -> int:
         """Start a Noise-only server on an ephemeral loopback port."""
@@ -81,6 +85,7 @@ class HarnessServer:
             allow_noncompliant_clients=False,
             min_pin_length=6,
         )
+        self._install_client_state_capture()
         self.server.add_event_listener(self._on_event)
         app = web.Application()
         app.router.add_get(SendspinServer.API_PATH, self.server.on_client_connect)
@@ -88,6 +93,25 @@ class HarnessServer:
         await self.http_server.start_server()
         assert self.http_server.port is not None
         return self.http_server.port
+
+    def _install_client_state_capture(self) -> None:
+        """Capture the same parsed payload that upstream validates in strict mode."""
+        original_handle_message = SendspinConnection._handle_message
+
+        async def capture(
+            connection: SendspinConnection,
+            message: Any,
+            timestamp_us: int,
+        ) -> None:
+            if isinstance(message, ClientStateMessage):
+                self.parsed_client_state = json.loads(message.payload.to_json())
+                self.parsed_client_state_accepted = False
+                await original_handle_message(connection, message, timestamp_us)
+                self.parsed_client_state_accepted = True
+                return
+            await original_handle_message(connection, message, timestamp_us)
+
+        SendspinConnection._handle_message = capture
 
     def _load_identity(self) -> Identity:
         key_path = self.state_dir / "identity.key"
@@ -160,23 +184,35 @@ class HarnessServer:
             while True:
                 client = self.server.get_client(client_id) if self.server else None
                 role = client.role("player@v1") if client is not None else None
+                parsed_player = (
+                    self.parsed_client_state.get("player")
+                    if self.parsed_client_state is not None
+                    else None
+                )
                 if (
                     client is not None
                     and client.is_connected
                     and role is not None
                     and role.get_player_volume() == expected_volume
+                    and self.parsed_client_state_accepted
+                    and isinstance(parsed_player, dict)
+                    and parsed_player.get("volume") == expected_volume
                 ):
                     return {
-                        "available": client.available,
-                        "player": {
-                            "volume": role.get_player_volume(),
-                            "muted": role.get_player_muted(),
-                            "static_delay_ms": role.get_static_delay_ms(),
-                            "required_lead_time_ms": role.required_lead_time_ms,
-                            "min_buffer_ms": role.min_buffer_ms,
-                            "supported_commands": [
-                                command.value for command in role.state_supported_commands
-                            ],
+                        "accepted_by_strict_parser": True,
+                        "parsed_payload": self.parsed_client_state,
+                        "semantic_state": {
+                            "available": client.available,
+                            "player": {
+                                "volume": role.get_player_volume(),
+                                "muted": role.get_player_muted(),
+                                "static_delay_ms": role.get_static_delay_ms(),
+                                "required_lead_time_ms": role.required_lead_time_ms,
+                                "min_buffer_ms": role.min_buffer_ms,
+                                "supported_commands": [
+                                    command.value for command in role.state_supported_commands
+                                ],
+                            },
                         },
                     }
                 await asyncio.sleep(0.01)

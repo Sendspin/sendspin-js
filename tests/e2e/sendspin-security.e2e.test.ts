@@ -301,7 +301,7 @@ describe("Sendspin encryption and pairing E2E (aiosendspin)", () => {
     const trusted = await server.trustUnpaired(connection.core.clientId);
     expect(trusted.active_roles).toContain("player@v1");
     const state = await server.waitForClientState(connection.core.clientId, 42);
-    expect(state).toEqual({
+    const expectedState = {
       available: true,
       player: {
         volume: 42,
@@ -311,8 +311,11 @@ describe("Sendspin encryption and pairing E2E (aiosendspin)", () => {
         min_buffer_ms: 250,
         supported_commands: ["set_static_delay"],
       },
-    });
-    expect(state.player).not.toHaveProperty("state");
+    };
+    expect(state.accepted_by_strict_parser).toBe(true);
+    expect(state.parsed_payload).toEqual(expectedState);
+    expect(state.parsed_payload.player).not.toHaveProperty("state");
+    expect(state.semantic_state).toEqual(expectedState);
   });
 
   it("rejects a malformed Pairing PSK token", async () => {

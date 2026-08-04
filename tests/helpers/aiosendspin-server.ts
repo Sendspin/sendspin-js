@@ -31,14 +31,29 @@ export type PinWaitResult =
   | { status: "pin_requested" | "timeout" };
 
 export interface ReceivedClientState {
-  available: boolean;
-  player: {
-    volume: number;
-    muted: boolean;
-    static_delay_ms: number;
-    required_lead_time_ms: number;
-    min_buffer_ms: number;
-    supported_commands: string[];
+  accepted_by_strict_parser: boolean;
+  parsed_payload: {
+    available: boolean;
+    player: {
+      volume: number;
+      muted: boolean;
+      static_delay_ms: number;
+      required_lead_time_ms: number;
+      min_buffer_ms: number;
+      supported_commands: string[];
+      state?: string;
+    };
+  };
+  semantic_state: {
+    available: boolean;
+    player: {
+      volume: number;
+      muted: boolean;
+      static_delay_ms: number;
+      required_lead_time_ms: number;
+      min_buffer_ms: number;
+      supported_commands: string[];
+    };
   };
 }
 
