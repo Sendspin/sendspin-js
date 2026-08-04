@@ -238,31 +238,14 @@ function resetStatusDisplay() {
 function updatePairingDisplay() {
   clientIdEl.textContent = player.clientId;
   pairingTokenEl.textContent = pairingTokenForDisplay();
-  const pairingAvailable = hasPairingApi();
-  rotatePskBtn.disabled = !pairingAvailable;
-  openPairingWindowBtn.disabled = !pairingAvailable;
-  cancelPairingBtn.disabled = !pairingAvailable;
-  clearLockoutBtn.disabled = !pairingAvailable;
-  staticPinInput.disabled = !pairingAvailable;
   updateLockoutDisplay();
 }
 
-function hasPairingApi() {
-  return (
-    player !== null &&
-    "pairingToken" in player &&
-    typeof player.rotatePairingPsk === "function" &&
-    typeof player.isPairingLockedOut === "function" &&
-    typeof player.clearPairingLockout === "function" &&
-    typeof player.openPairingWindow === "function" &&
-    typeof player.cancelPairing === "function"
-  );
+function isValidStaticPin(pin) {
+  return /^[0-9]{8}$/.test(pin);
 }
 
 function pairingTokenForDisplay() {
-  if (!hasPairingApi()) {
-    return "(SDK update required)";
-  }
   return player.pairingToken ?? "(no storage)";
 }
 
@@ -271,10 +254,6 @@ function pairingTokenForDisplay() {
  */
 function updateLockoutDisplay() {
   if (!player) return;
-  if (!hasPairingApi()) {
-    pinLockoutEl.textContent = "(SDK update required)";
-    return;
-  }
   const locked = ["dynamic_pin", "static_pin"].filter((m) =>
     player.isPairingLockedOut(m),
   );
@@ -699,11 +678,12 @@ async function connect() {
         showToast(`Server set sync delay to ${delayMs}ms`, "info");
       },
       unpairedAccess: unpairedAccessCheckbox.checked,
-      onPairing,
-      onPairingPin,
-      staticPin: /^[0-9]{8}$/.test(staticPinInput.value)
+      // Enables static-PIN pairing only once the field holds a complete PIN.
+      staticPin: isValidStaticPin(staticPinInput.value)
         ? staticPinInput.value
         : undefined,
+      onPairing,
+      onPairingPin,
       onStateChange,
     });
 
@@ -919,17 +899,13 @@ function init() {
   });
   rotatePskBtn.addEventListener("click", () => {
     if (!player) return;
-    if (!hasPairingApi()) {
-      showToast("Update the SDK to use pairing controls", "error");
-      return;
-    }
     player.rotatePairingPsk();
     pairingTokenEl.textContent = pairingTokenForDisplay();
     showToast("Pairing token rotated", "success");
   });
   staticPinInput.addEventListener("change", () => {
     const pin = staticPinInput.value.trim();
-    if (pin && !/^[0-9]{8}$/.test(pin)) {
+    if (pin && !isValidStaticPin(pin)) {
       showToast("Static PIN must be exactly 8 digits", "error");
       return;
     }
@@ -941,29 +917,17 @@ function init() {
       showToast("Connect first", "error");
       return;
     }
-    if (!hasPairingApi()) {
-      showToast("Update the SDK to use pairing controls", "error");
-      return;
-    }
     player.openPairingWindow();
     showToast("Pairing window open (~5 minutes, one attempt)", "info");
   });
   cancelPairingBtn.addEventListener("click", () => {
     if (!player) return;
-    if (!hasPairingApi()) {
-      showToast("Update the SDK to use pairing controls", "error");
-      return;
-    }
     player.cancelPairing();
     showToast("Pairing cancelled", "info");
   });
   clearLockoutBtn.addEventListener("click", () => {
     if (!player) {
       showToast("Connect first", "error");
-      return;
-    }
-    if (!hasPairingApi()) {
-      showToast("Update the SDK to use pairing controls", "error");
       return;
     }
     for (const method of ["dynamic_pin", "static_pin"]) {
