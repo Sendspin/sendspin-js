@@ -114,7 +114,12 @@ export class SendspinDecoder {
     audioData: ArrayBuffer,
     format: StreamFormat,
   ): { samples: Float32Array[]; sampleRate: number } | null {
-    const bytesPerSample = (format.bit_depth || 16) / 8;
+    const bitDepth = format.bit_depth ?? 16;
+    if (bitDepth !== 16 && bitDepth !== 24 && bitDepth !== 32) {
+      console.warn(`Sendspin: unsupported PCM bit_depth ${bitDepth}`);
+      return null;
+    }
+    const bytesPerSample = bitDepth / 8;
     const dataView = new DataView(audioData);
     const numSamples =
       audioData.byteLength / (bytesPerSample * format.channels);
@@ -131,9 +136,9 @@ export class SendspinDecoder {
         const offset = (i * format.channels + channel) * bytesPerSample;
         let sample = 0;
 
-        if (format.bit_depth === 16) {
+        if (bitDepth === 16) {
           sample = dataView.getInt16(offset, true) / 32768.0;
-        } else if (format.bit_depth === 24) {
+        } else if (bitDepth === 24) {
           const byte1 = dataView.getUint8(offset);
           const byte2 = dataView.getUint8(offset + 1);
           const byte3 = dataView.getUint8(offset + 2);
@@ -142,7 +147,7 @@ export class SendspinDecoder {
             int24 |= 0xff000000;
           }
           sample = int24 / 8388608.0;
-        } else if (format.bit_depth === 32) {
+        } else if (bitDepth === 32) {
           sample = dataView.getInt32(offset, true) / 2147483648.0;
         }
 

@@ -274,6 +274,47 @@ describe("SendspinDecoder", () => {
     });
   });
 
+  describe("PCM bit depth handling", () => {
+    it("decodes an omitted bit_depth as 16-bit", async () => {
+      const format: StreamFormat = {
+        codec: "pcm",
+        sample_rate: 48000,
+        channels: 2,
+      };
+
+      const pcmData = createPcm16Sine(960, 2);
+      await decoder.handleBinaryMessage(
+        buildBinaryMessage(1000000, pcmData.buffer),
+        format,
+        0,
+      );
+
+      expect(chunks.length).toBe(1);
+      expect(chunks[0].samples[0].length).toBe(960);
+      let peak = 0;
+      for (const s of chunks[0].samples[0]) peak = Math.max(peak, Math.abs(s));
+      expect(peak).toBeGreaterThan(0.4);
+    });
+
+    it("emits no chunk for an unsupported bit_depth", async () => {
+      const format: StreamFormat = {
+        codec: "pcm",
+        sample_rate: 48000,
+        channels: 2,
+        bit_depth: 8,
+      };
+
+      const pcmData = createPcm16Sine(960, 2);
+      await decoder.handleBinaryMessage(
+        buildBinaryMessage(1000000, pcmData.buffer),
+        format,
+        0,
+      );
+
+      expect(chunks.length).toBe(0);
+    });
+  });
+
   describe("generation filtering", () => {
     it("drops frames for old generations", async () => {
       const format: StreamFormat = {
