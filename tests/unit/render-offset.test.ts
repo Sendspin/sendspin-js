@@ -162,6 +162,7 @@ const PCM_FORMAT: StreamFormat = {
 };
 
 let lastCtx: ChromeLikeAudioContext | null = null;
+let schedulers: AudioScheduler[] = [];
 
 interface Harness {
   scheduler: AudioScheduler;
@@ -190,6 +191,7 @@ function setup(
     useOutputLatencyCompensation: opts.useOutputLatencyCompensation ?? true,
     correctionMode: "sync",
   });
+  schedulers.push(scheduler);
   stateManager.currentStreamFormat = PCM_FORMAT;
   scheduler.initAudioContext();
   const ctx = lastCtx!;
@@ -237,8 +239,10 @@ function measureRenderOffsetMs(h: Harness): number {
 }
 
 beforeEach(() => {
+  vi.useFakeTimers();
   nowMs = WALL_EPOCH_MS;
   lastCtx = null;
+  schedulers = [];
   vi.stubGlobal("AudioContext", function (opts?: { sampleRate?: number }) {
     lastCtx = new ChromeLikeAudioContext(opts);
     return lastCtx;
@@ -257,6 +261,9 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  for (const scheduler of schedulers) scheduler.close();
+  expect(vi.getTimerCount()).toBe(0);
+  vi.useRealTimers();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
