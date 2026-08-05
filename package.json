@@ -58,7 +58,7 @@
     "prettier": "3.9.6",
     "rollup": "^4.54.0",
     "serve": "^14.2.5",
-    "typescript": "^6.0.2",
+    "typescript": "^7.0.2",
     "vitest": "^4.1.4",
     "ws": "^8.20.0"
   },
