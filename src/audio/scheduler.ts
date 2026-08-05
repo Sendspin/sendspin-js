@@ -641,6 +641,11 @@ export class AudioScheduler {
       cutCount++;
       return false;
     });
+    // Requeued sources predate the chunks still queued, and a cut from the drain
+    // loop lands after that loop's own sort.
+    if (requeued > 0) {
+      this.audioBufferQueue.sort((a, b) => a.serverTime - b.serverTime);
+    }
     return { requeuedCount: requeued, cutCount, keptTailEndTimeSec };
   }
 
@@ -880,7 +885,6 @@ export class AudioScheduler {
         }
         this.recorrectionMonitor.clearMinScheduleTime();
         playbackRate = 1.0;
-        chunk.buffer = this.copyBuffer(chunk.buffer);
       } else {
         const serverGapUs = chunk.serverTime - this.lastScheduledServerTime;
         const serverGapSec = serverGapUs / 1_000_000;
@@ -909,7 +913,6 @@ export class AudioScheduler {
             playbackRate = 1.0;
             this.currentCorrectionMethod = "resync";
             this.lastSamplesAdjusted = 0;
-            chunk.buffer = this.copyBuffer(chunk.buffer);
           } else if (Math.abs(correctionErrorMs) > thresholds.resyncAboveMs) {
             playbackTime = this.nextPlaybackTime;
             scheduleTime = this.nextScheduleTime;
@@ -921,14 +924,12 @@ export class AudioScheduler {
             this.currentCorrectionMethod =
               playbackRate === 1.0 ? "none" : "rate";
             this.lastSamplesAdjusted = 0;
-            chunk.buffer = this.copyBuffer(chunk.buffer);
           } else if (Math.abs(correctionErrorMs) < thresholds.deadbandBelowMs) {
             playbackTime = this.nextPlaybackTime;
             scheduleTime = this.nextScheduleTime;
             playbackRate = 1.0;
             this.currentCorrectionMethod = "none";
             this.lastSamplesAdjusted = 0;
-            chunk.buffer = this.copyBuffer(chunk.buffer);
           } else if (Math.abs(correctionErrorMs) <= thresholds.samplesBelowMs) {
             playbackTime = this.nextPlaybackTime;
             scheduleTime = this.nextScheduleTime;
@@ -962,7 +963,6 @@ export class AudioScheduler {
             this.currentCorrectionMethod =
               playbackRate === 1.0 ? "none" : "rate";
             this.lastSamplesAdjusted = 0;
-            chunk.buffer = this.copyBuffer(chunk.buffer);
           }
         } else {
           // Gap detected in server timestamps - hard resync (gated on cooldown)
@@ -977,7 +977,6 @@ export class AudioScheduler {
           playbackRate = 1.0;
           this.currentCorrectionMethod = "resync";
           this.lastSamplesAdjusted = 0;
-          chunk.buffer = this.copyBuffer(chunk.buffer);
         }
       }
 

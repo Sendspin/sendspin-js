@@ -581,6 +581,32 @@ describe("AudioScheduler cutover backlog handling", () => {
   });
 });
 
+describe("AudioScheduler cut requeue ordering", () => {
+  it("restores serverTime order when a cut requeues behind a queued chunk", () => {
+    const h = setup();
+    const base = nowUs();
+    // Two chunks scheduled, then a later one left queued.
+    h.scheduler.handleDecodedChunk(makeChunk(base, 0));
+    h.scheduler.handleDecodedChunk(makeChunk(base + 100_000, 0));
+    h.scheduler.processAudioQueue();
+    expect(h.ctx.startedSources.length).toBe(2);
+    h.tf.synchronized = false;
+    h.scheduler.handleDecodedChunk(makeChunk(base + 200_000, 0));
+
+    // A cut mirrors the one processAudioQueue makes mid-drain, after its sort.
+    (h.scheduler as any).cutScheduledSources(h.ctx.currentTime);
+
+    const queued = (h.scheduler as any).audioBufferQueue as Array<{
+      serverTime: number;
+    }>;
+    expect(queued.map((c) => c.serverTime)).toEqual([
+      base,
+      base + 100_000,
+      base + 200_000,
+    ]);
+  });
+});
+
 describe("AudioScheduler quality mode thresholds", () => {
   it("never uses playback-rate changes in quality mode", () => {
     const h = setup({ correctionMode: "quality" });
