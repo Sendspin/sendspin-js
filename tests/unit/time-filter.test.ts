@@ -29,6 +29,14 @@ describe("SendspinTimeFilter", () => {
   });
 
   describe("multiple measurements", () => {
+    it("reports measurements processed after the maturity gate caps", () => {
+      for (let i = 1; i <= 105; i++) {
+        filter.update(10000, 1000, i * 100000);
+      }
+
+      expect(filter.count).toBe(105);
+    });
+
     it("refines offset with consistent measurements", () => {
       // Simulate a constant 10ms offset
       const trueOffset = 10000; // 10ms in µs
