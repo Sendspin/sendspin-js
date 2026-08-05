@@ -26,7 +26,9 @@ export interface TimeElement {
 
 export class SendspinTimeFilter {
   private _last_update: number = 0;
+  // Maturity gate for the state machine and adaptive forgetting, caps at 100.
   private _count: number = 0;
+  private _measurements_processed: number = 0;
 
   private _offset: number = 0.0;
   private _drift: number = 0.0;
@@ -92,6 +94,7 @@ export class SendspinTimeFilter {
 
     const dt = time_added - this._last_update;
     this._last_update = time_added;
+    this._measurements_processed += 1;
 
     const update_std_dev = max_error;
     const measurement_variance = update_std_dev * update_std_dev;
@@ -268,6 +271,7 @@ export class SendspinTimeFilter {
    */
   reset(): void {
     this._count = 0;
+    this._measurements_processed = 0;
     this._last_update = 0;
     this._offset = 0.0;
     this._drift = 0.0;
@@ -283,7 +287,7 @@ export class SendspinTimeFilter {
    * Get the number of time sync measurements processed.
    */
   get count(): number {
-    return this._count;
+    return this._measurements_processed;
   }
 
   /**
