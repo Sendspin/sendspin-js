@@ -168,9 +168,12 @@ export class WebSocketManager {
         this.ws = new WebSocket(url);
         this.ws.binaryType = "arraybuffer";
         this.shouldReconnect = true;
+        // Browsers fire close even for attempts that never opened.
+        let opened = false;
 
         this.ws.onopen = () => {
           console.log("Sendspin: WebSocket connected");
+          opened = true;
           const wasReconnecting = this.isReconnecting;
           this.isReconnecting = false;
           this.reconnectAttempt = 0;
@@ -199,7 +202,7 @@ export class WebSocketManager {
 
         this.ws.onclose = () => {
           console.log("Sendspin: WebSocket disconnected");
-          if (this.onCloseHandler) {
+          if (opened && this.onCloseHandler) {
             this.onCloseHandler();
           }
 

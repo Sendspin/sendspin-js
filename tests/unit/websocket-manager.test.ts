@@ -208,6 +208,21 @@ describe("WebSocketManager extra", () => {
       ws.fireError(new Error("boom"));
       expect(onError).toHaveBeenCalled();
     });
+
+    it("does not report a close for a socket that never opened", () => {
+      const onClose = vi.fn();
+      void mgr.connect(
+        "ws://host/sendspin",
+        undefined,
+        undefined,
+        undefined,
+        onClose,
+      );
+
+      RichFakeWebSocket.instances[0].fireClose();
+
+      expect(onClose).not.toHaveBeenCalled();
+    });
   });
 
   describe("disconnect", () => {
