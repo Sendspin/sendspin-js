@@ -345,6 +345,11 @@ export class SendspinDecoder {
       }
 
       const { serverTimeUs, generation } = metadata;
+      const format = this.webCodecsFormat;
+      if (!format) {
+        audioData.close();
+        return;
+      }
       if (generation !== this.currentGeneration()) {
         console.warn(
           `[NativeOpus] Dropping old-stream frame (ts=${serverTimeUs}, gen=${generation} != current=${this.currentGeneration()})`,
@@ -356,36 +361,37 @@ export class SendspinDecoder {
       const channels = audioData.numberOfChannels;
       const frames = audioData.numberOfFrames;
       const fmt = audioData.format;
-
-      let interleaved: Float32Array;
+      const samples: Float32Array[] = [];
+      for (let ch = 0; ch < channels; ch++) {
+        samples.push(new Float32Array(frames));
+      }
 
       if (fmt === "f32-planar") {
-        interleaved = new Float32Array(frames * channels);
         for (let ch = 0; ch < channels; ch++) {
-          const channelData = new Float32Array(frames);
-          audioData.copyTo(channelData, { planeIndex: ch });
-          for (let i = 0; i < frames; i++) {
-            interleaved[i * channels + ch] = channelData[i];
-          }
+          audioData.copyTo(samples[ch], { planeIndex: ch });
+        }
+      } else if (fmt === "s16-planar") {
+        const plane = new Int16Array(frames);
+        for (let ch = 0; ch < channels; ch++) {
+          audioData.copyTo(plane, { planeIndex: ch });
+          const out = samples[ch];
+          for (let i = 0; i < frames; i++) out[i] = plane[i] / 32768.0;
         }
       } else if (fmt === "f32") {
-        interleaved = new Float32Array(frames * channels);
+        const interleaved = new Float32Array(frames * channels);
         audioData.copyTo(interleaved, { planeIndex: 0 });
-      } else if (fmt === "s16-planar") {
-        interleaved = new Float32Array(frames * channels);
         for (let ch = 0; ch < channels; ch++) {
-          const channelData = new Int16Array(frames);
-          audioData.copyTo(channelData, { planeIndex: ch });
-          for (let i = 0; i < frames; i++) {
-            interleaved[i * channels + ch] = channelData[i] / 32768.0;
-          }
+          const out = samples[ch];
+          for (let i = 0; i < frames; i++)
+            out[i] = interleaved[i * channels + ch];
         }
       } else if (fmt === "s16") {
-        const int16Data = new Int16Array(frames * channels);
-        audioData.copyTo(int16Data, { planeIndex: 0 });
-        interleaved = new Float32Array(frames * channels);
-        for (let i = 0; i < frames * channels; i++) {
-          interleaved[i] = int16Data[i] / 32768.0;
+        const interleaved = new Int16Array(frames * channels);
+        audioData.copyTo(interleaved, { planeIndex: 0 });
+        for (let ch = 0; ch < channels; ch++) {
+          const out = samples[ch];
+          for (let i = 0; i < frames; i++)
+            out[i] = interleaved[i * channels + ch] / 32768.0;
         }
       } else {
         console.warn(`[NativeOpus] Unsupported AudioData format: ${fmt}`);
@@ -393,44 +399,17 @@ export class SendspinDecoder {
         return;
       }
 
-      this.emitDeinterleavedChunk(
-        interleaved,
-        serverTimeUs,
-        channels,
-        generation,
-      );
       audioData.close();
+      this.onDecodedChunk({
+        samples,
+        sampleRate: format.sample_rate,
+        serverTimeUs,
+        generation,
+      });
     } catch (e) {
       console.error("[NativeOpus] Error in output callback:", e);
       audioData.close();
     }
-  }
-
-  private emitDeinterleavedChunk(
-    interleaved: Float32Array,
-    serverTimeUs: number,
-    channels: number,
-    generation: number,
-  ): void {
-    if (!this.webCodecsFormat) return;
-
-    const numFrames = interleaved.length / channels;
-    const samples: Float32Array[] = [];
-
-    for (let ch = 0; ch < channels; ch++) {
-      const channelData = new Float32Array(numFrames);
-      for (let i = 0; i < numFrames; i++) {
-        channelData[i] = interleaved[i * channels + ch];
-      }
-      samples.push(channelData);
-    }
-
-    this.onDecodedChunk({
-      samples,
-      sampleRate: this.webCodecsFormat.sample_rate,
-      serverTimeUs,
-      generation,
-    });
   }
 
   private queueToNativeOpusDecoder(
