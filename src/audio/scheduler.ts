@@ -641,6 +641,11 @@ export class AudioScheduler {
       cutCount++;
       return false;
     });
+    // Requeued sources predate the chunks still queued, and a cut from the drain
+    // loop lands after that loop's own sort.
+    if (requeued > 0) {
+      this.audioBufferQueue.sort((a, b) => a.serverTime - b.serverTime);
+    }
     return { requeuedCount: requeued, cutCount, keptTailEndTimeSec };
   }
 
