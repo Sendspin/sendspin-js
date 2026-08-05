@@ -39,6 +39,8 @@ jobs:
           registry-url: "https://registry.npmjs.org"
       - name: Install dependencies
         run: yarn install --frozen-lockfile
+        env:
+          NODE_AUTH_TOKEN: unused
       - name: Set package version from tag
         run: npm version ${{ steps.vars.outputs.tag }} --no-git-tag-version --allow-same-version
       - name: Build package
@@ -72,6 +74,8 @@ jobs:
 
       - name: Install dependencies
         run: yarn install --frozen-lockfile
+        env:
+          NODE_AUTH_TOKEN: unused
 
       - name: Update npm for OIDC support
         run: npm install -g npm@latest

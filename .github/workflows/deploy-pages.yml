@@ -1,8 +1,9 @@
 name: Deploy to GitHub Pages
 
 on:
-  release:
-    types: [published]
+  workflow_run:
+    workflows: [Publish release to npm]
+    types: [completed]
 
 permissions:
   contents: read
@@ -15,6 +16,7 @@ concurrency:
 
 jobs:
   deploy:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
