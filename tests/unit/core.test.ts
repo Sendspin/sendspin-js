@@ -19,7 +19,7 @@ function makeStorage(): SendspinStorage & { data: Map<string, string> } {
   };
 }
 
-const STATIC_DELAY_KEY = "sendspin-static-delay-ms";
+const STATIC_DELAY_KEY = "sendspin-static-delay-ms-v2";
 
 const PCM_FORMAT: StreamFormat = {
   codec: "pcm",
@@ -424,6 +424,18 @@ describe("SendspinCore static delay persistence", () => {
     });
 
     expect(core.getSyncDelayMs()).toBe(321);
+  });
+
+  it("ignores a delay persisted under the pre-v2 key", () => {
+    const storage = makeStorage();
+    storage.data.set("sendspin-static-delay-ms", "321");
+
+    const core = new SendspinCore({
+      baseUrl: "http://h",
+      storage,
+    });
+
+    expect(core.getSyncDelayMs()).toBe(0);
   });
 
   it("lets an explicit config.syncDelay override the persisted value", () => {
