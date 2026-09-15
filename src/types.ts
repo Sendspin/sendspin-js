@@ -583,8 +583,9 @@ export interface SendspinCoreConfig {
    * - Browsers with WebCodecs (Chrome, Edge): All codecs
    * - Browsers without WebCodecs (e.g., insecure context or older browsers): No Opus
    *
-   * Servers are only required to support FLAC and PCM, so "pcm" is appended as
-   * the lowest-priority fallback when neither "flac" nor "pcm" remains.
+   * Servers are only required to support FLAC and PCM, so when neither "flac"
+   * nor "pcm" remains, both are appended (where the browser decodes them) as
+   * lowest-priority fallbacks, "flac" first.
    *
    * Default: ["opus", "flac", "pcm"]
    */

@@ -147,43 +147,66 @@ describe("getSupportedFormats", () => {
   });
 
   // Servers only have to support flac and pcm, so a player must offer at
-  // least one of them; pcm is the fallback every browser can decode.
+  // least one of them; the fallback is flac then pcm, as the browser allows.
   describe("flac/pcm guarantee", () => {
     beforeEach(() => {
       vi.spyOn(console, "warn").mockImplementation(() => {});
     });
 
-    it("appends pcm as lowest priority when only opus is requested", () => {
+    it("appends flac then pcm at lowest priority when only opus is requested", () => {
       setEnv({ userAgent: UA.chrome, hasAudioDecoder: true });
       const formats = getSupportedFormats(["opus"]);
-      expect(formats.map((f) => f.codec)).toEqual(["opus", "pcm", "pcm"]);
+      expect(formats.map((f) => f.codec)).toEqual([
+        "opus",
+        "flac",
+        "flac",
+        "pcm",
+        "pcm",
+      ]);
       expect(console.warn).toHaveBeenCalledOnce();
     });
 
-    it("advertises pcm for an empty codec list", () => {
+    it("advertises flac and pcm for an empty codec list", () => {
       setEnv({ userAgent: UA.chrome, hasAudioDecoder: true });
       const formats = getSupportedFormats([]);
-      expect(formats.map((f) => f.codec)).toEqual(["pcm", "pcm"]);
+      expect(formats.map((f) => f.codec)).toEqual([
+        "flac",
+        "flac",
+        "pcm",
+        "pcm",
+      ]);
     });
 
-    it("appends pcm when the requested lossless codec is unsupported", () => {
+    it("appends only pcm when the browser cannot decode flac", () => {
       // Safari has no FLAC, so opus+flac would otherwise leave opus alone.
       setEnv({ userAgent: UA.safari, hasAudioDecoder: true });
       const formats = getSupportedFormats(["opus", "flac"]);
       expect(formats.map((f) => f.codec)).toEqual(["opus", "pcm", "pcm"]);
     });
 
-    it("falls back to pcm when every requested codec is unsupported", () => {
+    it("falls back to flac and pcm when every requested codec is unsupported", () => {
       // Firefox does not support opus; requesting only opus leaves nothing.
       setEnv({ userAgent: UA.firefox, hasAudioDecoder: true });
       const formats = getSupportedFormats(["opus"]);
-      expect(formats.map((f) => f.codec)).toEqual(["pcm", "pcm"]);
+      expect(formats.map((f) => f.codec)).toEqual([
+        "flac",
+        "flac",
+        "pcm",
+        "pcm",
+      ]);
     });
 
-    it("does not append pcm when flac is already offered", () => {
+    it("appends nothing when flac is already offered", () => {
       setEnv({ userAgent: UA.chrome, hasAudioDecoder: true });
       const formats = getSupportedFormats(["opus", "flac"]);
       expect(formats.some((f) => f.codec === "pcm")).toBe(false);
+      expect(console.warn).not.toHaveBeenCalled();
+    });
+
+    it("appends nothing when pcm is already offered", () => {
+      setEnv({ userAgent: UA.chrome, hasAudioDecoder: true });
+      const formats = getSupportedFormats(["opus", "pcm"]);
+      expect(formats.some((f) => f.codec === "flac")).toBe(false);
       expect(console.warn).not.toHaveBeenCalled();
     });
   });
@@ -221,10 +244,10 @@ describe("getDefaultBufferCapacity", () => {
     );
   });
 
-  it("covers the pcm fallback appended to an opus-only request", () => {
+  it("covers the flac fallback appended to an opus-only request", () => {
     setEnv({ userAgent: UA.chrome, hasAudioDecoder: true });
     const capacity = getDefaultBufferCapacity(getSupportedFormats(["opus"]));
-    expect(capacity).toBeGreaterThanOrEqual(48000 * 2 * 2 * DEPTH_SECONDS);
+    expect(capacity).toBeGreaterThanOrEqual(195_400 * DEPTH_SECONDS);
   });
 
   it("stays well above the stream-ahead depth for Opus", () => {

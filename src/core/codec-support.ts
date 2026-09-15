@@ -65,14 +65,19 @@ export function getSupportedFormats(codecs: Codec[]): SupportedFormat[] {
   const selected = codecs.filter((codec) => browserSupported.has(codec));
 
   // Servers only have to support flac and pcm, so the protocol requires at
-  // least one of them in the list. Every browser decodes pcm, so it is the
-  // lowest-priority fallback when neither was requested or survived the filter.
+  // least one of them in the list. When neither was requested or survived the
+  // filter, append both (where the browser decodes them) at lowest priority,
+  // flac first for its lower bandwidth.
   if (!selected.includes("flac") && !selected.includes("pcm")) {
+    const fallback = (["flac", "pcm"] as Codec[]).filter((codec) =>
+      browserSupported.has(codec),
+    );
     console.warn(
       `[Codec] No flac or pcm in usable codecs [${selected.join(", ")}] ` +
-        `(requested [${codecs.join(", ")}]), advertising pcm as fallback`,
+        `(requested [${codecs.join(", ")}]), advertising ` +
+        `[${fallback.join(", ")}] as fallback`,
     );
-    selected.push("pcm");
+    selected.push(...fallback);
   }
 
   const formats: SupportedFormat[] = [];
