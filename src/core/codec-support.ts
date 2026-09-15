@@ -56,16 +56,32 @@ export function getBrowserSupportedCodecs(): Set<Codec> {
   return new Set(["pcm", "flac"] as Codec[]);
 }
 
-/** Build supported format list from requested codecs, filtering by browser support. */
+/**
+ * Build the client/hello format list from the requested codecs, in priority
+ * order and filtered by browser support. Always contains a flac or pcm entry.
+ */
 export function getSupportedFormats(codecs: Codec[]): SupportedFormat[] {
   const browserSupported = getBrowserSupportedCodecs();
+  const selected = codecs.filter((codec) => browserSupported.has(codec));
+
+  // Servers only have to support flac and pcm, so the protocol requires at
+  // least one of them in the list. When neither was requested or survived the
+  // filter, append both (where the browser decodes them) at lowest priority,
+  // flac first for its lower bandwidth.
+  if (!selected.includes("flac") && !selected.includes("pcm")) {
+    const fallback = (["flac", "pcm"] as Codec[]).filter((codec) =>
+      browserSupported.has(codec),
+    );
+    console.warn(
+      `[Codec] No flac or pcm in usable codecs [${selected.join(", ")}] ` +
+        `(requested [${codecs.join(", ")}]), advertising ` +
+        `[${fallback.join(", ")}] as fallback`,
+    );
+    selected.push(...fallback);
+  }
+
   const formats: SupportedFormat[] = [];
-
-  for (const codec of codecs) {
-    if (!browserSupported.has(codec)) {
-      continue;
-    }
-
+  for (const codec of selected) {
     if (codec === "opus") {
       // Opus requires 48kHz
       formats.push({
@@ -79,13 +95,6 @@ export function getSupportedFormats(codecs: Codec[]): SupportedFormat[] {
       formats.push({ codec, sample_rate: 48000, channels: 2, bit_depth: 16 });
       formats.push({ codec, sample_rate: 44100, channels: 2, bit_depth: 16 });
     }
-  }
-
-  if (formats.length === 0) {
-    throw new Error(
-      `No supported codecs: requested [${codecs.join(", ")}], ` +
-        `browser supports [${[...browserSupported].join(", ")}]`,
-    );
   }
 
   return formats;

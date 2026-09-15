@@ -15,6 +15,7 @@ import {
 import { StateManager } from "../../src/core/state-manager";
 import type { SendspinTimeFilter } from "../../src/core/time-filter";
 import type { StreamHandler } from "../../src/internal-types";
+import { MessageType, type ServerHello } from "../../src/types";
 
 function makeHelloContext(overrides: Partial<HelloContext> = {}): HelloContext {
   return {
@@ -255,6 +256,26 @@ describe("ProtocolHandler extra", () => {
       )["player@v1_support"] as Record<string, unknown>;
       expect(support.buffer_capacity).toBe(123_456);
     });
+
+    it("always offers flac or pcm, even when only opus is requested", () => {
+      // Servers need not support opus, so the hello must carry a codec every
+      // server can produce. Stub WebCodecs so opus survives the browser filter.
+      (globalThis as any).AudioDecoder = class {};
+      try {
+        makeHandler({ codecs: ["opus"] }).sendClientHello();
+      } finally {
+        delete (globalThis as any).AudioDecoder;
+      }
+
+      const support = (
+        lastSent(send, "client/hello")!.payload as Record<string, unknown>
+      )["player@v1_support"] as Record<string, unknown>;
+      const codecs = (
+        support.supported_formats as Array<Record<string, unknown>>
+      ).map((f) => f.codec);
+      expect(codecs[0]).toBe("opus");
+      expect(codecs).toContain("pcm");
+    });
   });
 
   describe("handleServerHello", () => {
@@ -287,6 +308,19 @@ describe("ProtocolHandler extra", () => {
       const handler = makeHandler();
       dispatch(handler, { type: "server/hello", payload: {} });
       expect(lastSent(send, "client/state")).toBeUndefined();
+    });
+
+    it("still replies to a server/hello carrying source@v1_support", () => {
+      const handler = makeHandler();
+      const hello: ServerHello = {
+        type: MessageType.SERVER_HELLO,
+        payload: {
+          name: "Srv",
+          "source@v1_support": { supported_codecs: ["opus", "flac", "pcm"] },
+        },
+      };
+      handler.handleServerMessage(hello);
+      expect(lastSent(send, "client/hello")).toBeDefined();
     });
   });
 
