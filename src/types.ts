@@ -144,7 +144,19 @@ export interface ClientCommand {
 
 export interface ServerHello {
   type: MessageType.SERVER_HELLO;
-  payload: Record<string, unknown>;
+  payload: {
+    name: string;
+    languages?: string[];
+    /**
+     * Present only when the server supports the source@v1 role, which this SDK
+     * does not implement. Lists the codecs the server accepts in
+     * client-stream/start; always includes flac and pcm, and may include
+     * identifiers unknown to this SDK.
+     */
+    "source@v1_support"?: {
+      supported_codecs: string[];
+    };
+  };
 }
 
 export interface ServerTime {
@@ -571,6 +583,9 @@ export interface SendspinCoreConfig {
    * - Browsers with WebCodecs (Chrome, Edge): All codecs
    * - Browsers without WebCodecs (e.g., insecure context or older browsers): No Opus
    *
+   * Servers are only required to support FLAC and PCM, so "pcm" is appended as
+   * the lowest-priority fallback when neither "flac" nor "pcm" remains.
+   *
    * Default: ["opus", "flac", "pcm"]
    */
   codecs?: Codec[];
@@ -580,8 +595,8 @@ export interface SendspinCoreConfig {
    * not-yet-played encoded audio it may send ahead.
    *
    * Defaults to the server's stream-ahead depth at the worst-case byte rate of
-   * the negotiable formats: ~5.9MB when FLAC or PCM is offered, ~1.9MB for
-   * Opus-only. Set this only for clients with a real, smaller buffer.
+   * the advertised formats (~5.8-5.9MB, as FLAC or PCM is always offered). Set
+   * this only for clients with a real, smaller buffer.
    */
   bufferCapacity?: number;
 

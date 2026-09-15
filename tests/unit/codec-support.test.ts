@@ -3,13 +3,13 @@
  *
  * Covers browser codec detection (Safari / Firefox / Chrome, with and without
  * WebCodecs AudioDecoder), format expansion rules, browser filtering of
- * requested codecs, and the "no supported codecs" throw.
+ * requested codecs, and the flac/pcm entry the protocol requires.
  *
  * navigator / AudioDecoder / window don't exist in node; each test installs
  * the minimal globals it needs and restores them afterward.
  */
 
-import { describe, it, expect, afterEach, vi } from "vitest";
+import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
 import {
   getBrowserSupportedCodecs,
   getDefaultBufferCapacity,
@@ -113,10 +113,11 @@ describe("getSupportedFormats", () => {
 
   it("expands opus to a single 48kHz format only", () => {
     setEnv({ userAgent: UA.chrome, hasAudioDecoder: true });
-    const formats = getSupportedFormats(["opus"]);
-    expect(formats.length).toBe(1);
-    expect(formats[0].codec).toBe("opus");
-    expect(formats[0].sample_rate).toBe(48000);
+    const opus = getSupportedFormats(["opus"]).filter(
+      (f) => f.codec === "opus",
+    );
+    expect(opus.length).toBe(1);
+    expect(opus[0].sample_rate).toBe(48000);
   });
 
   it("expands pcm to both 48kHz and 44.1kHz", () => {
@@ -145,10 +146,46 @@ describe("getSupportedFormats", () => {
     expect(formats.some((f) => f.codec === "opus")).toBe(false);
   });
 
-  it("throws when every requested codec is unsupported", () => {
-    // Firefox does not support opus; requesting only opus leaves nothing.
-    setEnv({ userAgent: UA.firefox, hasAudioDecoder: true });
-    expect(() => getSupportedFormats(["opus"])).toThrow(/No supported codecs/);
+  // Servers only have to support flac and pcm, so a player must offer at
+  // least one of them; pcm is the fallback every browser can decode.
+  describe("flac/pcm guarantee", () => {
+    beforeEach(() => {
+      vi.spyOn(console, "warn").mockImplementation(() => {});
+    });
+
+    it("appends pcm as lowest priority when only opus is requested", () => {
+      setEnv({ userAgent: UA.chrome, hasAudioDecoder: true });
+      const formats = getSupportedFormats(["opus"]);
+      expect(formats.map((f) => f.codec)).toEqual(["opus", "pcm", "pcm"]);
+      expect(console.warn).toHaveBeenCalledOnce();
+    });
+
+    it("advertises pcm for an empty codec list", () => {
+      setEnv({ userAgent: UA.chrome, hasAudioDecoder: true });
+      const formats = getSupportedFormats([]);
+      expect(formats.map((f) => f.codec)).toEqual(["pcm", "pcm"]);
+    });
+
+    it("appends pcm when the requested lossless codec is unsupported", () => {
+      // Safari has no FLAC, so opus+flac would otherwise leave opus alone.
+      setEnv({ userAgent: UA.safari, hasAudioDecoder: true });
+      const formats = getSupportedFormats(["opus", "flac"]);
+      expect(formats.map((f) => f.codec)).toEqual(["opus", "pcm", "pcm"]);
+    });
+
+    it("falls back to pcm when every requested codec is unsupported", () => {
+      // Firefox does not support opus; requesting only opus leaves nothing.
+      setEnv({ userAgent: UA.firefox, hasAudioDecoder: true });
+      const formats = getSupportedFormats(["opus"]);
+      expect(formats.map((f) => f.codec)).toEqual(["pcm", "pcm"]);
+    });
+
+    it("does not append pcm when flac is already offered", () => {
+      setEnv({ userAgent: UA.chrome, hasAudioDecoder: true });
+      const formats = getSupportedFormats(["opus", "flac"]);
+      expect(formats.some((f) => f.codec === "pcm")).toBe(false);
+      expect(console.warn).not.toHaveBeenCalled();
+    });
   });
 });
 
@@ -172,19 +209,29 @@ describe("getDefaultBufferCapacity", () => {
 
   it("sizes for the highest byte rate among the advertised formats", () => {
     setEnv({ userAgent: UA.chrome, hasAudioDecoder: true });
-    const opusOnly = getDefaultBufferCapacity(getSupportedFormats(["opus"]));
+    const withPcm = getDefaultBufferCapacity(
+      getSupportedFormats(["opus", "pcm"]),
+    );
     const withFlac = getDefaultBufferCapacity(
       getSupportedFormats(["opus", "flac"]),
     );
-    expect(withFlac).toBeGreaterThan(opusOnly);
+    expect(withFlac).toBeGreaterThan(withPcm);
     expect(withFlac).toBe(
       getDefaultBufferCapacity(getSupportedFormats(["flac"])),
     );
   });
 
-  it("stays well above the stream-ahead depth for Opus", () => {
+  it("covers the pcm fallback appended to an opus-only request", () => {
     setEnv({ userAgent: UA.chrome, hasAudioDecoder: true });
     const capacity = getDefaultBufferCapacity(getSupportedFormats(["opus"]));
+    expect(capacity).toBeGreaterThanOrEqual(48000 * 2 * 2 * DEPTH_SECONDS);
+  });
+
+  it("stays well above the stream-ahead depth for Opus", () => {
+    // Hand-built list: getSupportedFormats never returns opus on its own.
+    const capacity = getDefaultBufferCapacity([
+      { codec: "opus", sample_rate: 48000, channels: 2, bit_depth: 16 },
+    ]);
     // ~96 kbps in practice, so the depth covered is far beyond 30s.
     expect(capacity / (96_000 / 8)).toBeGreaterThan(DEPTH_SECONDS);
   });

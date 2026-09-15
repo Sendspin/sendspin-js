@@ -20,7 +20,6 @@ import { SendspinTransport } from "./transport";
 import type { HandshakeInfo } from "./transport";
 import { SUITES } from "./noise/suites";
 import { PairingManager } from "./pairing";
-import { getSupportedFormats } from "./codec-support";
 import { base64urlEncode, base64urlDecode } from "./noise/base64url";
 import { encodePairingToken } from "./noise/pairing-token";
 import type {
@@ -69,9 +68,6 @@ export class SendspinCore implements StreamHandler {
   private _onConnectionClose?: () => void;
 
   constructor(config: SendspinCoreConfig) {
-    // Validate configured codecs up front so a set with no browser overlap
-    // throws to the app instead of failing silently inside client/hello dispatch.
-    if (config.codecs) getSupportedFormats(config.codecs);
     this.hasStorage = (config.storage ?? null) !== null;
     this.identity = Identity.loadOrCreate(config.storage ?? null);
     const clientName =
