@@ -385,6 +385,7 @@ export class SendspinCore implements StreamHandler {
   // ========================================
 
   setVolume(volume: number): void {
+    if (Number.isNaN(volume)) throw new RangeError("volume must be a number");
     this.stateManager.volume = volume;
     this._onVolumeUpdate?.();
     this.protocolHandler.sendStateUpdate();
@@ -432,6 +433,12 @@ export class SendspinCore implements StreamHandler {
         `Command '${command}' is not supported by the server. ` +
           `Supported commands: ${supportedCommands.join(", ")}`,
       );
+    }
+    if (
+      command === "volume" &&
+      Number.isNaN((params as ControllerCommands["volume"]).volume)
+    ) {
+      throw new RangeError("volume must be a number");
     }
     this.protocolHandler.sendCommand(command, params);
   }

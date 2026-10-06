@@ -21,7 +21,7 @@ import type {
   StreamStart,
 } from "../types";
 import type { StreamHandler } from "../internal-types";
-import type { StateManager } from "./state-manager";
+import { clampVolume, type StateManager } from "./state-manager";
 import { TimeSyncManager } from "./time-sync-manager";
 import { getDefaultBufferCapacity, getSupportedFormats } from "./codec-support";
 import { clampSyncDelayMs } from "../sync-delay";
@@ -44,10 +44,11 @@ interface SentPlayerState {
   min_buffer_ms: number;
 }
 
-function assertBufferMs(value: number, name: string): void {
+function toBufferMs(value: number, name: string): number {
   if (!isFinite(value) || value < 0) {
     throw new RangeError(`${name} must be a non-negative finite number`);
   }
+  return Math.round(value);
 }
 
 export interface MessageSender {
@@ -109,11 +110,14 @@ export class ProtocolHandler {
     // Left undefined so the capacity is derived from the formats actually
     // advertised in client/hello (see sendClientHello).
     this.bufferCapacity = config.bufferCapacity;
-    this.requiredLeadTimeMs =
-      config.requiredLeadTimeMs ?? DEFAULT_REQUIRED_LEAD_TIME_MS;
-    assertBufferMs(this.requiredLeadTimeMs, "requiredLeadTimeMs");
-    this.minBufferMs = config.minBufferMs ?? DEFAULT_MIN_BUFFER_MS;
-    assertBufferMs(this.minBufferMs, "minBufferMs");
+    this.requiredLeadTimeMs = toBufferMs(
+      config.requiredLeadTimeMs ?? DEFAULT_REQUIRED_LEAD_TIME_MS,
+      "requiredLeadTimeMs",
+    );
+    this.minBufferMs = toBufferMs(
+      config.minBufferMs ?? DEFAULT_MIN_BUFFER_MS,
+      "minBufferMs",
+    );
     this.useHardwareVolume = config.useHardwareVolume ?? false;
     this.onVolumeCommand = config.onVolumeCommand;
     this.onDelayCommand = config.onDelayCommand;
@@ -372,14 +376,12 @@ export class ProtocolHandler {
   }
 
   setRequiredLeadTimeMs(leadTimeMs: number): void {
-    assertBufferMs(leadTimeMs, "requiredLeadTimeMs");
-    this.requiredLeadTimeMs = leadTimeMs;
+    this.requiredLeadTimeMs = toBufferMs(leadTimeMs, "requiredLeadTimeMs");
     this.sendStateUpdate();
   }
 
   setMinBufferMs(minBufferMs: number): void {
-    assertBufferMs(minBufferMs, "minBufferMs");
-    this.minBufferMs = minBufferMs;
+    this.minBufferMs = toBufferMs(minBufferMs, "minBufferMs");
     this.sendStateUpdate();
   }
 
@@ -393,7 +395,8 @@ export class ProtocolHandler {
     let muted = this.stateManager.muted;
     if (!skipHardwareRead && this.useHardwareVolume && this.getExternalVolume) {
       const externalVol = this.getExternalVolume();
-      volume = externalVol.volume;
+      if (!Number.isNaN(externalVol.volume))
+        volume = clampVolume(externalVol.volume);
       muted = externalVol.muted;
     }
 
@@ -459,12 +462,17 @@ export class ProtocolHandler {
   ): void {
     if (this.pairingSuspended || !this.activeRoles?.has("controller@v1"))
       return;
+    let fields = params as object;
+    if (command === "volume") {
+      const { volume } = params as ControllerCommands["volume"];
+      fields = { volume: clampVolume(volume) };
+    }
     this.sender.sendControl({
       type: "client/command" as MessageType.CLIENT_COMMAND,
       payload: {
         controller: {
           command,
-          ...(params as object),
+          ...fields,
         },
       },
     } satisfies ClientCommand);

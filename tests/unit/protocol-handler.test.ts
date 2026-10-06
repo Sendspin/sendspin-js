@@ -424,6 +424,31 @@ describe("ProtocolHandler extra", () => {
       expect(player.min_buffer_ms).toBeTypeOf("number");
     });
 
+    it("rounds required_lead_time_ms and min_buffer_ms to integers", () => {
+      const handler = makeHandler({
+        requiredLeadTimeMs: 150.4,
+        minBufferMs: 80.5,
+      });
+      handler.sendStateUpdate();
+      let player = (
+        lastSent(send, "client/state")!.payload as Record<string, unknown>
+      ).player as Record<string, unknown>;
+      expect(player.required_lead_time_ms).toBe(150);
+      expect(player.min_buffer_ms).toBe(81);
+
+      handler.setRequiredLeadTimeMs(200.7);
+      player = (
+        lastSent(send, "client/state")!.payload as Record<string, unknown>
+      ).player as Record<string, unknown>;
+      expect(player.required_lead_time_ms).toBe(201);
+
+      handler.setMinBufferMs(99.2);
+      player = (
+        lastSent(send, "client/state")!.payload as Record<string, unknown>
+      ).player as Record<string, unknown>;
+      expect(player.min_buffer_ms).toBe(99);
+    });
+
     describe("hardware volume", () => {
       it("reads external volume when useHardwareVolume and no skipHardwareRead", () => {
         const getExternalVolume = vi.fn(() => ({ volume: 30, muted: true }));
@@ -439,6 +464,34 @@ describe("ProtocolHandler extra", () => {
         ).player as Record<string, unknown>;
         expect(getExternalVolume).toHaveBeenCalled();
         expect(player.volume).toBe(30);
+        expect(player.muted).toBe(true);
+      });
+
+      it("rounds the external volume to an integer", () => {
+        const handler = makeHandler({
+          useHardwareVolume: true,
+          getExternalVolume: () => ({ volume: 30.6, muted: false }),
+        });
+        handler.sendStateUpdate();
+
+        const player = (
+          lastSent(send, "client/state")!.payload as Record<string, unknown>
+        ).player as Record<string, unknown>;
+        expect(player.volume).toBe(31);
+      });
+
+      it("reports the stored volume when the external volume is NaN", () => {
+        const handler = makeHandler({
+          useHardwareVolume: true,
+          getExternalVolume: () => ({ volume: NaN, muted: true }),
+        });
+        stateManager.volume = 64;
+        handler.sendStateUpdate();
+
+        const player = (
+          lastSent(send, "client/state")!.payload as Record<string, unknown>
+        ).player as Record<string, unknown>;
+        expect(player.volume).toBe(64);
         expect(player.muted).toBe(true);
       });
 
@@ -681,6 +734,22 @@ describe("ProtocolHandler extra", () => {
       ).controller as Record<string, unknown>;
       expect(controller.command).toBe("volume");
       expect(controller.volume).toBe(55);
+    });
+
+    it("rounds the controller volume", () => {
+      const handler = makeHandler();
+      dispatch(handler, {
+        type: "server/activate",
+        payload: {
+          activities: ["playback"],
+          active_roles: ["controller@v1"],
+        },
+      });
+      handler.sendCommand("volume", { volume: 55.5 });
+      const controller = (
+        lastSent(send, "client/command")!.payload as Record<string, unknown>
+      ).controller as Record<string, unknown>;
+      expect(controller.volume).toBe(56);
     });
   });
 });

@@ -242,7 +242,7 @@ export class SendspinPlayer {
     }
   }
 
-  // Set volume (0-100)
+  // Set volume (0-100). Throws RangeError if NaN.
   setVolume(volume: number): void {
     this.core.setVolume(volume);
   }
@@ -288,7 +288,8 @@ export class SendspinPlayer {
   // ========================================
 
   /**
-   * Send a controller command to the server.
+   * Send a controller command to the server. Throws RangeError if a volume
+   * command carries a NaN volume.
    */
   sendCommand<T extends ControllerCommand>(
     command: T,
