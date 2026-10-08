@@ -200,6 +200,14 @@ describe("SendspinCore E2E (aiosendspin)", () => {
       expect(chunk.serverTimeUs).toBeGreaterThan(0);
       expect(chunk.samples[0].length).toBeGreaterThan(0);
 
+      // The server's 440 Hz sine starts at sample 0 of the stream.
+      const sine = [0, 1, 2, 3].map((i) =>
+        Math.trunc(Math.sin((2 * Math.PI * 440 * i) / 48000) * 16000),
+      );
+      expect(Array.from(chunk.samples[0].slice(0, 4))).toEqual(
+        sine.map((value) => value / 32768),
+      );
+
       // Verify samples are in -1.0 to 1.0 range
       for (const channelSamples of chunk.samples) {
         for (const sample of channelSamples) {
