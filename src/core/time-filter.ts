@@ -11,12 +11,15 @@
  * matrix to track estimation uncertainty. An adaptive forgetting factor helps the
  * filter recover quickly from network disruptions or server clock adjustments.
  *
- * Direct port of the Python implementation from aiosendspin.
+ * Implements the time filter from the Sendspin specification.
  */
 
-// Residual threshold as fraction of max_error for triggering adaptive forgetting.
+// Residual threshold as multiple of max_error for triggering adaptive forgetting.
 // When residual > CUTOFF * max_error, the filter applies forgetting to recover from outliers.
-const ADAPTIVE_FORGETTING_CUTOFF = 2.0;
+const ADAPTIVE_FORGETTING_CUTOFF = 3.0;
+
+// Scale from max_error, a worst-case bound, to the measurement standard deviation.
+const MAX_ERROR_SCALE = 0.5;
 
 export interface TimeElement {
   last_update: number;
@@ -46,10 +49,10 @@ export class SendspinTimeFilter {
   private _current_time_element: TimeElement;
 
   constructor(
-    offset_process_std_dev: number = 0.01,
-    forget_factor: number = 1.1,
+    offset_process_std_dev: number = 0.0,
+    forget_factor: number = 2.0,
     drift_significance_threshold: number = 2.0,
-    drift_process_std_dev: number = 0.0,
+    drift_process_std_dev: number = 1e-11,
   ) {
     this._offset_process_variance =
       offset_process_std_dev * offset_process_std_dev;
@@ -96,7 +99,7 @@ export class SendspinTimeFilter {
     this._last_update = time_added;
     this._measurements_processed += 1;
 
-    const update_std_dev = max_error;
+    const update_std_dev = max_error * MAX_ERROR_SCALE;
     const measurement_variance = update_std_dev * update_std_dev;
 
     // Filter initialization: First measurement establishes offset baseline
