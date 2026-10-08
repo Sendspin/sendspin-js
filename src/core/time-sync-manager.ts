@@ -6,11 +6,9 @@ import type { ClientTime, MessageType, ServerTime } from "../types";
 const TIME_SYNC_BURST_SIZE = 8;
 const TIME_SYNC_BURST_INTERVAL_MS = 10000;
 const TIME_SYNC_REQUEST_TIMEOUT_MS = 2000;
-const TIME_SYNC_ROBUST_SELECTION_COUNT = 3;
 
 interface TimeSyncSample {
   measurement: number;
-  maxError: number;
   t4: number;
   rttTerm: number;
 }
@@ -106,11 +104,9 @@ export class TimeSyncManager {
 
     const candidate = this.selectTimeSyncBurstCandidate();
     if (candidate) {
-      this.timeFilter.update(
-        candidate.measurement,
-        candidate.maxError,
-        candidate.t4,
-      );
+      // Floor at 1 ms so coarse timers never yield a zero max_error.
+      const maxError = Math.max(1000, candidate.rttTerm / 2);
+      this.timeFilter.update(candidate.measurement, maxError, candidate.t4);
     }
 
     this.timeSyncBurstActive = false;
@@ -124,19 +120,10 @@ export class TimeSyncManager {
       return null;
     }
 
-    const topRttSamples = [...this.timeSyncBurstSamples]
-      .sort((a, b) => a.rttTerm - b.rttTerm)
-      .slice(
-        0,
-        Math.min(
-          TIME_SYNC_ROBUST_SELECTION_COUNT,
-          this.timeSyncBurstSamples.length,
-        ),
-      );
-    const sortedByMeasurement = [...topRttSamples].sort(
-      (a, b) => a.measurement - b.measurement,
+    // Compare raw RTT since the 1 ms max_error floor ties fast LAN samples.
+    return this.timeSyncBurstSamples.reduce((best, sample) =>
+      sample.rttTerm < best.rttTerm ? sample : best,
     );
-    return sortedByMeasurement[Math.floor(sortedByMeasurement.length / 2)];
   }
 
   private abortTimeSyncBurst(): void {
@@ -182,10 +169,8 @@ export class TimeSyncManager {
 
     // Max error (half of round-trip time): max_error = ((T4 - T1) - (T3 - T2)) / 2
     const rttTerm = Math.max(0, T4 - T1 - (T3 - T2));
-    const maxError = Math.max(1000, rttTerm / 2);
     this.timeSyncBurstSamples.push({
       measurement,
-      maxError,
       t4: T4,
       rttTerm,
     });
