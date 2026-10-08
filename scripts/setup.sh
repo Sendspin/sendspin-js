@@ -5,7 +5,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-AIOSENDSPIN_VERSION="9.0.0"
+AIOSENDSPIN_VERSION="10.2.1"
 
 python3 -m venv .venv
 .venv/bin/pip install --upgrade pip
