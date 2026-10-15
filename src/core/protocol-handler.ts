@@ -109,7 +109,10 @@ export class ProtocolHandler {
     this.codecs = config.codecs ?? ["opus", "flac", "pcm"];
     // Left undefined so the capacity is derived from the formats actually
     // advertised in client/hello (see sendClientHello).
-    this.bufferCapacity = config.bufferCapacity;
+    this.bufferCapacity =
+      config.bufferCapacity === undefined
+        ? undefined
+        : Math.round(config.bufferCapacity);
     this.requiredLeadTimeMs = toBufferMs(
       config.requiredLeadTimeMs ?? DEFAULT_REQUIRED_LEAD_TIME_MS,
       "requiredLeadTimeMs",

@@ -246,8 +246,11 @@ describe("ProtocolHandler extra", () => {
       );
     });
 
-    it("uses an explicit buffer capacity when configured", () => {
-      const handler = makeHandler({ codecs: ["pcm"], bufferCapacity: 123_456 });
+    it("uses an explicit buffer capacity rounded to an integer", () => {
+      const handler = makeHandler({
+        codecs: ["pcm"],
+        bufferCapacity: 123_455.6,
+      });
       handler.sendClientHello();
 
       const support = (
