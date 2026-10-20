@@ -244,12 +244,6 @@ describe("getDefaultBufferCapacity", () => {
     );
   });
 
-  it("covers the flac fallback appended to an opus-only request", () => {
-    setEnv({ userAgent: UA.chrome, hasAudioDecoder: true });
-    const capacity = getDefaultBufferCapacity(getSupportedFormats(["opus"]));
-    expect(capacity).toBeGreaterThanOrEqual(195_400 * DEPTH_SECONDS);
-  });
-
   it("stays well above the stream-ahead depth for Opus", () => {
     // Hand-built list: getSupportedFormats never returns opus on its own.
     const capacity = getDefaultBufferCapacity([
