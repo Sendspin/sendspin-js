@@ -105,7 +105,7 @@ export class TimeSyncManager {
     const candidate = this.selectTimeSyncBurstCandidate();
     if (candidate) {
       // Floor at 1 ms so coarse timers never yield a zero max_error.
-      const maxError = Math.max(1000, candidate.rttTerm / 2);
+      const maxError = Math.max(1000, Math.trunc(candidate.rttTerm / 2));
       this.timeFilter.update(candidate.measurement, maxError, candidate.t4);
     }
 
@@ -165,7 +165,7 @@ export class TimeSyncManager {
     const T3 = message.payload.server_transmitted;
 
     // NTP offset calculation: measurement = ((T2 - T1) + (T3 - T4)) / 2
-    const measurement = (T2 - T1 + (T3 - T4)) / 2;
+    const measurement = Math.trunc((T2 - T1 + (T3 - T4)) / 2);
 
     // Max error (half of round-trip time): max_error = ((T4 - T1) - (T3 - T2)) / 2
     const rttTerm = Math.max(0, T4 - T1 - (T3 - T2));
