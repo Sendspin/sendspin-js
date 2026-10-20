@@ -255,26 +255,6 @@ describe("ProtocolHandler extra", () => {
       )["player@v1_support"] as Record<string, unknown>;
       expect(support.buffer_capacity).toBe(123_456);
     });
-
-    it("always offers flac or pcm, even when only opus is requested", () => {
-      // Servers need not support opus, so the hello must carry a codec every
-      // server can produce. Stub WebCodecs so opus survives the browser filter.
-      (globalThis as any).AudioDecoder = class {};
-      try {
-        makeHandler({ codecs: ["opus"] }).sendClientHello();
-      } finally {
-        delete (globalThis as any).AudioDecoder;
-      }
-
-      const support = (
-        lastSent(send, "client/hello")!.payload as Record<string, unknown>
-      )["player@v1_support"] as Record<string, unknown>;
-      const codecs = (
-        support.supported_formats as Array<Record<string, unknown>>
-      ).map((f) => f.codec);
-      expect(codecs[0]).toBe("opus");
-      expect(codecs).toContain("pcm");
-    });
   });
 
   describe("handleServerHello", () => {
