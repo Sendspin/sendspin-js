@@ -238,6 +238,16 @@ describe("SendspinTimeFilter extra", () => {
       expect(filter.offset).toBe(offsetAfterFirst);
     });
 
+    it("skips an update with non-positive max_error without advancing time", () => {
+      filter.update(5000, 500, 100000);
+      filter.update(9999, 0, 200000); // max_error 0 -> skipped
+      expect(filter.count).toBe(1);
+      expect(filter.offset).toBe(5000);
+      // The skipped sample must not consume its timestamp.
+      filter.update(5100, 500, 200000);
+      expect(filter.count).toBe(2);
+    });
+
     it("does not corrupt drift init when a duplicate sits between measurements", () => {
       filter.update(10000, 500, 100000);
       filter.update(10000, 500, 100000); // duplicate, skipped

@@ -89,9 +89,9 @@ export class SendspinTimeFilter {
    * @param time_added - Client timestamp when this measurement was taken in microseconds
    */
   update(measurement: number, max_error: number, time_added: number): void {
-    if (time_added <= this._last_update) {
-      // Skip non-monotonic timestamps. dt == 0 divides by zero in the drift
-      // calc, dt < 0 corrupts the predict step.
+    if (time_added <= this._last_update || max_error <= 0) {
+      // Skip non-monotonic timestamps and non-positive max_error. dt == 0
+      // divides by zero in the drift calc, dt < 0 corrupts the predict step.
       return;
     }
 
