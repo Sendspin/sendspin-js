@@ -78,7 +78,7 @@ describe("TimeSyncManager", () => {
     }
 
     // measurement = (a + b) / 2; maxError = max(1000, (a-b)/2). Every sample
-    // is equivalent so any may be selected — don't pin which t4 wins here
+    // is equivalent so any may be selected. Don't pin which t4 wins here
     // (selection is covered by the next test).
     expect(update).toHaveBeenCalledTimes(1);
     expect(update).toHaveBeenCalledWith(1500, 1000, expect.any(Number));
