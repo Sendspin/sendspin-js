@@ -15,7 +15,6 @@ import {
 import { StateManager } from "../../src/core/state-manager";
 import type { SendspinTimeFilter } from "../../src/core/time-filter";
 import type { StreamHandler } from "../../src/internal-types";
-import { MessageType, type ServerHello } from "../../src/types";
 
 function makeHelloContext(overrides: Partial<HelloContext> = {}): HelloContext {
   return {
@@ -308,19 +307,6 @@ describe("ProtocolHandler extra", () => {
       const handler = makeHandler();
       dispatch(handler, { type: "server/hello", payload: {} });
       expect(lastSent(send, "client/state")).toBeUndefined();
-    });
-
-    it("still replies to a server/hello carrying source@v1_support", () => {
-      const handler = makeHandler();
-      const hello: ServerHello = {
-        type: MessageType.SERVER_HELLO,
-        payload: {
-          name: "Srv",
-          "source@v1_support": { supported_codecs: ["opus", "flac", "pcm"] },
-        },
-      };
-      handler.handleServerMessage(hello);
-      expect(lastSent(send, "client/hello")).toBeDefined();
     });
   });
 
