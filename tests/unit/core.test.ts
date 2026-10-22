@@ -104,6 +104,12 @@ describe("SendspinCore (offline)", () => {
     it("forwards when the server has not declared supported commands", () => {
       expect(() => core.sendCommand("pause", undefined)).not.toThrow();
     });
+
+    it("throws on a NaN controller volume", () => {
+      expect(() => core.sendCommand("volume", { volume: NaN })).toThrow(
+        RangeError,
+      );
+    });
   });
 
   describe("handleBinaryMessage", () => {
@@ -356,6 +362,17 @@ describe("SendspinCore command + state forwarding", () => {
     expect(core.muted).toBe(true);
     expect(send).toHaveBeenCalledTimes(1);
     expect(send.mock.calls[0][0].payload.player.muted).toBe(true);
+  });
+
+  it("setVolume throws on NaN without sending state", () => {
+    const send = spySend(core);
+    activatePlayer(core, send);
+    core.setVolume(42);
+    send.mockClear();
+
+    expect(() => core.setVolume(NaN)).toThrow(RangeError);
+    expect(core.volume).toBe(42);
+    expect(send).not.toHaveBeenCalled();
   });
 
   it("setVolume invokes the onVolumeUpdate callback", () => {

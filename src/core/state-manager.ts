@@ -5,6 +5,10 @@ import type {
   GroupUpdatePayload,
 } from "../types";
 
+export function clampVolume(volume: number): number {
+  return Math.max(0, Math.min(100, Math.round(volume)));
+}
+
 /**
  * Apply a diff to an object, returning a new copy.
  * - Fields from diff are merged into the copy
@@ -88,7 +92,7 @@ export class StateManager {
   }
 
   set volume(value: number) {
-    this._volume = Math.max(0, Math.min(100, value));
+    this._volume = clampVolume(value);
     this.notifyStateChange();
   }
 

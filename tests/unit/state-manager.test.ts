@@ -27,6 +27,11 @@ describe("StateManager", () => {
       sm.volume = -10;
       expect(sm.volume).toBe(0);
     });
+
+    it("rounds volume to an integer", () => {
+      sm.volume = 42.6;
+      expect(sm.volume).toBe(43);
+    });
   });
 
   describe("stream generation", () => {
