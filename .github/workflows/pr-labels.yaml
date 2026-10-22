@@ -22,6 +22,9 @@ on:
 permissions:
   pull-requests: write
 
+concurrency:
+  group: pr-labels-${{ github.event.pull_request.number }}
+
 jobs:
   pr_labels:
     name: Verify
@@ -40,12 +43,15 @@ jobs:
 
             const { owner, repo } = context.repo;
             const issue_number = context.payload.pull_request.number;
-            const current = (context.payload.pull_request.labels || [])
-              .map(l => l.name);
+            // Read the PR fresh, since an earlier run may have relabeled it.
+            const { data: pr } = await github.rest.pulls.get({
+              owner, repo, pull_number: issue_number,
+            });
+            const current = pr.labels.map(l => l.name);
 
             // Match a ticked bullet whose first backticked word is a label,
             // e.g.  - [x] CI / workflow change: `ci`
-            const body = context.payload.pull_request.body || '';
+            const body = pr.body || '';
             const re = /^\s*-\s*\[x\][^`\n]*`([^`]+)`/gim;
             const ticked = [];
             for (const m of body.matchAll(re)) {
