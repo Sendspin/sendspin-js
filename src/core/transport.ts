@@ -53,8 +53,7 @@ export class SendspinTransport {
   private lastHandshakeHash: Uint8Array = new Uint8Array(0);
   private quiesced = false;
   private outboundQueue: object[] = [];
-  private seenActivate = false;
-  private effectiveActiveRoles: string[] | undefined = undefined;
+  private activeRoles: string[] = [];
 
   constructor(
     private wsManager: WebSocketManager,
@@ -119,8 +118,7 @@ export class SendspinTransport {
     this.quiesced = false;
     this.outboundQueue = [];
     this.lastHandshakeHash = new Uint8Array(0);
-    this.seenActivate = false;
-    this.effectiveActiveRoles = undefined;
+    this.activeRoles = [];
   }
 
   /**
@@ -293,7 +291,7 @@ export class SendspinTransport {
         msg as {
           type: string;
           payload: {
-            activities: ("playback" | "pairing" | "management")[];
+            activities: string[];
             active_roles?: string[];
           };
         },
@@ -339,49 +337,42 @@ export class SendspinTransport {
     this.session = new NoiseSession("responder", newHs.split());
     this.matched = entry;
     this.lastHandshakeHash = newHs.handshakeHash;
-    // The re-handshake re-runs the activate sequence, so the next activate is a fresh first.
-    this.seenActivate = false;
-    this.effectiveActiveRoles = undefined;
     this.cb.onHandshakeComplete(this.handshakeInfo!);
   }
 
   protected handleActivate(msg: {
     type: string;
     payload: {
-      activities: ("playback" | "pairing" | "management")[];
+      activities: string[];
       active_roles?: string[];
     };
   }): void {
-    const payloadRoles = msg.payload.active_roles;
-    // active_roles is required on the first activate and persists when later ones omit it.
-    if (!this.seenActivate && payloadRoles === undefined) {
-      this.sendGoodbyeAndClose("unauthorized");
-      return;
-    }
-    if (payloadRoles !== undefined) this.effectiveActiveRoles = payloadRoles;
-    this.seenActivate = true;
-
     const result = authorizeActivate(
       this.matched!.category,
       msg.payload.activities,
-      this.effectiveActiveRoles,
+      msg.payload.active_roles,
+      this.activeRoles,
       this.deps.unpairedAccess,
     );
     if (!result.ok) {
       this.sendGoodbyeAndClose(result.goodbye);
       return;
     }
+    this.activeRoles = result.activeRoles;
     this.clearTimeout();
     const queuedCommands =
       !msg.payload.activities.includes("pairing") &&
-      this.effectiveActiveRoles?.includes("controller@v1")
+      this.activeRoles.includes("controller@v1")
         ? this.outboundQueue.filter(
             (queued) => (queued as { type?: string }).type === "client/command",
           )
         : [];
     this.quiesced = false;
     this.outboundQueue = [];
-    this.cb.onControlMessage(msg);
+    this.cb.onControlMessage({
+      ...msg,
+      payload: { ...msg.payload, active_roles: this.activeRoles },
+    });
     for (const command of queuedCommands) this.encryptSend(command);
   }
 
