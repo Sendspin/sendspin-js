@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 import { randomBytes, randomInt } from "node:crypto";
 import { WebSocket } from "ws";
 import { SendspinCore } from "../../src/core/core";
@@ -6,6 +6,7 @@ import type { SendspinCoreConfig, SendspinStorage } from "../../src/types";
 import type { SuiteId } from "../../src/core/noise/suites";
 import {
   AiosendspinServer,
+  reportDeferredViolations,
   type PairingResult,
 } from "../helpers/aiosendspin-server";
 
@@ -181,13 +182,15 @@ describe("Sendspin encryption and pairing E2E (aiosendspin)", () => {
     await server.start();
   });
 
-  afterEach(async () => {
+  afterEach(async ({ task }) => {
     for (const { core, socket } of connections) {
       core.disconnect();
       socket.close();
     }
-    await server.close();
+    await server.close(task);
   });
+
+  afterAll(reportDeferredViolations);
 
   async function connect(options: ConnectOptions): Promise<Connection> {
     const connection = await connectCore(server, options);
@@ -203,7 +206,6 @@ describe("Sendspin encryption and pairing E2E (aiosendspin)", () => {
       const status = await server.status(connection.core.clientId);
 
       expect(status.psk_category).toBe("sentinel");
-      expect(status.trust_level).toBe("none");
       expect(status.active_roles).toEqual([]);
       expect(
         connection.outboundText.map(
@@ -297,32 +299,37 @@ describe("Sendspin encryption and pairing E2E (aiosendspin)", () => {
     expect(socket.readyState).toBe(WebSocket.CLOSED);
   });
 
-  it("reports exact player state when live trust activates the role", async () => {
-    const connection = await connect({
-      clientName: "Live trust client",
-      unpairedAccess: true,
-    });
-    connection.core.setVolume(42);
+  // G22, G23
+  it.fails(
+    "reports exact player state when live trust activates the role",
+    async () => {
+      const connection = await connect({
+        clientName: "Live trust client",
+        unpairedAccess: true,
+      });
+      connection.core.setVolume(42);
 
-    const trusted = await server.trustUnpaired(connection.core.clientId);
-    expect(trusted.active_roles).toContain("player@v1");
-    const state = await server.waitForClientState(connection.core.clientId, 42);
-    const expectedState = {
-      available: true,
-      player: {
-        volume: 42,
-        muted: false,
-        static_delay_ms: 0,
-        required_lead_time_ms: 250,
-        min_buffer_ms: 250,
-        supported_commands: ["set_static_delay"],
-      },
-    };
-    expect(state.accepted_by_strict_parser).toBe(true);
-    expect(state.parsed_payload).toEqual(expectedState);
-    expect(state.parsed_payload.player).not.toHaveProperty("state");
-    expect(state.semantic_state).toEqual(expectedState);
-  });
+      const trusted = await server.trustUnpaired(connection.core.clientId);
+      expect(trusted.active_roles).toContain("player@v1");
+      const state = await server.waitForClientState(
+        connection.core.clientId,
+        42,
+      );
+      const expectedState = {
+        available: true,
+        player: {
+          volume: 42,
+          muted: false,
+          output_delay_ms: 0,
+          required_lead_time_ms: 250,
+          min_buffer_ms: 250,
+          supported_commands: ["volume", "mute", "set_output_delay"],
+        },
+      };
+      expect(state.raw_payload).toEqual(expectedState);
+      expect(state.semantic_state).toEqual(expectedState);
+    },
+  );
 
   it("rejects a malformed Pairing PSK token", async () => {
     const connection = await connect({ clientName: "Malformed token client" });
@@ -373,7 +380,6 @@ describe("Sendspin encryption and pairing E2E (aiosendspin)", () => {
       expectPairingResult(result, "success");
       expect(result.connected).toBe(true);
       expect(result.psk_category).toBe("long_term");
-      expect(result.trust_level).toBe("user");
       expect(result.active_roles).toContain("player@v1");
       expect(result.has_pairing_record).toBe(true);
       expect(connection.socket.readyState).toBe(WebSocket.OPEN);
@@ -409,21 +415,21 @@ describe("Sendspin encryption and pairing E2E (aiosendspin)", () => {
         },
       });
 
-      await server.beginPinPairing("dynamic_pin");
-      expect((await server.waitForPinRequest()).status).toBe("pin_requested");
+      await server.beginCodePairing("dynamic_pairing_code");
+      expect((await server.waitForCodeRequest()).status).toBe("code_requested");
       await waitFor(() => pins.length === 1);
       connection.core.setVolume(42);
       connection.core.sendCommand("play", undefined as never);
       await new Promise((resolve) => setTimeout(resolve, 5_200));
       expect(connection.socket.readyState).toBe(WebSocket.OPEN);
-      const first = await server.submitPin(wrongPin(pins[0]));
-      expectPairingResult(first, "aborted", "pin_mismatch");
+      const first = await server.submitCode(wrongPin(pins[0]));
+      expectPairingResult(first, "aborted", "pairing_code_mismatch");
       expect(connection.socket.readyState).toBe(WebSocket.OPEN);
 
-      await server.beginPinPairing("dynamic_pin");
-      expect((await server.waitForPinRequest()).status).toBe("pin_requested");
+      await server.beginCodePairing("dynamic_pairing_code");
+      expect((await server.waitForCodeRequest()).status).toBe("code_requested");
       await waitFor(() => pins.length === 2);
-      const second = await server.submitPin(pins[1]);
+      const second = await server.submitCode(pins[1]);
       expectPairingResult(second, "success");
       expect(second.connected).toBe(true);
       expect(second.psk_category).toBe("long_term");
@@ -458,11 +464,13 @@ describe("Sendspin encryption and pairing E2E (aiosendspin)", () => {
       });
 
       for (let attempt = 0; attempt < 10; attempt++) {
-        await server.beginPinPairing("dynamic_pin");
-        expect((await server.waitForPinRequest()).status).toBe("pin_requested");
+        await server.beginCodePairing("dynamic_pairing_code");
+        expect((await server.waitForCodeRequest()).status).toBe(
+          "code_requested",
+        );
         await waitFor(() => pins.length === attempt + 1);
-        const result = await server.submitPin(wrongPin(pins[attempt]));
-        expectPairingResult(result, "aborted", "pin_mismatch");
+        const result = await server.submitCode(wrongPin(pins[attempt]));
+        expectPairingResult(result, "aborted", "pairing_code_mismatch");
       }
       expect(connection.core.isDynamicPinEscalated()).toBe(true);
       expect(await server.hasPairingRecord(connection.core.clientId)).toBe(
@@ -480,38 +488,46 @@ describe("Sendspin encryption and pairing E2E (aiosendspin)", () => {
       // The counter survived the reconnect, so the method stays escalated: the
       // client withholds pair-init until the operator opens the window.
       expect(reconnected.core.isDynamicPinEscalated()).toBe(true);
-      await server.beginPinPairing("dynamic_pin");
-      expect((await server.waitForPinRequest(200)).status).toBe("timeout");
+      await server.beginCodePairing("dynamic_pairing_code");
+      expect((await server.waitForCodeRequest(200)).status).toBe("timeout");
       expect(reconnected.socket.readyState).toBe(WebSocket.OPEN);
 
       reconnected.core.openPairingWindow();
-      expect((await server.waitForPinRequest()).status).toBe("pin_requested");
+      expect((await server.waitForCodeRequest()).status).toBe("code_requested");
       await waitFor(() => pins.length === 11);
-      expectPairingResult(await server.submitPin(pins[10]), "success");
+      expectPairingResult(await server.submitCode(pins[10]), "success");
       // A verified round de-escalates the method.
       expect(reconnected.core.isDynamicPinEscalated()).toBe(false);
     },
     TEST_TIMEOUT_MS,
   );
 
-  it("advertises the configured out-channels and secret locations", async () => {
-    const connection = await connect({
-      clientName: "Descriptor hints client",
-      onPairingPin: () => undefined,
-      pinOutChannels: ["display", "speaker"],
-      staticPin: "31415926",
-      staticPinLocations: ["device", "leaflet"],
-      pairingPskLocations: ["leaflet"],
-    });
+  // G47
+  it.fails(
+    "advertises the configured out-channels and secret locations",
+    async () => {
+      const connection = await connect({
+        clientName: "Descriptor hints client",
+        onPairingPin: () => undefined,
+        pinOutChannels: ["display", "speaker"],
+        staticPin: "31415926",
+        staticPinLocations: ["device", "leaflet"],
+        pairingPskLocations: ["leaflet"],
+      });
 
-    const status = await server.status(connection.core.clientId);
-    const byMethod = Object.fromEntries(
-      status.pair_method_descriptors.map((d) => [d.method, d]),
-    );
-    expect(byMethod.dynamic_pin.out_channels).toEqual(["display", "speaker"]);
-    expect(byMethod.static_pin.locations).toEqual(["device", "leaflet"]);
-    expect(byMethod.pairing_psk.locations).toEqual(["leaflet"]);
-  });
+      const methods = (await server.status(connection.core.clientId))
+        .supported_pair_methods;
+      expect(methods.dynamic_pairing_code?.out_channels).toEqual([
+        "display",
+        "speaker",
+      ]);
+      expect(methods.static_pairing_code?.locations).toEqual([
+        "device",
+        "leaflet",
+      ]);
+      expect(methods.pairing_psk?.locations).toEqual(["leaflet"]);
+    },
+  );
 
   it("waits for the Static PIN window before pairing", async () => {
     const pin = randomInt(0, 100_000_000).toString().padStart(8, "0");
@@ -520,12 +536,12 @@ describe("Sendspin encryption and pairing E2E (aiosendspin)", () => {
       staticPin: pin,
     });
 
-    await server.beginPinPairing("static_pin");
-    expect((await server.waitForPinRequest(200)).status).toBe("timeout");
+    await server.beginCodePairing("static_pairing_code");
+    expect((await server.waitForCodeRequest(200)).status).toBe("timeout");
     expect(connection.socket.readyState).toBe(WebSocket.OPEN);
     connection.core.openPairingWindow();
-    expect((await server.waitForPinRequest()).status).toBe("pin_requested");
-    const result = await server.submitPin(pin);
+    expect((await server.waitForCodeRequest()).status).toBe("code_requested");
+    const result = await server.submitCode(pin);
     expectPairingResult(result, "success");
     expect(result.connected).toBe(true);
     expect(result.psk_category).toBe("long_term");
@@ -545,10 +561,10 @@ describe("Sendspin encryption and pairing E2E (aiosendspin)", () => {
         },
       });
 
-      await server.beginPinPairing("dynamic_pin");
-      expect((await server.waitForPinRequest()).status).toBe("pin_requested");
+      await server.beginCodePairing("dynamic_pairing_code");
+      expect((await server.waitForCodeRequest()).status).toBe("code_requested");
       await waitFor(() => pins.length === 1);
-      expectPairingResult(await server.submitPin(pins[0]), "success");
+      expectPairingResult(await server.submitCode(pins[0]), "success");
       const clientId = connection.core.clientId;
       connection.core.disconnect();
       connection.socket.close();

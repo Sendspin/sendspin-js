@@ -3,30 +3,30 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 import { createInterface, type Interface } from "node:readline";
+import { KNOWN_VIOLATIONS } from "./known-violations";
 
 const PYTHON_BIN = resolve(import.meta.dirname, "../../.venv/bin/python");
 const SERVER_SCRIPT = resolve(import.meta.dirname, "sendspin-server.py");
 const STATE_PREFIX = join(tmpdir(), "sendspin-js-aiosendspin-");
 
-export type PskCategory = "sentinel" | "pairing" | "long_term";
-export type PairMethod = "dynamic_pin" | "pairing_psk" | "static_pin";
+const NONCOMPLIANCE_SUBJECT = "non-compliant client";
 
-/** A client/hello pair-method descriptor as the server parsed it. */
-export interface PairMethodDescriptor {
-  method: PairMethod;
-  out_channels: string[];
-  min_pin_length: number | null;
-  locations: string[];
+export type PskCategory = "sentinel" | "pairing" | "long_term";
+export type PairingCodeMethod = "dynamic_pairing_code" | "static_pairing_code";
+
+/** client/hello supported_pair_methods as the server parsed it. */
+export interface SupportedPairMethods {
+  pairing_psk?: { locations?: string[] };
+  static_pairing_code?: { locations?: string[] };
+  dynamic_pairing_code?: { out_channels: string[]; formats: string[] };
 }
 
 export interface ClientStatus {
   client_id: string | null;
   connected: boolean;
   psk_category: PskCategory | null;
-  trust_level: "none" | "user" | null;
   active_roles: string[];
-  supported_pair_methods: PairMethod[];
-  pair_method_descriptors: PairMethodDescriptor[];
+  supported_pair_methods: SupportedPairMethods;
   has_pairing_record: boolean;
 }
 
@@ -35,35 +35,35 @@ export interface PairingResult extends ClientStatus {
   reason: string | null;
 }
 
-export type PinWaitResult =
-  | PairingResult
-  | { status: "pin_requested" | "timeout" };
+export type CodeWaitResult =
+  PairingResult | { status: "code_requested" | "timeout" };
 
 export interface ReceivedClientState {
-  accepted_by_strict_parser: boolean;
-  parsed_payload: {
-    available: boolean;
-    player: {
-      volume: number;
-      muted: boolean;
-      static_delay_ms: number;
-      required_lead_time_ms: number;
-      min_buffer_ms: number;
-      supported_commands: string[];
-      state?: string;
-    };
-  };
+  raw_payload: Record<string, unknown>;
   semantic_state: {
     available: boolean;
     player: {
       volume: number;
       muted: boolean;
-      static_delay_ms: number;
+      output_delay_ms: number;
       required_lead_time_ms: number;
       min_buffer_ms: number;
       supported_commands: string[];
     };
   };
+}
+
+interface ServerLogLine {
+  log?: { level: string; name: string; message: string };
+}
+
+// it.fails absorbs afterEach errors, so its violations are reported from afterAll.
+const deferredViolations: string[] = [];
+
+export function reportDeferredViolations(): void {
+  if (deferredViolations.length) {
+    throw new Error(deferredViolations.splice(0).join("\n"));
+  }
 }
 
 interface CommandResponse<T> {
@@ -118,6 +118,7 @@ export class AiosendspinServer {
   private stderrTail: string[] = [];
   private procError: Error | null = null;
   private stateDir = "";
+  private noncompliance: string[] = [];
 
   port = 0;
 
@@ -183,12 +184,8 @@ export class AiosendspinServer {
       }
       this.responseQueue.shift()?.resolve(line);
     });
-    proc.stderr!.on("data", (data: Buffer) => {
-      for (const line of data.toString("utf8").split("\n")) {
-        if (!line) continue;
-        this.stderrTail.push(line);
-        if (this.stderrTail.length > 50) this.stderrTail.shift();
-      }
+    createInterface({ input: proc.stderr! }).on("line", (line) => {
+      if (line) this.recordStderrLine(line);
     });
 
     const ready = JSON.parse(await this.readLine(10_000)) as {
@@ -196,6 +193,23 @@ export class AiosendspinServer {
     };
     if (!ready.ready?.port) throw new Error("Server did not report a port");
     this.port = ready.ready.port;
+  }
+
+  private recordStderrLine(line: string): void {
+    let text = line;
+    try {
+      const parsed = JSON.parse(line) as ServerLogLine;
+      if (parsed.log) {
+        text = `${parsed.log.level} ${parsed.log.name}: ${parsed.log.message}`;
+        if (parsed.log.message.includes(NONCOMPLIANCE_SUBJECT)) {
+          this.noncompliance.push(parsed.log.message);
+        }
+      }
+    } catch {
+      // Plain stderr output, kept as is.
+    }
+    this.stderrTail.push(text);
+    if (this.stderrTail.length > 50) this.stderrTail.shift();
   }
 
   private formatStderrTail(): string {
@@ -294,20 +308,20 @@ export class AiosendspinServer {
     return this.sendCommand<PairingResult>("pair_token", { token }, 35_000);
   }
 
-  async beginPinPairing(method: "dynamic_pin" | "static_pin"): Promise<void> {
-    await this.sendCommand("begin_pin", { method });
+  async beginCodePairing(method: PairingCodeMethod): Promise<void> {
+    await this.sendCommand("begin_code", { method });
   }
 
-  waitForPinRequest(timeoutMs = 10_000): Promise<PinWaitResult> {
+  waitForCodeRequest(timeoutMs = 10_000): Promise<CodeWaitResult> {
     return this.sendCommand(
-      "wait_pin",
+      "wait_code",
       { timeout_ms: timeoutMs },
       timeoutMs + 1_000,
     );
   }
 
-  submitPin(pin: string): Promise<PairingResult> {
-    return this.sendCommand("submit_pin", { pin }, 35_000);
+  submitCode(code: string): Promise<PairingResult> {
+    return this.sendCommand("submit_code", { code }, 35_000);
   }
 
   async hasPairingRecord(clientId: string): Promise<boolean> {
@@ -363,12 +377,21 @@ export class AiosendspinServer {
     this.port = 0;
   }
 
-  async close(): Promise<void> {
+  /** Stop the server, then fail `test` on non-compliance outside the known list. */
+  async close(test: { name: string; fails?: boolean }): Promise<void> {
     await this.stopProcess();
     const stateDir = this.stateDir;
     this.stateDir = "";
     if (stateDir.startsWith(STATE_PREFIX)) {
       await rm(stateDir, { recursive: true, force: true });
     }
+    const unknown = this.noncompliance.filter(
+      (message) =>
+        !KNOWN_VIOLATIONS.some((known) => message.includes(known.message)),
+    );
+    if (!unknown.length) return;
+    const error = `Server logged unknown non-compliance:\n${unknown.join("\n")}`;
+    if (!test.fails) throw new Error(error);
+    deferredViolations.push(`${test.name}: ${error}`);
   }
 }

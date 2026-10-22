@@ -1,0 +1,1 @@
+aiosendspin[server]==10.2.1
