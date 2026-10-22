@@ -17,12 +17,21 @@ const concat = (a: Uint8Array, b: Uint8Array) => {
   return output;
 };
 
-function setupRehandshake() {
+function setupRehandshake(
+  beforeRehandshake?: (
+    h: ReturnType<typeof harness>,
+    session: NoiseSession,
+  ) => void,
+  toPairingPsk = false,
+) {
   const h = harness();
   const { serverSession, serverId, server, clientId, priorHash } =
     completeHandshake(h);
-  const longTermPsk = new Uint8Array(32).fill(77);
-  h.store.addLongTerm(longTermPsk, serverId);
+  beforeRehandshake?.(h, serverSession);
+  const newPsk = toPairingPsk
+    ? h.store.getOrCreatePairingPsk()
+    : new Uint8Array(32).fill(77);
+  if (!toPairingPsk) h.store.addLongTerm(newPsk, serverId);
 
   const initiator = new HandshakeState({
     suite: SUITES.chacha,
@@ -30,11 +39,11 @@ function setupRehandshake() {
     prologue: priorHash,
     s: server,
     rs: base64urlDecode(clientId),
-    psk: longTermPsk,
+    psk: newPsk,
   });
   const message1 = initiator.writeMessage(
     MSG1,
-    utf8.encode(JSON.stringify({ psk_id: pskId(longTermPsk) })),
+    utf8.encode(JSON.stringify({ psk_id: pskId(newPsk) })),
   );
   const message1Frame = concat(
     Uint8Array.of(0),
@@ -66,7 +75,7 @@ function deliverActivate(
   h: ReturnType<typeof harness>,
   session: NoiseSession,
   activities: string[],
-  activeRoles: string[],
+  activeRoles: string[] | undefined,
   pairMethod?: string,
 ): void {
   const frame = concat(
@@ -88,6 +97,20 @@ function deliverActivate(
 }
 
 describe("transport re-handshake", () => {
+  it("keeps active_roles from before the re-handshake when the next activate omits them", () => {
+    const { h, newServerSession } = setupRehandshake((h, session) =>
+      deliverActivate(h, session, ["playback"], ["player@v1"]),
+    );
+
+    deliverActivate(h, newServerSession, ["playback"], undefined);
+
+    expect(h.ws.disconnected).toBe(false);
+    expect(h.cb.onControlMessage).toHaveBeenLastCalledWith({
+      type: "server/activate",
+      payload: { activities: ["playback"], active_roles: ["player@v1"] },
+    });
+  });
+
   it("retains a queued command when playback restores the controller role", () => {
     const { h, newServerSession } = setupRehandshake();
     expect(h.transport.handshakeInfo?.trustLevel).toBe("user");
@@ -142,7 +165,7 @@ describe("transport re-handshake", () => {
   });
 
   it("drops queued normal traffic when the re-handshake enters pairing", () => {
-    const { h, newServerSession } = setupRehandshake();
+    const { h, newServerSession } = setupRehandshake(undefined, true);
     const before = fakeWsSend(h).binary.length;
     h.transport.sendControl({
       type: "client/state",
@@ -155,7 +178,7 @@ describe("transport re-handshake", () => {
     h.transport.sendControl({ type: "client/hello", payload: { name: "Cli" } });
     expect(fakeWsSend(h).binary.length).toBe(before + 1);
 
-    deliverActivate(h, newServerSession, ["pairing"], [], "dynamic_pin");
+    deliverActivate(h, newServerSession, ["pairing"], [], "pairing_psk");
 
     expect(fakeWsSend(h).binary.length).toBe(before + 1);
   });

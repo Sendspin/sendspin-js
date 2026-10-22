@@ -302,7 +302,7 @@ export interface ActivatePairing {
 export interface ServerActivate {
   type: MessageType.SERVER_ACTIVATE;
   payload: {
-    activities: Array<"playback" | "pairing" | "management">;
+    activities: Array<"playback" | "pairing">;
     active_roles?: string[];
     pairing?: ActivatePairing;
   };

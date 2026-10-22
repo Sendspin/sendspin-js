@@ -1,75 +1,69 @@
 import type { PskCategory } from "./noise/psk";
 import type { GoodbyeReason } from "../types";
 
-type Activity = "playback" | "pairing" | "management";
+export type AuthResult =
+  { ok: true; activeRoles: string[] } | { ok: false; goodbye: GoodbyeReason };
 
-export type AuthResult = { ok: true } | { ok: false; goodbye: GoodbyeReason };
-
-/** Is this activity set allowed at all for the matched PSK category? */
 function isAllowedActivitySet(
   category: PskCategory,
-  set: Set<Activity>,
+  activities: readonly string[],
   unpairedAccess: boolean,
 ): boolean {
-  if (category === "long_term") {
-    // ['pairing'] alone, or any subset of {playback, management}.
-    if (set.has("pairing")) return set.size === 1;
-    for (const a of set)
-      if (a !== "playback" && a !== "management") return false;
-    return true;
+  if (activities.some((a) => a !== "playback" && a !== "pairing")) {
+    return false;
   }
-  if (category === "pairing") {
-    return set.size === 1 && set.has("pairing");
-  }
-  // sentinel
-  if (set.size === 0) return true;
-  if (set.size === 1 && set.has("pairing")) return true;
-  if (set.size === 1 && set.has("playback")) return unpairedAccess;
-  return false;
+  if (category === "long_term") return !activities.includes("pairing");
+  return unpairedAccess || !activities.includes("playback");
 }
 
-/**
- * Is the WHOLE activation admissible for the given unpairedAccess: activities allowed AND
- * (if active_roles present) the connection is playback-capable (activities + 'playback' allowed)?
- */
+function isPlaybackCapable(
+  category: PskCategory,
+  activities: readonly string[],
+  unpairedAccess: boolean,
+): boolean {
+  return isAllowedActivitySet(
+    category,
+    [...activities, "playback"],
+    unpairedAccess,
+  );
+}
+
 function isAdmissible(
   category: PskCategory,
-  set: Set<Activity>,
-  hasActiveRoles: boolean,
+  activities: readonly string[],
+  activeRoles: readonly string[],
   unpairedAccess: boolean,
 ): boolean {
-  if (!isAllowedActivitySet(category, set, unpairedAccess)) return false;
-  if (hasActiveRoles) {
-    const withPlayback = new Set(set);
-    withPlayback.add("playback");
-    if (!isAllowedActivitySet(category, withPlayback, unpairedAccess)) {
-      return false;
-    }
-  }
-  return true;
+  if (!isAllowedActivitySet(category, activities, unpairedAccess)) return false;
+  return (
+    activeRoles.length === 0 ||
+    isPlaybackCapable(category, activities, unpairedAccess)
+  );
 }
 
+/** Checks a server/activate and resolves its effective active_roles. */
 export function authorizeActivate(
   category: PskCategory,
-  activities: Activity[],
-  activeRoles: string[] | undefined,
+  activities: readonly string[],
+  activeRoles: readonly string[] | undefined,
+  persistedRoles: readonly string[],
   unpairedAccess: boolean,
 ): AuthResult {
   // The activation's `pairing` object is ignored unless 'pairing' is in
   // activities, so it never bears on authorization.
-  const set = new Set(activities);
-  const hasActiveRoles = !!activeRoles && activeRoles.length > 0;
+  const roles =
+    activeRoles ??
+    (isPlaybackCapable(category, activities, unpairedAccess)
+      ? persistedRoles
+      : []);
 
-  if (isAdmissible(category, set, hasActiveRoles, unpairedAccess)) {
-    return { ok: true };
+  if (isAdmissible(category, activities, roles, unpairedAccess)) {
+    return { ok: true, activeRoles: [...roles] };
   }
-  // pairing_required exactly when the matched PSK is Sentinel and enabling unpaired
-  // access would make the whole activation admissible. Covers both a ['playback']
-  // activation AND an active_roles-gated one blocked solely by unpairedAccess=false.
   if (
-    category === "sentinel" &&
+    category !== "long_term" &&
     !unpairedAccess &&
-    isAdmissible(category, set, hasActiveRoles, true)
+    isAdmissible(category, activities, roles, true)
   ) {
     return { ok: false, goodbye: "pairing_required" };
   }
