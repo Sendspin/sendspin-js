@@ -5,10 +5,8 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-AIOSENDSPIN_VERSION="10.2.1"
-
 python3 -m venv .venv
 .venv/bin/pip install --upgrade pip
-.venv/bin/pip install "aiosendspin[server]==${AIOSENDSPIN_VERSION}"
+.venv/bin/pip install -r tests/requirements.txt
 
 yarn install --frozen-lockfile
