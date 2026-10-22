@@ -177,7 +177,7 @@ describe("TimeSyncManager extra", () => {
     vi.useRealTimers();
   });
 
-  it("schedules a recurring burst every 10s after the previous one finalizes", () => {
+  it("starts the next burst less than 10s after the previous one started", () => {
     mgr.startAndSchedule();
 
     // Complete the first full burst (8 probes).
@@ -193,8 +193,8 @@ describe("TimeSyncManager extra", () => {
     const afterFirst = send.mock.calls.length;
     expect(afterFirst).toBe(8);
 
-    // Advance to the next tick; a second burst should begin.
-    vi.advanceTimersByTime(10000);
+    // A second burst starts before 10s have passed.
+    vi.advanceTimersByTime(9999);
     expect(send.mock.calls.length).toBe(afterFirst + 1);
     runBurst();
     expect(update).toHaveBeenCalledTimes(2);

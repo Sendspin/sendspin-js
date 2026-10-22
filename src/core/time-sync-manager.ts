@@ -4,7 +4,8 @@ import type { MessageSender } from "./protocol-handler";
 import type { ClientTime, MessageType, ServerTime } from "../types";
 
 const TIME_SYNC_BURST_SIZE = 8;
-const TIME_SYNC_BURST_INTERVAL_MS = 10000;
+// Stays under the spec's 10 s maximum between burst starts, leaving room for timer lateness.
+const TIME_SYNC_BURST_INTERVAL_MS = 9000;
 const TIME_SYNC_REQUEST_TIMEOUT_MS = 2000;
 
 interface TimeSyncSample {
@@ -33,7 +34,7 @@ export class TimeSyncManager {
     this.scheduleNextTimeSyncBurstTick();
   }
 
-  // Schedule the next fixed 10s burst tick.
+  // Schedule the next burst tick.
   private scheduleNextTimeSyncBurstTick(): void {
     const timeSyncTimeout = globalThis.setTimeout(() => {
       this.startTimeSyncBurstIfIdle();
