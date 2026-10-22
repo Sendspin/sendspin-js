@@ -169,26 +169,28 @@ export interface ServerTime {
 }
 
 export interface ServerStateMetadata {
-  timestamp?: number;
-  title?: string | null;
-  artist?: string | null;
-  album?: string | null;
-  artwork_url?: string | null;
-  year?: number | null;
-  track_number?: number | null;
+  timestamp: number;
+  title?: string;
+  artist?: string;
+  album_artist?: string;
+  album?: string;
+  artwork_url?: string;
+  year?: number;
+  track?: number;
   progress?: {
     track_progress: number;
     track_duration: number;
     playback_speed: number;
-  } | null;
-  repeat?: "off" | "one" | "all" | null;
-  shuffle?: boolean | null;
+  };
 }
 
 export interface ServerStateController {
-  supported_commands?: string[];
-  volume?: number;
-  muted?: boolean;
+  supported_commands: string[];
+  volume: number;
+  muted: boolean;
+  repeat: "off" | "one" | "all";
+  shuffle: boolean;
+  seek_max_ms?: number;
 }
 
 export interface ServerStatePlayer {
@@ -766,7 +768,7 @@ export interface SendspinCoreConfig {
     volume: number;
     muted: boolean;
     playerState: PlayerState;
-    /** Cached server state (merged from server/state messages) */
+    /** Cached server state (latest role objects from server/state messages) */
     serverState: ServerStatePayload;
     /** Cached group state (merged from group/update messages) */
     groupState: GroupUpdatePayload;

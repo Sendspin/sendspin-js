@@ -222,6 +222,7 @@ export class SendspinCore implements StreamHandler {
     this.protocolHandler.stopTimeSync();
     this.protocolHandler.resetActivation();
     this.pairing.reset();
+    this.stateManager.clearServerState();
     // Stop periodic state-update sends so they don't spam
     // "WebSocket not connected" warnings after the transport is gone.
     this.stateManager.clearStateUpdateInterval();
@@ -536,7 +537,7 @@ export class SendspinCore implements StreamHandler {
     playbackSpeed: number;
   } | null {
     const metadata = this.stateManager.serverState.metadata;
-    if (!metadata?.progress || metadata.timestamp === undefined) {
+    if (!metadata?.progress) {
       return null;
     }
 

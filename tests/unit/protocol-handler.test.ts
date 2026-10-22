@@ -13,7 +13,7 @@ import {
   type MessageSender,
 } from "../../src/core/protocol-handler";
 import { StateManager } from "../../src/core/state-manager";
-import type { SendspinTimeFilter } from "../../src/core/time-filter";
+import { SendspinTimeFilter } from "../../src/core/time-filter";
 import type { StreamHandler } from "../../src/internal-types";
 
 function makeHelloContext(overrides: Partial<HelloContext> = {}): HelloContext {
@@ -191,6 +191,45 @@ describe("ProtocolHandler extra", () => {
   afterEach(() => {
     stateManager.clearAllIntervals();
     vi.useRealTimers();
+  });
+
+  describe("server/state metadata timing", () => {
+    beforeEach(() => {
+      vi.spyOn(performance, "now").mockReturnValue(1000);
+      timeFilter = new SendspinTimeFilter(0, 1.1, 2.0, 1e-12);
+    });
+
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it("defers metadata until its timestamp, translated by the time filter", () => {
+      // Server clock runs 5 s ahead, so server time 7 s is local time 2 s,
+      // 1 s after the mocked local now of 1 s.
+      timeFilter.update(5_000_000, 500, 900_000);
+      const handler = makeHandler();
+
+      dispatch(handler, {
+        type: "server/state",
+        payload: { metadata: { timestamp: 7_000_000, title: "Next" } },
+      });
+      vi.advanceTimersByTime(999);
+      expect(stateManager.serverState.metadata).toBeUndefined();
+
+      vi.advanceTimersByTime(1);
+      expect(stateManager.serverState.metadata?.title).toBe("Next");
+    });
+
+    it("applies metadata at once before the first time sync measurement", () => {
+      const handler = makeHandler();
+
+      dispatch(handler, {
+        type: "server/state",
+        payload: { metadata: { timestamp: 7_000_000_000, title: "Current" } },
+      });
+
+      expect(stateManager.serverState.metadata?.title).toBe("Current");
+    });
   });
 
   describe("sendClientHello", () => {

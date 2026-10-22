@@ -164,7 +164,7 @@ export class ProtocolHandler {
         break;
 
       case "server/state":
-        this.stateManager.updateServerState((message as ServerState).payload);
+        this.handleServerState(message as ServerState);
         break;
 
       case "group/update":
@@ -242,6 +242,18 @@ export class ProtocolHandler {
     if (!preserveActiveRoles) this.activeRoles = null;
     this.timeSyncManager.stop();
     this.stateManager.clearStateUpdateInterval();
+  }
+
+  // Without a time sync measurement the filter has no estimate to translate
+  // the metadata timestamp with, so the update applies immediately.
+  private handleServerState(message: ServerState): void {
+    const { metadata } = message.payload;
+    let metadataDelayMs = 0;
+    if (metadata && this.timeFilter.count > 0) {
+      const localUs = this.timeFilter.computeClientTime(metadata.timestamp);
+      metadataDelayMs = (localUs - performance.now() * 1000) / 1000;
+    }
+    this.stateManager.updateServerState(message.payload, metadataDelayMs);
   }
 
   private handleStreamStart(message: StreamStart): void {

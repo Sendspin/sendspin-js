@@ -167,20 +167,6 @@ describe("SendspinCore.trackProgress", () => {
     expect(core.trackProgress).toBeNull();
   });
 
-  it("returns null when progress exists but timestamp is undefined", () => {
-    // Without a timestamp the elapsed term is undefined; must not interpolate.
-    core._stateManager.updateServerState({
-      metadata: {
-        progress: {
-          track_progress: 1000,
-          track_duration: 5000,
-          playback_speed: 1000,
-        },
-      },
-    });
-    expect(core.trackProgress).toBeNull();
-  });
-
   it("interpolates position from elapsed server time at normal speed", () => {
     // No time sync -> offset 0 -> serverTimeUs == client now in us.
     // now = 2000ms -> serverTimeUs = 2_000_000us. metadata timestamp = 1_000_000us.
