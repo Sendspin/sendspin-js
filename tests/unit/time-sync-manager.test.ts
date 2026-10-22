@@ -2,7 +2,7 @@
  * Unit tests for TimeSyncManager (NTP-style burst → Kalman filter feeder).
  *
  * Drives the burst state machine with a stubbed performance.now and a fake
- * MessageSender so the NTP arithmetic, robust candidate selection, and
+ * MessageSender so the NTP arithmetic, candidate selection, and
  * timeout/abort paths are exercised deterministically.
  */
 
@@ -78,16 +78,16 @@ describe("TimeSyncManager", () => {
     }
 
     // measurement = (a + b) / 2; maxError = max(1000, (a-b)/2). Every sample
-    // is equivalent so any may be selected — don't pin which t4 wins here
+    // is equivalent so any may be selected. Don't pin which t4 wins here
     // (selection is covered by the next test).
     expect(update).toHaveBeenCalledTimes(1);
     expect(update).toHaveBeenCalledWith(1500, 1000, expect.any(Number));
   });
 
-  it("selects the median measurement among the lowest-RTT samples", () => {
+  it("selects the lowest-RTT sample when the best max_errors are floored", () => {
     // Per-probe (a, b): measurement = (a+b)/2, rtt = a-b.
     const a = [3000, 3000, 3000, 10000, 10000, 10000, 10000, 10000];
-    const b = [2900, 2800, 2700, 0, 0, 0, 0, 0];
+    const b = [2800, 2900, 2700, 0, 0, 0, 0, 0];
     const recvMs = [10, 20, 30, 40, 50, 60, 70, 80];
 
     mgr.startAndSchedule();
@@ -99,10 +99,9 @@ describe("TimeSyncManager", () => {
       respond(t1, t1 + a[i], t4 + b[i]);
     }
 
-    // Lowest-3 rtt = probes 0/1/2 (rtt 100/200/300), measurements
-    // 2950/2900/2850 → median 2900 (probe 1).
+    // Probe 1 has the lowest rtt (100), so its measurement and t4 are used.
     expect(update).toHaveBeenCalledTimes(1);
-    expect(update.mock.calls[0][0]).toBe(2900);
+    expect(update).toHaveBeenCalledWith(2950, 1000, 20000);
   });
 
   it("ignores an out-of-order response and does not advance the burst", () => {
@@ -178,7 +177,7 @@ describe("TimeSyncManager extra", () => {
     vi.useRealTimers();
   });
 
-  it("schedules a recurring burst every 10s after the previous one finalizes", () => {
+  it("starts the next burst less than 10s after the previous one started", () => {
     mgr.startAndSchedule();
 
     // Complete the first full burst (8 probes).
@@ -194,8 +193,8 @@ describe("TimeSyncManager extra", () => {
     const afterFirst = send.mock.calls.length;
     expect(afterFirst).toBe(8);
 
-    // Advance to the next tick; a second burst should begin.
-    vi.advanceTimersByTime(10000);
+    // A second burst starts before 10s have passed.
+    vi.advanceTimersByTime(9999);
     expect(send.mock.calls.length).toBe(afterFirst + 1);
     runBurst();
     expect(update).toHaveBeenCalledTimes(2);
