@@ -58,6 +58,8 @@ const deadbandThresholdInput = document.getElementById("deadband-threshold");
 const groupVolumeSlider = document.getElementById("group-volume-slider");
 const groupVolumeValue = document.getElementById("group-volume-value");
 const groupMuteBtn = document.getElementById("group-mute-btn");
+const seekBackBtn = document.getElementById("seek-back-btn");
+const seekForwardBtn = document.getElementById("seek-forward-btn");
 const groupMuteIcon = document.getElementById("group-mute-icon");
 const clientIdEl = document.getElementById("client-id");
 const pairingTokenEl = document.getElementById("pairing-token");
@@ -104,12 +106,14 @@ const trackAlbum = document.getElementById("track-album");
 const groupName = document.getElementById("group-name");
 const artwork = document.getElementById("artwork");
 const artworkPlaceholder = document.getElementById("artwork-placeholder");
+const progressBar = document.getElementById("progress-bar");
 const progressFill = document.getElementById("progress-fill");
 const progressCurrent = document.getElementById("progress-current");
 const progressDuration = document.getElementById("progress-duration");
 
 // Player instance
 let player = null;
+let controllerState = null;
 let statusUpdateInterval = null;
 
 /**
@@ -495,9 +499,43 @@ function onStateChange(state) {
   }
 
   // Update group volume from controller state
-  if (state.serverState?.controller) {
-    updateGroupVolume(state.serverState.controller);
+  controllerState = state.serverState?.controller ?? null;
+  if (controllerState) {
+    updateGroupVolume(controllerState);
   }
+}
+
+/**
+ * Send a controller command, showing an error toast if the SDK rejects it
+ */
+function sendServerCommand(command, params) {
+  try {
+    player.sendCommand(command, params);
+    return true;
+  } catch (error) {
+    showToast(error.message, "error");
+    return false;
+  }
+}
+
+/**
+ * Seek to the clicked point of the progress bar, within the seekable range
+ */
+function seekFromProgressBar(event) {
+  const seekMaxMs = controllerState?.seek_max_ms;
+  if (seekMaxMs === undefined) {
+    showToast("Seeking is not available for this track", "error");
+    return;
+  }
+  const rect = progressBar.getBoundingClientRect();
+  const fraction = Math.min(
+    Math.max((event.clientX - rect.left) / rect.width, 0),
+    1,
+  );
+  const durationMs = player.trackProgress?.durationMs || seekMaxMs;
+  sendServerCommand("seek", {
+    position_ms: Math.min(fraction * durationMs, seekMaxMs),
+  });
 }
 
 /**
@@ -994,13 +1032,20 @@ function init() {
     );
   });
   groupVolumeSlider.addEventListener("input", () => {
-    player.sendCommand("volume", {
+    sendServerCommand("volume", {
       volume: parseInt(groupVolumeSlider.value, 10),
     });
   });
   groupMuteBtn.addEventListener("click", () => {
     const currentMuted = groupMuteIcon.textContent === "🔇";
-    player.sendCommand("mute", { mute: !currentMuted });
+    sendServerCommand("mute", { mute: !currentMuted });
+  });
+  progressBar.addEventListener("click", seekFromProgressBar);
+  seekBackBtn.addEventListener("click", () => {
+    sendServerCommand("seek_relative", { offset_ms: -10_000 });
+  });
+  seekForwardBtn.addEventListener("click", () => {
+    sendServerCommand("seek_relative", { offset_ms: 10_000 });
   });
   rotatePskBtn.addEventListener("click", () => {
     if (!player) return;
@@ -1057,8 +1102,7 @@ function init() {
   // Transport control event listeners
   document.querySelectorAll(".transport-btn").forEach((btn) => {
     btn.addEventListener("click", () => {
-      player.sendCommand(btn.dataset.command);
-      showToast(btn.title);
+      if (sendServerCommand(btn.dataset.command)) showToast(btn.title);
     });
   });
 

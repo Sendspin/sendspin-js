@@ -82,7 +82,7 @@
             </div>
           </div>
           <div class="progress-container">
-            <div class="progress-bar">
+            <div id="progress-bar" class="progress-bar" title="Click to seek">
               <div id="progress-fill" class="progress-fill"></div>
             </div>
             <div class="progress-times">
@@ -105,6 +105,13 @@
                 ⏮
               </button>
               <button
+                id="seek-back-btn"
+                class="btn btn-icon"
+                title="Back 10 seconds"
+              >
+                -10s
+              </button>
+              <button
                 class="btn btn-icon btn-large transport-btn"
                 data-command="play"
                 title="Play"
@@ -124,6 +131,13 @@
                 title="Stop"
               >
                 ⏹
+              </button>
+              <button
+                id="seek-forward-btn"
+                class="btn btn-icon"
+                title="Forward 10 seconds"
+              >
+                +10s
               </button>
               <button
                 class="btn btn-icon transport-btn"
