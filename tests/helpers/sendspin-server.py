@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import math
 import os
 import struct
@@ -15,10 +16,10 @@ from typing import Any
 from aiohttp import web
 from aiohttp.test_utils import TestServer as AiohttpTestServer
 from aiosendspin.models.core import ClientStateMessage
-from aiosendspin.models.types import PairMethod
+from aiosendspin.models.types import PairingCodeFormat, PairMethod
 from aiosendspin.noise.keys import Identity, b64url_decode
 from aiosendspin.noise.pairing import PairingAbortError, PairingAttempt
-from aiosendspin.noise.pairing_token import decode_token
+from aiosendspin.noise.pairing_token import decode_psk_token
 from aiosendspin.noise.trust_store import FileServerPairingStore
 from aiosendspin.server import (
     AudioFormat,
@@ -63,11 +64,11 @@ class HarnessServer:
             channels=2,
             sample_type="int",
         )
-        self.pin_task: asyncio.Task[dict[str, Any]] | None = None
-        self.pin_future: asyncio.Future[str] | None = None
-        self.pin_requested: asyncio.Event | None = None
-        self.parsed_client_state: dict[str, Any] | None = None
-        self.parsed_client_state_accepted = False
+        self.code_task: asyncio.Task[dict[str, Any]] | None = None
+        self.code_future: asyncio.Future[str] | None = None
+        self.code_requested: asyncio.Event | None = None
+        self.raw_client_state: dict[str, Any] | None = None
+        self.raw_client_state_accepted = False
 
     async def start(self) -> int:
         """Start a Noise-only server on an ephemeral loopback port."""
@@ -82,8 +83,6 @@ class HarnessServer:
             server_name="Sendspin JS E2E",
             pairing_store=self.pairing_store,
             allow_unencrypted=False,
-            allow_noncompliant_clients=False,
-            min_pin_length=6,
         )
         self._install_client_state_capture()
         self.server.add_event_listener(self._on_event)
@@ -95,23 +94,28 @@ class HarnessServer:
         return self.http_server.port
 
     def _install_client_state_capture(self) -> None:
-        """Capture the same parsed payload that upstream validates in strict mode."""
+        """Capture the client/state payload as sent, before upstream normalizes it."""
+        original_deserialize = SendspinConnection._deserialize_client_message
         original_handle_message = SendspinConnection._handle_message
 
-        async def capture(
+        def deserialize(cls: Any, raw_message: str, active_families: Any = None) -> Any:
+            message = original_deserialize(raw_message, active_families)
+            if isinstance(message, ClientStateMessage):
+                self.raw_client_state = json.loads(raw_message)["payload"]
+                self.raw_client_state_accepted = False
+            return message
+
+        async def handle(
             connection: SendspinConnection,
             message: Any,
             timestamp_us: int,
         ) -> None:
-            if isinstance(message, ClientStateMessage):
-                self.parsed_client_state = json.loads(message.payload.to_json())
-                self.parsed_client_state_accepted = False
-                await original_handle_message(connection, message, timestamp_us)
-                self.parsed_client_state_accepted = True
-                return
             await original_handle_message(connection, message, timestamp_us)
+            if isinstance(message, ClientStateMessage):
+                self.raw_client_state_accepted = True
 
-        SendspinConnection._handle_message = capture
+        SendspinConnection._deserialize_client_message = classmethod(deserialize)
+        SendspinConnection._handle_message = handle
 
     def _load_identity(self) -> Identity:
         key_path = self.state_dir / "identity.key"
@@ -158,25 +162,20 @@ class HarnessServer:
             "client_id": selected_id,
             "connected": client is not None and client.is_connected,
             "psk_category": security.psk_category.value if security else None,
-            "trust_level": security.trust_level.value if security else None,
             "active_roles": [role.role_id for role in client.active_roles] if client else [],
-            "supported_pair_methods": [
-                descriptor.method.value for descriptor in (info.supported_pair_methods or [])
-            ]
-            if info
-            else [],
-            "pair_method_descriptors": [
-                {
-                    "method": descriptor.method.value,
-                    "out_channels": descriptor.out_channels or [],
-                    "min_pin_length": descriptor.min_pin_length,
-                    "locations": descriptor.locations or [],
-                }
-                for descriptor in (info.supported_pair_methods or [])
-            ]
-            if info
-            else [],
+            "supported_pair_methods": self._pair_methods(info),
             "has_pairing_record": record is not None,
+        }
+
+    @staticmethod
+    def _pair_methods(info: Any) -> dict[str, Any]:
+        methods = info.supported_pair_methods if info is not None else None
+        if methods is None:
+            return {}
+        return {
+            method.value: json.loads(descriptor.to_json())
+            for method in PairMethod
+            if (descriptor := getattr(methods, method.value)) is not None
         }
 
     async def trust_unpaired(self, client_id: str) -> dict[str, Any]:
@@ -195,9 +194,9 @@ class HarnessServer:
             while True:
                 client = self.server.get_client(client_id) if self.server else None
                 role = client.role("player@v1") if client is not None else None
-                parsed_player = (
-                    self.parsed_client_state.get("player")
-                    if self.parsed_client_state is not None
+                raw_player = (
+                    self.raw_client_state.get("player")
+                    if self.raw_client_state is not None
                     else None
                 )
                 if (
@@ -205,19 +204,18 @@ class HarnessServer:
                     and client.is_connected
                     and role is not None
                     and role.get_player_volume() == expected_volume
-                    and self.parsed_client_state_accepted
-                    and isinstance(parsed_player, dict)
-                    and parsed_player.get("volume") == expected_volume
+                    and self.raw_client_state_accepted
+                    and isinstance(raw_player, dict)
+                    and raw_player.get("volume") == expected_volume
                 ):
                     return {
-                        "accepted_by_strict_parser": True,
-                        "parsed_payload": self.parsed_client_state,
+                        "raw_payload": self.raw_client_state,
                         "semantic_state": {
                             "available": client.available,
                             "player": {
                                 "volume": role.get_player_volume(),
                                 "muted": role.get_player_muted(),
-                                "static_delay_ms": role.get_static_delay_ms(),
+                                "output_delay_ms": role.get_output_delay_ms(),
                                 "required_lead_time_ms": role.required_lead_time_ms,
                                 "min_buffer_ms": role.min_buffer_ms,
                                 "supported_commands": [
@@ -231,7 +229,7 @@ class HarnessServer:
     async def pair_with_token(self, token_value: str) -> dict[str, Any]:
         client_id = self._connected_client_id()
         try:
-            token = decode_token(token_value)
+            token = decode_psk_token(token_value)
         except ValueError:
             return await self._pairing_result("rejected", "invalid_token")
         if token.client_id != client_id:
@@ -243,74 +241,81 @@ class HarnessServer:
                 PairingAttempt(
                     method=PairMethod.PAIRING_PSK,
                     pairing_psk=token.pairing_psk,
+                    client_id=token.client_id,
                 ),
             )
         )
 
-    async def begin_pin_pairing(self, method_name: str) -> dict[str, Any]:
-        if self.pin_task is not None and not self.pin_task.done():
-            raise RuntimeError("a PIN pairing attempt is already running")
+    async def begin_code_pairing(self, method_name: str) -> dict[str, Any]:
+        if self.code_task is not None and not self.code_task.done():
+            raise RuntimeError("a pairing code attempt is already running")
         method = PairMethod(method_name)
-        if method not in (PairMethod.DYNAMIC_PIN, PairMethod.STATIC_PIN):
-            raise ValueError("PIN pairing requires dynamic_pin or static_pin")
-        self.pin_future = asyncio.get_running_loop().create_future()
-        self.pin_requested = asyncio.Event()
+        if method not in (PairMethod.DYNAMIC_PAIRING_CODE, PairMethod.STATIC_PAIRING_CODE):
+            raise ValueError("code pairing requires dynamic_pairing_code or static_pairing_code")
+        self.code_future = asyncio.get_running_loop().create_future()
+        self.code_requested = asyncio.Event()
 
-        async def provide_pin() -> str:
-            assert self.pin_requested is not None
-            assert self.pin_future is not None
-            self.pin_requested.set()
-            return await self.pin_future
+        async def provide_code() -> str:
+            assert self.code_requested is not None
+            assert self.code_future is not None
+            self.code_requested.set()
+            return await self.code_future
 
         assert self.server is not None
         client_id = self._connected_client_id()
-        self.pin_task = asyncio.create_task(
+        self.code_task = asyncio.create_task(
             self._run_pairing(
                 self.server.initiate_pairing(
                     client_id,
-                    PairingAttempt(method=method, pin_provider=provide_pin),
+                    PairingAttempt(
+                        method=method,
+                        pairing_code_provider=provide_code,
+                        pairing_format=PairingCodeFormat.DIGITS
+                        if method is PairMethod.DYNAMIC_PAIRING_CODE
+                        else None,
+                    ),
                 )
             )
         )
         return {"status": "started", "method": method.value}
 
-    async def wait_for_pin_request(self, timeout_ms: int) -> dict[str, Any]:
-        if self.pin_task is None or self.pin_requested is None:
-            raise RuntimeError("no PIN pairing attempt is running")
-        if self.pin_task.done():
-            return await self._finish_pin_attempt()
-        waiter = asyncio.create_task(self.pin_requested.wait())
+    async def wait_for_code_request(self, timeout_ms: int) -> dict[str, Any]:
+        if self.code_task is None or self.code_requested is None:
+            raise RuntimeError("no pairing code attempt is running")
+        if self.code_task.done():
+            return await self._finish_code_attempt()
+        waiter = asyncio.create_task(self.code_requested.wait())
         try:
             done, _ = await asyncio.wait(
-                {waiter, self.pin_task},
+                {waiter, self.code_task},
                 timeout=timeout_ms / 1000,
                 return_when=asyncio.FIRST_COMPLETED,
             )
-            if self.pin_task in done:
-                return await self._finish_pin_attempt()
+            if self.code_task in done:
+                return await self._finish_code_attempt()
             if waiter in done:
-                return {"status": "pin_requested"}
+                return {"status": "code_requested"}
             return {"status": "timeout"}
         finally:
             waiter.cancel()
             with suppress(asyncio.CancelledError):
                 await waiter
 
-    async def submit_pin(self, pin: str) -> dict[str, Any]:
-        if self.pin_task is None or self.pin_future is None:
-            raise RuntimeError("no PIN pairing attempt is running")
-        if not self.pin_future.done():
-            self.pin_future.set_result(pin)
-        return await self._finish_pin_attempt()
+    async def submit_code(self, code: str) -> dict[str, Any]:
+        if self.code_task is None or self.code_future is None:
+            raise RuntimeError("no pairing code attempt is running")
+        if not self.code_future.done():
+            self.code_future.set_result(code)
+        return await self._finish_code_attempt()
 
-    async def _finish_pin_attempt(self) -> dict[str, Any]:
-        assert self.pin_task is not None
+    async def _finish_code_attempt(self) -> dict[str, Any]:
+        assert self.code_task is not None
         try:
-            return await self.pin_task
+            return await self.code_task
         finally:
-            self.pin_task = None
-            self.pin_future = None
-            self.pin_requested = None
+            self.code_task = None
+            self.code_future = None
+            self.code_requested = None
 
     async def _run_pairing(self, pairing: Any) -> dict[str, Any]:
         try:
@@ -365,7 +370,7 @@ class HarnessServer:
         self._player_role().set_mute(muted)
 
     def set_delay(self, delay_ms: int) -> None:
-        self._player_role().set_static_delay(delay_ms)
+        self._player_role().set_output_delay(delay_ms)
 
     def _active_client(self) -> Any:
         if not self.server or not self.active_client_id:
@@ -382,16 +387,16 @@ class HarnessServer:
         return role
 
     async def shutdown(self) -> None:
-        if self.pin_task is not None and not self.pin_task.done():
+        if self.code_task is not None and not self.code_task.done():
             if self.server is not None and self.active_client_id is not None:
                 with suppress(Exception):
                     await self.server.end_pairing(self.active_client_id)
-            self.pin_task.cancel()
+            self.code_task.cancel()
             with suppress(asyncio.CancelledError, Exception):
-                await self.pin_task
-        self.pin_task = None
-        self.pin_future = None
-        self.pin_requested = None
+                await self.code_task
+        self.code_task = None
+        self.code_future = None
+        self.code_requested = None
         if self.http_server is not None:
             await self.http_server.close()
             self.http_server = None
@@ -416,12 +421,12 @@ async def dispatch(server: HarnessServer, command: str, args: dict[str, Any]) ->
         )
     if command == "pair_token":
         return await server.pair_with_token(str(args["token"]))
-    if command == "begin_pin":
-        return await server.begin_pin_pairing(str(args["method"]))
-    if command == "wait_pin":
-        return await server.wait_for_pin_request(int(args.get("timeout_ms", 10000)))
-    if command == "submit_pin":
-        return await server.submit_pin(str(args["pin"]))
+    if command == "begin_code":
+        return await server.begin_code_pairing(str(args["method"]))
+    if command == "wait_code":
+        return await server.wait_for_code_request(int(args.get("timeout_ms", 10000)))
+    if command == "submit_code":
+        return await server.submit_code(str(args["code"]))
     if command == "stream_start":
         await server.stream_start()
         return None
@@ -449,7 +454,20 @@ async def dispatch(server: HarnessServer, command: str, args: dict[str, Any]) ->
     raise ValueError(f"unknown command: {command}")
 
 
+class JsonLogHandler(logging.Handler):
+    """Write each log record to stderr as one JSON line for the test harness."""
+
+    def emit(self, record: logging.LogRecord) -> None:
+        line = json.dumps(
+            {"log": {"level": record.levelname, "name": record.name, "message": self.format(record)}}
+        )
+        print(line, file=sys.stderr, flush=True)
+
+
 async def main() -> None:
+    aiosendspin_logger = logging.getLogger("aiosendspin")
+    aiosendspin_logger.setLevel(logging.WARNING)
+    aiosendspin_logger.addHandler(JsonLogHandler())
     if len(sys.argv) != 2:
         raise SystemExit("usage: sendspin-server.py <state-dir>")
     server = HarnessServer(Path(sys.argv[1]).resolve())

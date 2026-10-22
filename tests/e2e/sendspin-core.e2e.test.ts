@@ -8,14 +8,17 @@
  * - WebSocket connection and handshake (client/hello → server/hello)
  * - Time synchronization (NTP-style burst probes)
  * - Stream lifecycle (stream/start → PCM audio → stream/end)
- * - Server commands (volume, mute, set_static_delay)
+ * - Server commands (volume, mute, set_output_delay)
  * - Client state updates
  * - Disconnect (client/goodbye)
  */
 
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, afterAll } from "vitest";
 import { WebSocket } from "ws";
-import { AiosendspinServer } from "../helpers/aiosendspin-server";
+import {
+  AiosendspinServer,
+  reportDeferredViolations,
+} from "../helpers/aiosendspin-server";
 import { SendspinCore } from "../../src/core/core";
 import type { DecodedAudioChunk, StreamFormat } from "../../src/types";
 
@@ -52,13 +55,15 @@ describe("SendspinCore E2E (aiosendspin)", () => {
     await server.start();
   });
 
-  afterEach(async () => {
+  afterEach(async ({ task }) => {
     core?.disconnect();
     core = null;
     externalWs?.close();
     externalWs = null;
-    await server.close();
+    await server.close(task);
   });
+
+  afterAll(reportDeferredViolations);
 
   /**
    * Helper: create a SendspinCore connected to the aiosendspin server
@@ -195,6 +200,14 @@ describe("SendspinCore E2E (aiosendspin)", () => {
       expect(chunk.serverTimeUs).toBeGreaterThan(0);
       expect(chunk.samples[0].length).toBeGreaterThan(0);
 
+      // The server's 440 Hz sine starts at sample 0 of the stream.
+      const sine = [0, 1, 2, 3].map((i) =>
+        Math.trunc(Math.sin((2 * Math.PI * 440 * i) / 48000) * 16000),
+      );
+      expect(Array.from(chunk.samples[0].slice(0, 4))).toEqual(
+        sine.map((value) => value / 32768),
+      );
+
       // Verify samples are in -1.0 to 1.0 range
       for (const channelSamples of chunk.samples) {
         for (const sample of channelSamples) {
@@ -316,7 +329,7 @@ describe("SendspinCore E2E (aiosendspin)", () => {
       expect(core!.muted).toBe(true);
     });
 
-    it("receives set_static_delay command from server", async () => {
+    it("receives set_output_delay command from server", async () => {
       await connectCore();
 
       const streamStarted = new Promise<void>((resolve) => {
