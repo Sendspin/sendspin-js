@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  AiosendspinServer,
   awaitProcessExit,
+  reportDeferredViolations,
   type KillableProcess,
 } from "../helpers/aiosendspin-server";
 
@@ -39,5 +41,36 @@ describe("awaitProcessExit", () => {
     await expect(
       awaitProcessExit(proc, new Promise<void>(() => undefined), 0),
     ).rejects.toThrow(/SIGKILL/);
+  });
+});
+
+describe("non-compliance check", () => {
+  const unknownLine = JSON.stringify({
+    log: {
+      level: "WARNING",
+      name: "aiosendspin",
+      message: "non-compliant client Test: client/hello sent an unlisted field",
+    },
+  });
+
+  function serverThatLogged(line: string): AiosendspinServer {
+    const server = new AiosendspinServer();
+    (server as any).recordStderrLine(line);
+    return server;
+  }
+
+  it("fails a normal test on unlisted non-compliance", async () => {
+    await expect(
+      serverThatLogged(unknownLine).close({ name: "normal" }),
+    ).rejects.toThrow(/unlisted field/);
+  });
+
+  it("defers unlisted non-compliance from an it.fails test and reports it once", async () => {
+    await serverThatLogged(unknownLine).close({
+      name: "expected",
+      fails: true,
+    });
+    expect(reportDeferredViolations).toThrow(/expected: .*unlisted field/s);
+    expect(reportDeferredViolations).not.toThrow();
   });
 });
