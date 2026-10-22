@@ -397,6 +397,18 @@ describe("SendspinCore encryption wiring", () => {
         active_roles: ["controller@v1"],
       },
     });
+    serverSend(ws, serverSession, {
+      type: "server/state",
+      payload: {
+        controller: {
+          supported_commands: ["play"],
+          volume: 50,
+          muted: false,
+          repeat: "off",
+          shuffle: false,
+        },
+      },
+    });
     const oldFrames = binaryFrames(ws);
     for (let index = 1; index < oldFrames.length; index++) {
       serverSession.decrypt(oldFrames[index]);

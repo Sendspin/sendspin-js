@@ -70,6 +70,18 @@ function activatePlayer(
   send.mockClear();
 }
 
+function seedController(core: SendspinCore, commands: string[]): void {
+  core._stateManager.updateServerState({
+    controller: {
+      supported_commands: commands,
+      volume: 50,
+      muted: false,
+      repeat: "off",
+      shuffle: false,
+    },
+  });
+}
+
 function seedMetadata(
   core: SendspinCore,
   timestampUs: number,
@@ -93,22 +105,42 @@ describe("SendspinCore (offline)", () => {
 
   describe("sendCommand guard", () => {
     it("throws when the command is not in the server's supported list", () => {
-      core._stateManager.updateServerState({
-        controller: { supported_commands: ["play"] },
-      });
+      seedController(core, ["play"]);
       expect(() => core.sendCommand("pause", undefined)).toThrow(
         /not supported/,
       );
     });
 
-    it("forwards when the server has not declared supported commands", () => {
-      expect(() => core.sendCommand("pause", undefined)).not.toThrow();
+    it("throws before the server reports its controller state", () => {
+      expect(() => core.sendCommand("pause", undefined)).toThrow(
+        /controller state/,
+      );
+    });
+
+    it("throws once the transport closes, even with a previous controller state", () => {
+      seedController(core, ["pause"]);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (core as any).onTransportClose();
+      expect(() => core.sendCommand("pause", undefined)).toThrow(
+        /controller state/,
+      );
     });
 
     it("throws on a NaN controller volume", () => {
+      seedController(core, ["volume"]);
       expect(() => core.sendCommand("volume", { volume: NaN })).toThrow(
         RangeError,
       );
+    });
+
+    it("throws on a non-finite seek position or offset", () => {
+      seedController(core, ["seek", "seek_relative"]);
+      expect(() => core.sendCommand("seek", { position_ms: NaN })).toThrow(
+        RangeError,
+      );
+      expect(() =>
+        core.sendCommand("seek_relative", { offset_ms: Infinity }),
+      ).toThrow(RangeError);
     });
   });
 
@@ -319,6 +351,7 @@ describe("SendspinCore command + state forwarding", () => {
   it("forwards a controller command with command name and params merged", () => {
     const send = spySend(core);
     activateController(core);
+    seedController(core, ["volume"]);
     send.mockClear();
     core.sendCommand("volume", { volume: 42 });
 

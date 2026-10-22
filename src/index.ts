@@ -288,8 +288,9 @@ export class SendspinPlayer {
   // ========================================
 
   /**
-   * Send a controller command to the server. Throws RangeError if a volume
-   * command carries a NaN volume.
+   * Send a controller command to the server. Throws unless the latest
+   * controller state lists the command, and throws RangeError if a volume
+   * command carries a NaN volume or a seek command a non-finite value.
    */
   sendCommand<T extends ControllerCommand>(
     command: T,

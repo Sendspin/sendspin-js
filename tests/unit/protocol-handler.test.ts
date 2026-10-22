@@ -793,5 +793,63 @@ describe("ProtocolHandler extra", () => {
       ).controller as Record<string, unknown>;
       expect(controller.volume).toBe(56);
     });
+
+    it("sends seek positions and offsets as whole milliseconds", () => {
+      const handler = makeHandler();
+      dispatch(handler, {
+        type: "server/activate",
+        payload: {
+          activities: ["playback"],
+          active_roles: ["controller@v1"],
+        },
+      });
+      const sentController = () =>
+        (lastSent(send, "client/command")!.payload as Record<string, unknown>)
+          .controller;
+
+      handler.sendCommand("seek", { position_ms: 1234.6 });
+      expect(sentController()).toEqual({ command: "seek", position_ms: 1235 });
+
+      handler.sendCommand("seek_relative", { offset_ms: -10_000.4 });
+      expect(sentController()).toEqual({
+        command: "seek_relative",
+        offset_ms: -10_000,
+      });
+    });
+
+    it("clamps seek positions to 0 through seek_max_ms", () => {
+      const handler = makeHandler();
+      dispatch(handler, {
+        type: "server/activate",
+        payload: {
+          activities: ["playback"],
+          active_roles: ["controller@v1"],
+        },
+      });
+      dispatch(handler, {
+        type: "server/state",
+        payload: {
+          controller: {
+            supported_commands: ["seek"],
+            volume: 50,
+            muted: false,
+            repeat: "off",
+            shuffle: false,
+            seek_max_ms: 180_000,
+          },
+        },
+      });
+      const sentPosition = () =>
+        (
+          (lastSent(send, "client/command")!.payload as Record<string, unknown>)
+            .controller as Record<string, unknown>
+        ).position_ms;
+
+      handler.sendCommand("seek", { position_ms: 200_000 });
+      expect(sentPosition()).toBe(180_000);
+
+      handler.sendCommand("seek", { position_ms: -500 });
+      expect(sentPosition()).toBe(0);
+    });
   });
 });

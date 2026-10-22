@@ -429,7 +429,12 @@ export class SendspinCore implements StreamHandler {
   ): void {
     const supportedCommands =
       this.stateManager.serverState.controller?.supported_commands;
-    if (supportedCommands && !supportedCommands.includes(command)) {
+    if (!supportedCommands) {
+      throw new Error(
+        `Command '${command}' cannot be sent before the server reports its controller state`,
+      );
+    }
+    if (!supportedCommands.includes(command)) {
       throw new Error(
         `Command '${command}' is not supported by the server. ` +
           `Supported commands: ${supportedCommands.join(", ")}`,
@@ -440,6 +445,20 @@ export class SendspinCore implements StreamHandler {
       Number.isNaN((params as ControllerCommands["volume"]).volume)
     ) {
       throw new RangeError("volume must be a number");
+    }
+    if (
+      command === "seek" &&
+      !Number.isFinite((params as ControllerCommands["seek"]).position_ms)
+    ) {
+      throw new RangeError("position_ms must be a finite number");
+    }
+    if (
+      command === "seek_relative" &&
+      !Number.isFinite(
+        (params as ControllerCommands["seek_relative"]).offset_ms,
+      )
+    ) {
+      throw new RangeError("offset_ms must be a finite number");
     }
     this.protocolHandler.sendCommand(command, params);
   }

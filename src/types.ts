@@ -71,6 +71,8 @@ export interface ControllerCommands {
   shuffle: void;
   unshuffle: void;
   switch: void;
+  seek: { position_ms: number };
+  seek_relative: { offset_ms: number };
 }
 
 export type ControllerCommand = keyof ControllerCommands;
@@ -138,6 +140,8 @@ export interface ClientCommand {
       command: ControllerCommand;
       volume?: number;
       mute?: boolean;
+      position_ms?: number;
+      offset_ms?: number;
     };
   };
 }
