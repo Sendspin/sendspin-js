@@ -253,7 +253,7 @@ function resetStatusDisplay() {
  */
 function updatePairingDisplay() {
   clientIdEl.textContent = player.clientId;
-  pairingTokenEl.textContent = pairingTokenForDisplay();
+  pairingTokenEl.textContent = player.pairingToken;
   updateEscalationDisplay();
 }
 
@@ -268,10 +268,6 @@ function selectedLocations(inputs) {
     .map((input) => input.value);
   // undefined omits the hint; an empty list would advertise nothing useful.
   return picked.length ? picked : undefined;
-}
-
-function pairingTokenForDisplay() {
-  return player.pairingToken ?? "(no storage)";
 }
 
 /**
@@ -1050,7 +1046,7 @@ function init() {
   rotatePskBtn.addEventListener("click", () => {
     if (!player) return;
     player.rotatePairingPsk();
-    pairingTokenEl.textContent = pairingTokenForDisplay();
+    pairingTokenEl.textContent = player.pairingToken;
     showToast("Pairing token rotated", "success");
   });
   staticPinInput.addEventListener("change", () => {

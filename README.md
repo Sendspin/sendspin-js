@@ -222,7 +222,7 @@ later success de-escalates it.
 
 ```typescript
 console.log('Client ID:', player.clientId);              // 43-char base64url pubkey
-console.log('Pairing token:', player.pairingToken);      // spec version 0, or null without storage
+console.log('Pairing token:', player.pairingToken);      // spec version 0
 
 // Rotate the Pairing PSK (e.g. if it may have leaked)
 const newPsk = player.rotatePairingPsk();
@@ -238,9 +238,9 @@ activation arrives without one and the client closes the connection as a
 protocol error, logging the reason to the console.
 
 `player.pairingToken` is the version 0 token defined by the current specification.
-Identity and pairing require `storage` (defaults to `localStorage`); without
-it, `clientId` is still generated per session but `pairingPsk`,
-`pairingToken`, and `rotatePairingPsk()` return `null`.
+Identity and pairing persist in `storage` (defaults to `localStorage`). Without
+it, `clientId`, the Pairing PSK and any paired server are kept in memory only,
+so a reload needs a fresh pairing.
 
 Apps that key their own state on the client id can read it before a player
 exists. A player built afterwards on the same storage adopts this identity.

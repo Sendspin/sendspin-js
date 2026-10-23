@@ -150,13 +150,6 @@ export class PairingManager {
       MAX_PIN_DIGITS,
       Math.max(MIN_PIN_DIGITS, deps.minPinLength ?? DEFAULT_MIN_PIN_DIGITS),
     );
-    if (!deps.storage && deps.onPairingCode) {
-      // Spec requires the failure counter to survive reboots. Without storage
-      // it is in-memory only and escalation resets on restart.
-      console.warn(
-        "sendspin: dynamic PIN pairing is enabled without storage, so the failure counter will not persist across reboots.",
-      );
-    }
     this.failures = this.loadFailures();
   }
 

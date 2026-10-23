@@ -29,10 +29,6 @@ export const KNOWN_VIOLATIONS: readonly KnownViolation[] = [
     message: "client/hello sent the removed trust_level key",
   },
   {
-    gap: "G30",
-    message: "client/hello did not offer the pairing_psk method",
-  },
-  {
     gap: "G45",
     message: "pair/abort sent the pre-rename pin_mismatch reason",
   },

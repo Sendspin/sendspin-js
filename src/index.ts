@@ -329,17 +329,17 @@ export class SendspinPlayer {
     return this.core.clientId;
   }
 
-  /** The client's Pairing PSK (base64url) for the operator to enter server-side. Null without storage. */
-  get pairingPsk(): string | null {
+  /** The client's Pairing PSK (base64url) for the operator to enter server-side. */
+  get pairingPsk(): string {
     return this.core.pairingPsk;
   }
 
-  get pairingToken(): string | null {
+  get pairingToken(): string {
     return this.core.pairingToken;
   }
 
-  /** Rotate the Pairing PSK, returning the new value (null without storage). */
-  rotatePairingPsk(): string | null {
+  /** Rotate the Pairing PSK, returning the new value. */
+  rotatePairingPsk(): string {
     return this.core.rotatePairingPsk();
   }
 

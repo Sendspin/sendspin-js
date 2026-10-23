@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect } from "vitest";
 import { Identity } from "../../../src/core/noise/identity";
 import type { SendspinStorage } from "../../../src/types";
 
@@ -19,12 +19,9 @@ describe("Identity", () => {
     expect(a.clientId).toHaveLength(43);
   });
 
-  it("is ephemeral without storage and warns", () => {
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+  it("is ephemeral without storage", () => {
     const a = Identity.loadOrCreate(null);
     const b = Identity.loadOrCreate(null);
     expect(a.clientId).not.toBe(b.clientId);
-    expect(warn).toHaveBeenCalled();
-    warn.mockRestore();
   });
 });
