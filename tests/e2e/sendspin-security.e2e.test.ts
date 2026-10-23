@@ -276,7 +276,10 @@ describe("Sendspin encryption and pairing E2E (aiosendspin)", () => {
   it("terminates the connection on mutated transport ciphertext", async () => {
     const connection = await connect({
       clientName: "Mutation rejection client",
+      unpairedAccess: true,
     });
+    await server.trustUnpaired(connection.core.clientId);
+    await server.waitForClientState(connection.core.clientId, 100);
     connection.mutateNextBinary();
     connection.core.setVolume(42);
     await waitForClose(connection.socket);
