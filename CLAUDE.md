@@ -65,7 +65,7 @@ The `SendspinPlayerConfig` interface in `src/types.ts` defines all available opt
 - `audioOutputMode`: "direct" or "media-element" (for mobile)
 - `audioElement`: Required for media-element mode
 - `codecs`: Preferred codec order (opus, flac, pcm)
-- `syncDelay`: Static sync delay in ms
+- `syncDelay`: Output delay in ms
 - `useOutputLatencyCompensation`: Auto latency compensation
 - `useHardwareVolume`: Delegate volume to hardware
 - `onStateChange`: State change callback

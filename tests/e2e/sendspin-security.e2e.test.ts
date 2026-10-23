@@ -276,7 +276,10 @@ describe("Sendspin encryption and pairing E2E (aiosendspin)", () => {
   it("terminates the connection on mutated transport ciphertext", async () => {
     const connection = await connect({
       clientName: "Mutation rejection client",
+      unpairedAccess: true,
     });
+    await server.trustUnpaired(connection.core.clientId);
+    await server.waitForClientState(connection.core.clientId, 100);
     connection.mutateNextBinary();
     connection.core.setVolume(42);
     await waitForClose(connection.socket);
@@ -299,37 +302,30 @@ describe("Sendspin encryption and pairing E2E (aiosendspin)", () => {
     expect(socket.readyState).toBe(WebSocket.CLOSED);
   });
 
-  // G22, G23
-  it.fails(
-    "reports exact player state when live trust activates the role",
-    async () => {
-      const connection = await connect({
-        clientName: "Live trust client",
-        unpairedAccess: true,
-      });
-      connection.core.setVolume(42);
+  it("reports exact player state when live trust activates the role", async () => {
+    const connection = await connect({
+      clientName: "Live trust client",
+      unpairedAccess: true,
+    });
+    connection.core.setVolume(42);
 
-      const trusted = await server.trustUnpaired(connection.core.clientId);
-      expect(trusted.active_roles).toContain("player@v1");
-      const state = await server.waitForClientState(
-        connection.core.clientId,
-        42,
-      );
-      const expectedState = {
-        available: true,
-        player: {
-          volume: 42,
-          muted: false,
-          output_delay_ms: 0,
-          required_lead_time_ms: 250,
-          min_buffer_ms: 250,
-          supported_commands: ["volume", "mute", "set_output_delay"],
-        },
-      };
-      expect(state.raw_payload).toEqual(expectedState);
-      expect(state.semantic_state).toEqual(expectedState);
-    },
-  );
+    const trusted = await server.trustUnpaired(connection.core.clientId);
+    expect(trusted.active_roles).toContain("player@v1");
+    const state = await server.waitForClientState(connection.core.clientId, 42);
+    const expectedState = {
+      available: true,
+      player: {
+        volume: 42,
+        muted: false,
+        output_delay_ms: 0,
+        required_lead_time_ms: 250,
+        min_buffer_ms: 250,
+        supported_commands: ["volume", "mute", "set_output_delay"],
+      },
+    };
+    expect(state.raw_payload).toEqual(expectedState);
+    expect(state.semantic_state).toEqual(expectedState);
+  });
 
   it("rejects a malformed Pairing PSK token", async () => {
     const connection = await connect({ clientName: "Malformed token client" });

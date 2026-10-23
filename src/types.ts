@@ -115,13 +115,12 @@ export interface ClientState {
   payload: {
     available: boolean;
     player?: {
-      // Full initial state includes all fields; deltas include only changed fields.
-      static_delay_ms?: number;
       volume?: number;
       muted?: boolean;
-      required_lead_time_ms?: number;
-      min_buffer_ms?: number;
-      supported_commands?: string[];
+      output_delay_ms: number;
+      required_lead_time_ms: number;
+      min_buffer_ms: number;
+      supported_commands: Array<"volume" | "mute" | "set_output_delay">;
     };
   };
 }
@@ -243,10 +242,10 @@ export interface ServerCommand {
   type: MessageType.SERVER_COMMAND;
   payload: {
     player: {
-      command: "volume" | "mute" | "set_static_delay";
+      command: "volume" | "mute" | "set_output_delay";
       volume?: number;
       mute?: boolean;
-      static_delay_ms?: number;
+      output_delay_ms?: number;
     };
   };
 }
@@ -616,7 +615,7 @@ export interface SendspinCoreConfig {
   webSocket?: WebSocket;
 
   /**
-   * Static sync delay in milliseconds.
+   * Output delay in milliseconds.
    * Positive values make playback earlier to compensate for downstream device latency.
    * Allowed range: 0-5000.
    * Runtime update behavior depends on the active correction mode settings.
@@ -628,14 +627,14 @@ export interface SendspinCoreConfig {
    * a Bluetooth link), not for browser output latency, which is measured and
    * compensated automatically via `useOutputLatencyCompensation`.
    *
-   * Server-commanded delays (set_static_delay) are persisted via `storage` and
+   * Server-commanded delays (set_output_delay) are persisted via `storage` and
    * restored on the next connect. Passing `syncDelay` explicitly overrides any
    * persisted value for that connect.
    */
   syncDelay?: number;
 
   /**
-   * Fallback static delay used when neither `syncDelay` nor a persisted value
+   * Fallback output delay used when neither `syncDelay` nor a persisted value
    * is available. Defaults to 0.
    * @internal
    */
@@ -643,7 +642,7 @@ export interface SendspinCoreConfig {
 
   /**
    * Storage for persisting SDK state (cached output latency and the
-   * server-commanded static delay). SendspinCore persists only when this is
+   * server-commanded output delay). SendspinCore persists only when this is
    * provided. SendspinPlayer defaults it to localStorage. Pass null to
    * disable persistence.
    */
@@ -682,8 +681,8 @@ export interface SendspinCoreConfig {
   onVolumeCommand?: (volume: number, muted: boolean) => void;
 
   /**
-   * Callback when server sends a set_static_delay command.
-   * Called with the new static delay in milliseconds (0-5000).
+   * Callback when server sends a set_output_delay command.
+   * Called with the new output delay in milliseconds (0-5000).
    * The SDK persists the value via `storage` before invoking this callback.
    */
   onDelayCommand?: (delayMs: number) => void;

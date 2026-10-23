@@ -2,7 +2,7 @@
  * Unit tests for ProtocolHandler message routing and command handling.
  *
  * Uses a real StateManager (pure) with a stubbed MessageSender, StreamHandler
- * and time filter so message dispatch, the static-delay guard, and the
+ * and time filter so message dispatch, the output-delay guard, and the
  * stream/clear roles filter can be asserted directly.
  */
 
@@ -122,10 +122,10 @@ describe("ProtocolHandler", () => {
     });
   });
 
-  describe("set_static_delay command", () => {
-    const command = (static_delay_ms: unknown) => ({
+  describe("set_output_delay command", () => {
+    const command = (output_delay_ms: unknown) => ({
       type: "server/command",
-      payload: { player: { command: "set_static_delay", static_delay_ms } },
+      payload: { player: { command: "set_output_delay", output_delay_ms } },
     });
 
     it("applies and clamps a valid delay", () => {
@@ -343,6 +343,7 @@ describe("ProtocolHandler extra", () => {
       const handler = makeHandler();
       activate(handler);
       send.mockClear();
+      stateManager.volume = 42;
       vi.advanceTimersByTime(5000);
       expect(lastSent(send, "client/state")).toBeDefined();
     });
@@ -355,18 +356,26 @@ describe("ProtocolHandler extra", () => {
       expect(lastSent(send, "client/state")).toBeUndefined();
     });
 
-    it("sends state immediately when the active roles change", () => {
+    it("sends the full player state when player@v1 is re-added", () => {
       const handler = makeHandler();
+      activate(handler);
       dispatch(handler, {
         type: "server/activate",
-        payload: { activities: [], active_roles: [] },
+        payload: { active_roles: [] },
       });
       send.mockClear();
 
       activate(handler);
 
       const state = lastSent(send, "client/state")!;
-      expect((state.payload as Record<string, unknown>).player).toBeDefined();
+      expect((state.payload as Record<string, unknown>).player).toEqual({
+        volume: 100,
+        muted: false,
+        output_delay_ms: 0,
+        required_lead_time_ms: 250,
+        min_buffer_ms: 250,
+        supported_commands: ["volume", "mute", "set_output_delay"],
+      });
     });
 
     it("suspends periodic traffic until pairing ends", () => {
@@ -396,6 +405,13 @@ describe("ProtocolHandler extra", () => {
   });
 
   describe("sendStateUpdate message shape (spec client/state player object)", () => {
+    it("sends nothing before the first server/activate", () => {
+      const handler = makeHandler();
+      handler.sendStateUpdate();
+      handler.setMinBufferMs(100);
+      expect(lastSent(send, "client/state")).toBeUndefined();
+    });
+
     it("omits player state while the role is inactive", () => {
       const handler = makeHandler();
       dispatch(handler, {
@@ -409,61 +425,21 @@ describe("ProtocolHandler extra", () => {
 
     it("reports top-level availability", () => {
       const handler = makeHandler();
-      handler.sendStateUpdate();
+      activate(handler);
 
       const state = lastSent(send, "client/state")!;
       expect((state.payload as Record<string, unknown>).available).toBe(true);
     });
 
-    it("reports volume without the legacy player state", () => {
-      const handler = makeHandler();
-      stateManager.volume = 42;
-      handler.sendStateUpdate();
-
-      const state = lastSent(send, "client/state")!;
-      const player = (state.payload as Record<string, unknown>)
-        .player as Record<string, unknown>;
-      expect(player.volume).toBe(42);
-      expect(player.state).toBeUndefined();
-      expect(player.muted).toBe(false);
-    });
-
-    it("includes static_delay_ms clamped to 0-5000", () => {
+    it("includes output_delay_ms clamped to 0-5000", () => {
       streamHandler = makeStreamHandlerWithDelay(9999);
       const handler = makeHandler();
-      handler.sendStateUpdate();
+      activate(handler);
 
       const player = (
         lastSent(send, "client/state")!.payload as Record<string, unknown>
       ).player as Record<string, unknown>;
-      expect(player.static_delay_ms).toBe(5000);
-    });
-
-    it("declares set_static_delay in player supported_commands", () => {
-      const handler = makeHandler();
-      handler.sendStateUpdate();
-      const player = (
-        lastSent(send, "client/state")!.payload as Record<string, unknown>
-      ).player as Record<string, unknown>;
-      expect(player.supported_commands).toContain("set_static_delay");
-    });
-
-    it("includes required_lead_time_ms (spec: always required for players)", () => {
-      const handler = makeHandler();
-      handler.sendStateUpdate();
-      const player = (
-        lastSent(send, "client/state")!.payload as Record<string, unknown>
-      ).player as Record<string, unknown>;
-      expect(player.required_lead_time_ms).toBeTypeOf("number");
-    });
-
-    it("includes min_buffer_ms (spec: always required for players)", () => {
-      const handler = makeHandler();
-      handler.sendStateUpdate();
-      const player = (
-        lastSent(send, "client/state")!.payload as Record<string, unknown>
-      ).player as Record<string, unknown>;
-      expect(player.min_buffer_ms).toBeTypeOf("number");
+      expect(player.output_delay_ms).toBe(5000);
     });
 
     it("rounds required_lead_time_ms and min_buffer_ms to integers", () => {
@@ -471,7 +447,7 @@ describe("ProtocolHandler extra", () => {
         requiredLeadTimeMs: 150.4,
         minBufferMs: 80.5,
       });
-      handler.sendStateUpdate();
+      activate(handler);
       let player = (
         lastSent(send, "client/state")!.payload as Record<string, unknown>
       ).player as Record<string, unknown>;
@@ -499,7 +475,7 @@ describe("ProtocolHandler extra", () => {
           getExternalVolume,
         });
         // stateManager would say 100/false; hardware says 30/true.
-        handler.sendStateUpdate();
+        activate(handler);
 
         const player = (
           lastSent(send, "client/state")!.payload as Record<string, unknown>
@@ -514,7 +490,7 @@ describe("ProtocolHandler extra", () => {
           useHardwareVolume: true,
           getExternalVolume: () => ({ volume: 30.6, muted: false }),
         });
-        handler.sendStateUpdate();
+        activate(handler);
 
         const player = (
           lastSent(send, "client/state")!.payload as Record<string, unknown>
@@ -528,7 +504,7 @@ describe("ProtocolHandler extra", () => {
           getExternalVolume: () => ({ volume: NaN, muted: true }),
         });
         stateManager.volume = 64;
-        handler.sendStateUpdate();
+        activate(handler);
 
         const player = (
           lastSent(send, "client/state")!.payload as Record<string, unknown>
@@ -543,6 +519,7 @@ describe("ProtocolHandler extra", () => {
           useHardwareVolume: true,
           getExternalVolume,
         });
+        activate(handler);
         stateManager.volume = 77;
         getExternalVolume.mockClear();
         send.mockClear();
@@ -559,81 +536,37 @@ describe("ProtocolHandler extra", () => {
     });
   });
 
-  describe("delta client/state (spec: full then changed-only)", () => {
-    it("sends the full player payload on the first state after connect", () => {
+  describe("full client/state (spec: complete role object, sent on change)", () => {
+    it("sends every player field after a change to one field", () => {
       const handler = makeHandler();
-      handler.sendClientHello();
-      handler.sendStateUpdate();
-
-      const player = (
-        lastSent(send, "client/state")!.payload as Record<string, unknown>
-      ).player as Record<string, unknown>;
-      expect(player).toMatchObject({
-        volume: expect.any(Number),
-        muted: expect.any(Boolean),
-        static_delay_ms: expect.any(Number),
-        required_lead_time_ms: expect.any(Number),
-        min_buffer_ms: expect.any(Number),
-        supported_commands: ["set_static_delay"],
-      });
-    });
-
-    it("sends the full player payload when state changed before client/hello", () => {
-      const handler = makeHandler();
-      stateManager.volume = 42;
-      handler.sendStateUpdate();
+      activate(handler);
       send.mockClear();
 
-      handler.sendClientHello();
+      stateManager.volume = 42;
       handler.sendStateUpdate();
 
       const player = (
         lastSent(send, "client/state")!.payload as Record<string, unknown>
-      ).player as Record<string, unknown>;
-      expect(player).toMatchObject({
+      ).player;
+      expect(player).toEqual({
         volume: 42,
-        muted: expect.any(Boolean),
-        static_delay_ms: expect.any(Number),
-        required_lead_time_ms: expect.any(Number),
-        min_buffer_ms: expect.any(Number),
-        supported_commands: ["set_static_delay"],
+        muted: false,
+        output_delay_ms: 0,
+        required_lead_time_ms: 250,
+        min_buffer_ms: 250,
+        supported_commands: ["volume", "mute", "set_output_delay"],
       });
     });
 
-    it("sends only the changed field on the next update", () => {
+    it("sends nothing when the state is unchanged", () => {
       const handler = makeHandler();
-      handler.sendClientHello();
-      handler.sendStateUpdate();
+      activate(handler);
       send.mockClear();
 
-      stateManager.volume = 42;
       handler.sendStateUpdate();
+      vi.advanceTimersByTime(5000);
 
-      const player = (
-        lastSent(send, "client/state")!.payload as Record<string, unknown>
-      ).player as Record<string, unknown>;
-      expect(Object.keys(player)).toEqual(["volume"]);
-      expect(player.volume).toBe(42);
-    });
-
-    it("resets to a full payload after a reconnect", () => {
-      const handler = makeHandler();
-      handler.sendClientHello();
-      handler.sendStateUpdate();
-      stateManager.volume = 42;
-      handler.sendStateUpdate();
-      send.mockClear();
-
-      // Reconnect: a fresh server has no prior state to merge into.
-      handler.sendClientHello();
-      handler.sendStateUpdate();
-
-      const player = (
-        lastSent(send, "client/state")!.payload as Record<string, unknown>
-      ).player as Record<string, unknown>;
-      expect(player.supported_commands).toEqual(["set_static_delay"]);
-      expect(player.required_lead_time_ms).toBeTypeOf("number");
-      expect(player.min_buffer_ms).toBeTypeOf("number");
+      expect(lastSent(send, "client/state")).toBeUndefined();
     });
   });
 
@@ -667,12 +600,28 @@ describe("ProtocolHandler extra", () => {
 
     it("sends a follow-up client/state reflecting the commanded volume", () => {
       const handler = makeHandler();
+      activate(handler);
       send.mockClear();
       dispatch(handler, cmd({ command: "volume", volume: 33 }));
       const player = (
         lastSent(send, "client/state")!.payload as Record<string, unknown>
       ).player as Record<string, unknown>;
       expect(player.volume).toBe(33);
+    });
+
+    it("ignores a set_static_delay command without sending state", () => {
+      const handler = makeHandler({
+        useHardwareVolume: true,
+        getExternalVolume: () => ({ volume: 30, muted: false }),
+      });
+      activate(handler);
+      send.mockClear();
+      dispatch(
+        handler,
+        cmd({ command: "set_static_delay", static_delay_ms: 100 }),
+      );
+      expect(streamHandler.handleSyncDelayChange).not.toHaveBeenCalled();
+      expect(lastSent(send, "client/state")).toBeUndefined();
     });
 
     it("ignores a server/command with no player object", () => {
@@ -701,13 +650,6 @@ describe("ProtocolHandler extra", () => {
       const handler = makeHandler();
       dispatch(handler, end({ roles: ["artwork"] }));
       expect(streamHandler.handleStreamEnd).not.toHaveBeenCalled();
-    });
-
-    it("sends a client/state after ending the player stream", () => {
-      const handler = makeHandler();
-      send.mockClear();
-      dispatch(handler, end({}));
-      expect(lastSent(send, "client/state")).toBeDefined();
     });
   });
 
