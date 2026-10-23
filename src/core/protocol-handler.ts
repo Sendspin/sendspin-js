@@ -164,7 +164,7 @@ export class ProtocolHandler {
         break;
 
       case "server/state":
-        this.stateManager.updateServerState((message as ServerState).payload);
+        this.handleServerState(message as ServerState);
         break;
 
       case "group/update":
@@ -242,6 +242,18 @@ export class ProtocolHandler {
     if (!preserveActiveRoles) this.activeRoles = null;
     this.timeSyncManager.stop();
     this.stateManager.clearStateUpdateInterval();
+  }
+
+  // Without a time sync measurement the filter has no estimate to translate
+  // the metadata timestamp with, so the update applies immediately.
+  private handleServerState(message: ServerState): void {
+    const { metadata } = message.payload;
+    let metadataDelayMs = 0;
+    if (metadata && this.timeFilter.count > 0) {
+      const localUs = this.timeFilter.computeClientTime(metadata.timestamp);
+      metadataDelayMs = (localUs - performance.now() * 1000) / 1000;
+    }
+    this.stateManager.updateServerState(message.payload, metadataDelayMs);
   }
 
   private handleStreamStart(message: StreamStart): void {
@@ -469,6 +481,16 @@ export class ProtocolHandler {
     if (command === "volume") {
       const { volume } = params as ControllerCommands["volume"];
       fields = { volume: clampVolume(volume) };
+    } else if (command === "seek") {
+      const { position_ms } = params as ControllerCommands["seek"];
+      const max =
+        this.stateManager.serverState.controller?.seek_max_ms ?? Infinity;
+      fields = {
+        position_ms: Math.min(max, Math.max(0, Math.round(position_ms))),
+      };
+    } else if (command === "seek_relative") {
+      const { offset_ms } = params as ControllerCommands["seek_relative"];
+      fields = { offset_ms: Math.round(offset_ms) };
     }
     this.sender.sendControl({
       type: "client/command" as MessageType.CLIENT_COMMAND,

@@ -419,7 +419,6 @@ describe("Sendspin encryption and pairing E2E (aiosendspin)", () => {
       expect((await server.waitForCodeRequest()).status).toBe("code_requested");
       await waitFor(() => pins.length === 1);
       connection.core.setVolume(42);
-      connection.core.sendCommand("play", undefined as never);
       await new Promise((resolve) => setTimeout(resolve, 5_200));
       expect(connection.socket.readyState).toBe(WebSocket.OPEN);
       const first = await server.submitCode(wrongPin(pins[0]));

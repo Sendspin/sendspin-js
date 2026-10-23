@@ -29,6 +29,12 @@ const player = new SendspinPlayer({
     if (state.serverState?.metadata) {
       const meta = state.serverState.metadata;
       console.log('Track:', meta.title, '-', meta.artist);
+      console.log('Album:', meta.album, 'by', meta.album_artist, '#', meta.track);
+    }
+    if (state.serverState?.controller) {
+      const ctrl = state.serverState.controller;
+      console.log('Commands:', ctrl.supported_commands);
+      console.log('Repeat:', ctrl.repeat, 'Shuffle:', ctrl.shuffle);
     }
 
     // Group state (playback state, group info)
@@ -50,7 +56,8 @@ connectButton.addEventListener('click', async () => {
 player.setVolume(80);
 player.setMuted(false);
 
-// Send commands to server (controls the source)
+// Send commands to server (controls the source). Each must be listed in
+// the latest controller state's supported_commands, otherwise this throws.
 player.sendCommand('play');
 player.sendCommand('pause');
 player.sendCommand('stop');
@@ -64,6 +71,8 @@ player.sendCommand('repeat_off');
 player.sendCommand('repeat_one');
 player.sendCommand('repeat_all');
 player.sendCommand('switch');  // Switch group
+player.sendCommand('seek', { position_ms: 90_000 });  // Clamped to 0 through seek_max_ms
+player.sendCommand('seek_relative', { offset_ms: -10_000 });
 
 // Disconnect with reason (optional)
 player.disconnect('user_request');

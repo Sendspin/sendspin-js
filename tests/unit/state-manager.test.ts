@@ -73,58 +73,131 @@ describe("StateManager", () => {
   });
 
   describe("server state", () => {
-    it("merges delta updates", () => {
-      sm.updateServerState({
-        metadata: { title: "Song A", artist: "Artist A" },
-      });
+    const controller = {
+      supported_commands: ["play", "pause"],
+      volume: 50,
+      muted: false,
+      repeat: "off" as const,
+      shuffle: false,
+    };
+
+    it("keeps role objects a message omits", () => {
+      sm.updateServerState({ metadata: { timestamp: 1, title: "Song A" } });
+      sm.updateServerState({ controller });
 
       expect(sm.serverState.metadata?.title).toBe("Song A");
-
-      // Merge another field without losing existing
-      sm.updateServerState({
-        controller: { supported_commands: ["play", "pause"] },
-      });
-
-      expect(sm.serverState.metadata?.title).toBe("Song A");
-      expect(sm.serverState.controller?.supported_commands).toEqual([
-        "play",
-        "pause",
-      ]);
+      expect(sm.serverState.controller).toEqual(controller);
     });
 
-    it("handles null values by deleting keys", () => {
+    it("replaces an included role object instead of merging it", () => {
       sm.updateServerState({
-        metadata: { title: "Song A" },
+        metadata: {
+          timestamp: 1,
+          title: "Song A",
+          album: "Album A",
+          progress: {
+            track_progress: 1000,
+            track_duration: 5000,
+            playback_speed: 1000,
+          },
+        },
       });
 
-      sm.updateServerState({
-        metadata: null as any,
-      });
-
-      expect(sm.serverState.metadata).toBeUndefined();
-    });
-
-    it("merges nested fields without dropping siblings", () => {
-      sm.updateServerState({
-        metadata: { title: "Song A", artist: "Artist A" },
-      });
-
-      sm.updateServerState({ metadata: { artist: "Artist B" } });
+      sm.updateServerState({ metadata: { timestamp: 2, title: "Song B" } });
 
       expect(sm.serverState.metadata).toEqual({
-        title: "Song A",
-        artist: "Artist B",
+        timestamp: 2,
+        title: "Song B",
       });
     });
+  });
 
-    it("clears a nested key with null while keeping siblings", () => {
-      sm.updateServerState({
-        metadata: { title: "Song A", artist: "Artist A" },
+  describe("scheduled metadata", () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("holds a delayed update until its delay passes, then notifies", () => {
+      const cb = vi.fn();
+      const sm2 = new StateManager(cb);
+      sm2.updateServerState({ metadata: { timestamp: 1, title: "Current" } });
+      cb.mockClear();
+
+      sm2.updateServerState(
+        { metadata: { timestamp: 2, title: "Next" } },
+        1000,
+      );
+      expect(cb).not.toHaveBeenCalled();
+      sm2.updateServerState({
+        controller: {
+          supported_commands: [],
+          volume: 50,
+          muted: false,
+          repeat: "off",
+          shuffle: false,
+        },
       });
+      vi.advanceTimersByTime(999);
+      expect(sm2.serverState.metadata?.title).toBe("Current");
 
-      sm.updateServerState({ metadata: { artist: null } });
+      vi.advanceTimersByTime(1);
+      expect(sm2.serverState.metadata?.title).toBe("Next");
+      expect(cb).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          serverState: expect.objectContaining({
+            metadata: { timestamp: 2, title: "Next" },
+          }),
+        }),
+      );
+    });
 
-      expect(sm.serverState.metadata).toEqual({ title: "Song A" });
+    it("replaces the held update with a newer delayed one", () => {
+      sm.updateServerState(
+        { metadata: { timestamp: 3, title: "Later" } },
+        1000,
+      );
+      sm.updateServerState({ metadata: { timestamp: 2, title: "Next" } }, 500);
+
+      vi.advanceTimersByTime(1000);
+
+      expect(sm.serverState.metadata?.title).toBe("Next");
+    });
+
+    it("discards the held update when an immediate one arrives", () => {
+      sm.updateServerState({ metadata: { timestamp: 2, title: "Next" } }, 1000);
+      sm.updateServerState({ metadata: { timestamp: 1, title: "Current" } });
+
+      vi.advanceTimersByTime(1000);
+
+      expect(sm.serverState.metadata?.title).toBe("Current");
+    });
+
+    it("drops the held update when the server state is cleared", () => {
+      sm.updateServerState({ metadata: { timestamp: 2, title: "Next" } }, 1000);
+      sm.clearServerState();
+
+      vi.advanceTimersByTime(1000);
+
+      expect(sm.serverState).toEqual({});
+    });
+  });
+
+  describe("clearServerState", () => {
+    it("notifies only when there is server state to clear", () => {
+      const cb = vi.fn();
+      const sm2 = new StateManager(cb);
+      sm2.updateServerState({ metadata: { timestamp: 1, title: "Song" } });
+      cb.mockClear();
+
+      sm2.clearServerState();
+      sm2.clearServerState();
+
+      expect(cb).toHaveBeenCalledTimes(1);
+      expect(cb.mock.calls[0][0].serverState).toEqual({});
     });
   });
 

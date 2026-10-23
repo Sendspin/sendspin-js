@@ -55,6 +55,7 @@ export class StateManager {
 
   // Cached server state (from server/state messages)
   private _serverState: ServerStatePayload = {};
+  private pendingMetadataTimer: ReturnType<typeof setTimeout> | null = null;
 
   // Cached group state (from group/update messages)
   private _groupState: GroupUpdatePayload = {};
@@ -202,6 +203,7 @@ export class StateManager {
     this._currentStreamFormat = null;
     this._streamStartServerTime = 0;
     this._streamStartAudioTime = 0;
+    this.clearPendingMetadata();
     this._serverState = {};
     this._groupState = {};
     this.clearAllIntervals();
@@ -221,10 +223,38 @@ export class StateManager {
     }
   }
 
-  // Update server state (merges delta, null clears fields)
-  updateServerState(update: ServerStatePayload): void {
-    this._serverState = applyDiff(this._serverState, update);
+  // Replace each included role object, holding delayed metadata as the single pending update.
+  updateServerState(update: ServerStatePayload, metadataDelayMs = 0): void {
+    let applied = update;
+    if (update.metadata !== undefined) {
+      this.clearPendingMetadata();
+      if (metadataDelayMs > 0) {
+        const { metadata, ...rest } = update;
+        this.pendingMetadataTimer = setTimeout(() => {
+          this.pendingMetadataTimer = null;
+          this._serverState = { ...this._serverState, metadata };
+          this.notifyStateChange();
+        }, metadataDelayMs);
+        applied = rest;
+      }
+    }
+    if (Object.keys(applied).length === 0) return;
+    this._serverState = { ...this._serverState, ...applied };
     this.notifyStateChange();
+  }
+
+  clearServerState(): void {
+    this.clearPendingMetadata();
+    if (Object.keys(this._serverState).length === 0) return;
+    this._serverState = {};
+    this.notifyStateChange();
+  }
+
+  private clearPendingMetadata(): void {
+    if (this.pendingMetadataTimer !== null) {
+      clearTimeout(this.pendingMetadataTimer);
+      this.pendingMetadataTimer = null;
+    }
   }
 
   // Update group state (merges delta, null clears fields)
