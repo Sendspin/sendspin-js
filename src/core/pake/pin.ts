@@ -2,7 +2,9 @@
 
 import { sha256 } from "@noble/hashes/sha2";
 
-const PIN_DERIVE_LABEL = new TextEncoder().encode("sendspin-pin-derive-v1");
+const PAIRING_CODE_DERIVE_LABEL = new TextEncoder().encode(
+  "sendspin-pairing-code-derive-v1",
+);
 const PAIR_COMMIT_LABEL = new TextEncoder().encode("sendspin-pair-commit-v1");
 export const NONCE_SIZE = 32;
 const DYNAMIC_CODE_DIGITS = 6;
@@ -29,23 +31,23 @@ export function commitNonce(nonce: Uint8Array): Uint8Array {
 }
 
 /** Derive the 6-digit dynamic pairing code from the handshake hash and both nonces. */
-export function derivePin(
+export function derivePairingCode(
   handshakeHash: Uint8Array,
   nonceA: Uint8Array,
   nonceB: Uint8Array,
 ): string {
   const input = new Uint8Array(
-    PIN_DERIVE_LABEL.length +
+    PAIRING_CODE_DERIVE_LABEL.length +
       handshakeHash.length +
       nonceA.length +
       nonceB.length,
   );
-  input.set(PIN_DERIVE_LABEL, 0);
-  input.set(handshakeHash, PIN_DERIVE_LABEL.length);
-  input.set(nonceA, PIN_DERIVE_LABEL.length + handshakeHash.length);
+  input.set(PAIRING_CODE_DERIVE_LABEL, 0);
+  input.set(handshakeHash, PAIRING_CODE_DERIVE_LABEL.length);
+  input.set(nonceA, PAIRING_CODE_DERIVE_LABEL.length + handshakeHash.length);
   input.set(
     nonceB,
-    PIN_DERIVE_LABEL.length + handshakeHash.length + nonceA.length,
+    PAIRING_CODE_DERIVE_LABEL.length + handshakeHash.length + nonceA.length,
   );
   const digest = sha256(input);
   let n = 0n;

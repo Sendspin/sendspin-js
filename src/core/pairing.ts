@@ -13,7 +13,7 @@ import { CPace, CPaceError, SHARE_SIZE, TAG_SIZE } from "./pake/cpace";
 import {
   NONCE_SIZE,
   commitNonce,
-  derivePin,
+  derivePairingCode,
   generateNonce,
   isValidStaticPairingCode,
 } from "./pake/pin";
@@ -33,10 +33,13 @@ function concatBytes(...parts: Uint8Array[]): Uint8Array {
   return out;
 }
 
-/** CPace session-id label. sid = label || Noise handshake hash || counter. */
+/** CPace session-id label. sid = label || Noise handshake hash || counter || round. */
 const PAKE_SID_LABEL = "sendspin-pair-pake-v1";
-/** Label for the key that wraps the PSK in PIN pairing (PSK Wrapping). */
+/** This client never asks for another round, so every attempt runs round 1 only. */
+const PAKE_ROUND = 1;
+/** Labels for the keys that wrap the PSK and nonce_B in code pairing (Wrapping). */
 const PSK_WRAP_LABEL = utf8("sendspin-pair-psk-wrap-v1");
+const NONCE_WRAP_LABEL = utf8("sendspin-pair-nonce-wrap-v1");
 /** CPace associated data: distinct per side to prevent a reflected MAC. */
 const CPACE_AD_A = utf8("server");
 const CPACE_AD_B = utf8("client");
@@ -94,8 +97,8 @@ export interface PairingDeps {
   /** The Noise handshake hash h, which PIN derivation and the PAKE sid bind to. */
   handshakeHash(): Uint8Array;
   /**
-   * Seal the PIN-flow PSK under the negotiated AEAD (zero nonce, empty AD).
-   * key is K_wrap. Returns the 48-byte wrapped PSK.
+   * Seal a 32-byte code-flow value under the negotiated AEAD (zero nonce,
+   * empty AD). key is K_wrap. Returns the 48-byte wrapped value.
    */
   aeadSeal(key: Uint8Array, plaintext: Uint8Array): Uint8Array;
   /** Persists the dynamic-PIN failure counter. Null = in-memory only. */
@@ -298,7 +301,7 @@ export class PairingManager {
     const nonceA = this.decode(payload.nonce_A, NONCE_SIZE);
     if (!nonceA) return this.fail();
     const h = this.deps.handshakeHash();
-    const pin = derivePin(h, nonceA, this.nonceB!);
+    const pin = derivePairingCode(h, nonceA, this.nonceB!);
     this.currentSid = this.sid(h, this.attemptIndex);
     this.cpace = CPace.start({
       role: "responder",
@@ -338,15 +341,17 @@ export class PairingManager {
     if (!serverKc) return this.fail();
     if (!this.cpace.verify(serverKc)) {
       if (this.method === "dynamic_pairing_code") this.recordFailure();
-      return this.abort("pin_mismatch");
+      return this.abort("pairing_code_mismatch");
     }
     // Reset on a verified server_kc, whether or not the attempt finalizes.
     if (this.method === "dynamic_pairing_code") this.resetFailures();
-    const confirm: { client_kc: string; nonce_B?: string } = {
+    const confirm: { client_kc: string; wrapped_nonce_B?: string } = {
       client_kc: base64urlEncode(this.cpace.tag()),
     };
     if (this.method === "dynamic_pairing_code") {
-      confirm.nonce_B = base64urlEncode(this.nonceB!);
+      confirm.wrapped_nonce_B = base64urlEncode(
+        this.wrap(NONCE_WRAP_LABEL, this.nonceB!),
+      );
     }
     this.deps.sendControl({ type: "client/pair-confirm", payload: confirm });
     // client/pair-finalize follows immediately, without waiting (spec).
@@ -419,14 +424,12 @@ export class PairingManager {
     const psk = crypto.getRandomValues(new Uint8Array(32));
     this.pendingPsk = psk;
     if (this.cpace && this.currentSid) {
-      // PIN flow: seal the PSK under a key derived from the CPace output.
-      const kWrap = sha256(
-        concatBytes(PSK_WRAP_LABEL, this.currentSid, this.cpace.isk),
-      );
-      const wrapped = this.deps.aeadSeal(kWrap, psk);
+      // Pairing code flow: seal the PSK under a key derived from the CPace output.
       this.deps.sendControl({
         type: "client/pair-finalize",
-        payload: { wrapped_psk: base64urlEncode(wrapped) },
+        payload: {
+          wrapped_psk: base64urlEncode(this.wrap(PSK_WRAP_LABEL, psk)),
+        },
       });
       return;
     }
@@ -437,17 +440,22 @@ export class PairingManager {
     });
   }
 
+  /** Seal value under a key derived from the CPace output and sid. */
+  private wrap(label: Uint8Array, value: Uint8Array): Uint8Array {
+    const kWrap = sha256(concatBytes(label, this.currentSid!, this.cpace!.isk));
+    return this.deps.aeadSeal(kWrap, value);
+  }
+
   private sid(handshakeHash: Uint8Array, index: number): Uint8Array {
     const label = utf8(PAKE_SID_LABEL);
-    const sid = new Uint8Array(label.length + handshakeHash.length + 4);
+    const offset = label.length + handshakeHash.length;
+    const sid = new Uint8Array(offset + 8);
     sid.set(label, 0);
     sid.set(handshakeHash, label.length);
-    // counter: big-endian uint32 of the attempt index.
-    new DataView(sid.buffer).setUint32(
-      label.length + handshakeHash.length,
-      index,
-      false,
-    );
+    // counter and round: big-endian uint32 each.
+    const view = new DataView(sid.buffer);
+    view.setUint32(offset, index, false);
+    view.setUint32(offset + 4, PAKE_ROUND, false);
     return sid;
   }
 

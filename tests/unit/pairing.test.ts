@@ -14,7 +14,7 @@ import type {
   SendspinStorage,
 } from "../../src/types";
 import { CPace } from "../../src/core/pake/cpace";
-import { commitNonce, derivePin } from "../../src/core/pake/pin";
+import { commitNonce, derivePairingCode } from "../../src/core/pake/pin";
 import { SUITES } from "../../src/core/noise/suites";
 import { sha256 } from "@noble/hashes/sha2";
 
@@ -23,6 +23,7 @@ const EMPTY = new Uint8Array(0);
 const CPACE_AD_A = utf8("server");
 const CPACE_AD_B = utf8("client");
 const PSK_WRAP_LABEL = utf8("sendspin-pair-psk-wrap-v1");
+const NONCE_WRAP_LABEL = utf8("sendspin-pair-nonce-wrap-v1");
 
 const HANDSHAKE_HASH = new Uint8Array(32).fill(7);
 
@@ -36,31 +37,30 @@ function concatBytes(...parts: Uint8Array[]): Uint8Array {
   return out;
 }
 
-// CPace sid = label || h || big-endian uint32 attempt counter.
+// CPace sid = label || h || big-endian uint32 attempt counter || uint32 round 1.
 function sidFor(index: number): Uint8Array {
   const label = utf8("sendspin-pair-pake-v1");
-  const sid = new Uint8Array(label.length + HANDSHAKE_HASH.length + 4);
+  const sid = new Uint8Array(label.length + HANDSHAKE_HASH.length + 8);
   sid.set(label, 0);
   sid.set(HANDSHAKE_HASH, label.length);
-  new DataView(sid.buffer).setUint32(
-    label.length + HANDSHAKE_HASH.length,
-    index,
-    false,
-  );
+  const view = new DataView(sid.buffer);
+  view.setUint32(label.length + HANDSHAKE_HASH.length, index, false);
+  view.setUint32(label.length + HANDSHAKE_HASH.length + 4, 1, false);
   return sid;
 }
 
-// The negotiated-suite AEAD the manager uses to wrap the PIN-flow PSK.
+// The negotiated-suite AEAD the manager uses to wrap code-flow values.
 const aeadSeal = (key: Uint8Array, pt: Uint8Array) =>
   SUITES.chacha.aeadEncrypt(key, 0n, EMPTY, pt);
 
-// Server side: recover the wrapped PSK from the CPace ISK and sid.
-function unwrapPsk(
+// Server side: recover a wrapped value from the CPace ISK and sid.
+function unwrap(
+  label: Uint8Array,
   wrapped: Uint8Array,
   sid: Uint8Array,
   isk: Uint8Array,
 ): Uint8Array {
-  const kWrap = sha256(concatBytes(PSK_WRAP_LABEL, sid, isk));
+  const kWrap = sha256(concatBytes(label, sid, isk));
   return SUITES.chacha.aeadDecrypt(kWrap, 0n, EMPTY, wrapped);
 }
 
@@ -195,14 +195,14 @@ describe("PairingManager (pairing_psk)", () => {
   it("clears the attempt on an inbound pair/abort but keeps the connection open", () => {
     const { close, events, mgr } = setup();
     mgr.onActivate(["pairing"], { method: "pairing_psk" });
-    mgr.onAbort("pin_mismatch");
+    mgr.onAbort("pairing_code_mismatch");
     expect(close).not.toHaveBeenCalled();
     expect(events).toContain("aborted");
   });
 
   it("ignores an inbound pair/abort when no attempt is in progress", () => {
     const { close, events, mgr } = setup();
-    mgr.onAbort("pin_mismatch");
+    mgr.onAbort("pairing_code_mismatch");
     expect(close).not.toHaveBeenCalled();
     expect(events).not.toContain("aborted");
   });
@@ -376,9 +376,15 @@ describe("PairingManager (dynamic_pairing_code)", () => {
     expect(
       server.verify(base64urlDecode(confirm.payload!.client_kc as string)),
     ).toBe(true);
-    const nonceB = base64urlDecode(confirm.payload!.nonce_B as string);
+    expect(confirm.payload!.nonce_B).toBeUndefined();
+    const nonceB = unwrap(
+      NONCE_WRAP_LABEL,
+      base64urlDecode(confirm.payload!.wrapped_nonce_B as string),
+      sidFor(1),
+      server.isk,
+    );
     expect(commitNonce(nonceB)).toEqual(commitB);
-    expect(derivePin(HANDSHAKE_HASH, nonceA, nonceB)).toBe(shownPin);
+    expect(derivePairingCode(HANDSHAKE_HASH, nonceA, nonceB)).toBe(shownPin);
 
     // client/pair-finalize follows back-to-back, carrying the wrapped PSK.
     const fin = lastOfType(sent, "client/pair-finalize")!;
@@ -387,7 +393,8 @@ describe("PairingManager (dynamic_pairing_code)", () => {
 
     mgr.onPairFinalize();
     // The server unwraps with the shared CPace output and recovers the PSK.
-    const ltPsk = unwrapPsk(
+    const ltPsk = unwrap(
+      PSK_WRAP_LABEL,
       base64urlDecode(fin.payload!.wrapped_psk as string),
       sidFor(1),
       server.isk,
@@ -461,14 +468,14 @@ describe("PairingManager (dynamic_pairing_code)", () => {
     expect(close).not.toHaveBeenCalled();
   });
 
-  it("aborts with pin_mismatch and records a failure on a bad server tag", () => {
+  it("aborts with pairing_code_mismatch and records a failure on a bad server tag", () => {
     const storage = memStorage();
     const ctx = runToConfirm({ storage });
     const badTag = ctx.server.tag().slice();
     badTag[0] ^= 1;
     ctx.mgr.onPairConfirm({ server_kc: base64urlEncode(badTag) });
     expect(lastOfType(ctx.sent, "pair/abort")!.payload!.reason).toBe(
-      "pin_mismatch",
+      "pairing_code_mismatch",
     );
     expect(ctx.close).not.toHaveBeenCalled();
     expect(
@@ -664,11 +671,12 @@ describe("PairingManager (static_pairing_code)", () => {
     expect(
       server.verify(base64urlDecode(confirm.payload!.client_kc as string)),
     ).toBe(true);
-    expect(confirm.payload!.nonce_B).toBeUndefined();
+    expect(confirm.payload!.wrapped_nonce_B).toBeUndefined();
 
     const fin = lastOfType(ctx.sent, "client/pair-finalize")!;
     ctx.mgr.onPairFinalize();
-    const ltPsk = unwrapPsk(
+    const ltPsk = unwrap(
+      PSK_WRAP_LABEL,
       base64urlDecode(fin.payload!.wrapped_psk as string),
       sidFor(1),
       server.isk,
@@ -729,7 +737,7 @@ describe("PairingManager (static_pairing_code)", () => {
     ctx.mgr.onPairConfirm({ server_kc: base64urlEncode(badTag) });
 
     expect(lastOfType(ctx.sent, "pair/abort")!.payload!.reason).toBe(
-      "pin_mismatch",
+      "pairing_code_mismatch",
     );
     expect(storage.data.get("sendspin-pair-failures")).toBeUndefined();
   });

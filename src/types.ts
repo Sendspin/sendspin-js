@@ -349,8 +349,8 @@ export interface ServerPairConfirm {
 
 export interface ClientPairConfirm {
   type: MessageType.CLIENT_PAIR_CONFIRM;
-  /** nonce_B (preimage of commit_B) is present in dynamic PIN only. */
-  payload: { client_kc: string; nonce_B?: string };
+  /** wrapped_nonce_B (sealed preimage of commit_B) is present in dynamic pairing only. */
+  payload: { client_kc: string; wrapped_nonce_B?: string };
 }
 
 export interface ClientPairFinalize {
@@ -368,7 +368,7 @@ export type PairAbortReason =
   | "attempt_timeout"
   | "concurrent_attempt"
   | "method_not_supported"
-  | "pin_mismatch"
+  | "pairing_code_mismatch"
   | "user_cancelled";
 
 export interface PairAbort {

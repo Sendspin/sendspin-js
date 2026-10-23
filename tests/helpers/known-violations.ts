@@ -20,8 +20,4 @@ export const KNOWN_VIOLATIONS: readonly KnownViolation[] = [
     gap: "G29",
     message: "client/hello sent the removed trust_level key",
   },
-  {
-    gap: "G45",
-    message: "pair/abort sent the pre-rename pin_mismatch reason",
-  },
 ];
