@@ -492,8 +492,8 @@ describe("SendspinCore encryption wiring", () => {
         serverSession.decrypt(ws.sent[before] as Uint8Array).subarray(1),
       ),
     );
-    expect(clientHello.payload.supported_pair_methods).toContainEqual({
-      method: "pairing_psk",
+    expect(clientHello.payload.supported_pair_methods).toEqual({
+      pairing_psk: {},
     });
   });
 });

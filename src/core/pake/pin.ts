@@ -5,9 +5,7 @@ import { sha256 } from "@noble/hashes/sha2";
 const PIN_DERIVE_LABEL = new TextEncoder().encode("sendspin-pin-derive-v1");
 const PAIR_COMMIT_LABEL = new TextEncoder().encode("sendspin-pair-commit-v1");
 export const NONCE_SIZE = 32;
-export const MIN_PIN_DIGITS = 4;
-export const MAX_PIN_DIGITS = 12;
-export const DEFAULT_MIN_PIN_DIGITS = 6;
+const DYNAMIC_CODE_DIGITS = 6;
 export const STATIC_PIN_DIGITS = 8;
 
 const STATIC_PIN_RE = new RegExp(`^[0-9]{${STATIC_PIN_DIGITS}}$`);
@@ -30,12 +28,11 @@ export function commitNonce(nonce: Uint8Array): Uint8Array {
   return sha256(input);
 }
 
-/** Derive the pinLength-digit dynamic PIN from the handshake hash and both nonces. */
+/** Derive the 6-digit dynamic pairing code from the handshake hash and both nonces. */
 export function derivePin(
   handshakeHash: Uint8Array,
   nonceA: Uint8Array,
   nonceB: Uint8Array,
-  pinLength: number,
 ): string {
   const input = new Uint8Array(
     PIN_DERIVE_LABEL.length +
@@ -53,6 +50,6 @@ export function derivePin(
   const digest = sha256(input);
   let n = 0n;
   for (const b of digest) n = (n << 8n) | BigInt(b);
-  const pin = n % 10n ** BigInt(pinLength);
-  return pin.toString().padStart(pinLength, "0");
+  const code = n % 10n ** BigInt(DYNAMIC_CODE_DIGITS);
+  return code.toString().padStart(DYNAMIC_CODE_DIGITS, "0");
 }

@@ -4,16 +4,13 @@ import type {
   ActivatePairing,
   PairAbortReason,
   PairMethod,
-  PairMethodDescriptor,
   PairOutChannel,
   PairSecretLocation,
   SendspinStorage,
+  SupportedPairMethods,
 } from "../types";
 import { CPace, CPaceError, SHARE_SIZE, TAG_SIZE } from "./pake/cpace";
 import {
-  DEFAULT_MIN_PIN_DIGITS,
-  MAX_PIN_DIGITS,
-  MIN_PIN_DIGITS,
   NONCE_SIZE,
   commitNonce,
   derivePin,
@@ -49,19 +46,21 @@ const ATTEMPT_TIMEOUT_MS = 120_000;
 const WINDOW_LIFETIME_MS = 300_000;
 /** Dynamic PIN escalates to gesture-gating at this many consecutive failures. */
 const ESCALATION_THRESHOLD = 10;
-/** Dynamic PIN below this length is gesture-gated: short PINs are bought with a gesture. */
-const SHORT_PIN_LENGTH = 6;
 /** Persisted PIN failure counter (dynamic PIN only, not partitioned by server). */
 const FAILURES_STORAGE_KEY = "sendspin-pair-failures";
+/** Field of the stored failure counter, kept as earlier releases wrote it. */
+const FAILURES_FIELD = "dynamic_pin";
 
-const PIN_METHODS: readonly PairMethod[] = ["dynamic_pin", "static_pin"];
+const CODE_METHODS: readonly PairMethod[] = [
+  "dynamic_pairing_code",
+  "static_pairing_code",
+];
 
 /** Only advertise a locations hint the integrator actually configured. */
-function withLocations(
-  descriptor: PairMethodDescriptor,
-  locations?: PairSecretLocation[],
-): PairMethodDescriptor {
-  return locations?.length ? { ...descriptor, locations } : descriptor;
+function withLocations(locations?: PairSecretLocation[]): {
+  locations?: PairSecretLocation[];
+} {
+  return locations?.length ? { locations } : {};
 }
 
 /** A languages hint that is not a non-empty list of tags is treated as absent. */
@@ -101,13 +100,11 @@ export interface PairingDeps {
   aeadSeal(key: Uint8Array, plaintext: Uint8Array): Uint8Array;
   /** Persists the dynamic-PIN failure counter. Null = in-memory only. */
   storage: SendspinStorage | null;
-  /** Enables dynamic_pin: surfaces the code (null = attempt ended, hide it). */
+  /** Enables dynamic_pairing_code: surfaces the code (null = attempt ended, hide it). */
   onPairingCode: ((code: string | null, languages?: string[]) => void) | null;
   /** Channels advertised for dynamic pairing code emission. Default ["display"]. */
   pairingCodeOutChannels?: PairOutChannel[];
-  /** Shortest dynamic PIN length this client accepts. */
-  minPinLength?: number;
-  /** Enables static_pin: this device's fixed 8-digit pairing code. */
+  /** Enables static_pairing_code: this device's fixed 8-digit pairing code. */
   staticPairingCode?: string;
   /** Where the operator finds the static pairing code. Omitted when unset. */
   staticPairingCodeLocations?: PairSecretLocation[];
@@ -132,12 +129,9 @@ export class PairingManager {
   private pairingActivateCount = 0;
   /** The counter for the current attempt (pairing_index and CPace sid counter). */
   private attemptIndex = 0;
-  /** The dynamic PIN length for the current attempt, from the activation. */
-  private pinLength: number | null = null;
   /** The activation's spoken-PIN language preferences, in descending order. */
   private languages: string[] | undefined;
   private failures: number;
-  private readonly minPinLength: number;
 
   constructor(private deps: PairingDeps) {
     if (
@@ -146,34 +140,26 @@ export class PairingManager {
     ) {
       throw new Error("staticPairingCode must be exactly 8 decimal digits");
     }
-    this.minPinLength = Math.min(
-      MAX_PIN_DIGITS,
-      Math.max(MIN_PIN_DIGITS, deps.minPinLength ?? DEFAULT_MIN_PIN_DIGITS),
-    );
     this.failures = this.loadFailures();
   }
 
-  /** The pairing-method descriptors to advertise in client/hello. */
-  descriptors(): PairMethodDescriptor[] {
-    const out: PairMethodDescriptor[] = [
-      withLocations({ method: "pairing_psk" }, this.deps.pairingPskLocations),
-    ];
+  /** The pairing methods to advertise in client/hello. */
+  supportedPairMethods(): SupportedPairMethods {
+    const methods: SupportedPairMethods = {
+      pairing_psk: withLocations(this.deps.pairingPskLocations),
+    };
     if (this.deps.staticPairingCode !== undefined) {
-      out.push(
-        withLocations(
-          { method: "static_pin" },
-          this.deps.staticPairingCodeLocations,
-        ),
+      methods.static_pairing_code = withLocations(
+        this.deps.staticPairingCodeLocations,
       );
     }
     if (this.deps.onPairingCode) {
-      out.push({
-        method: "dynamic_pin",
+      methods.dynamic_pairing_code = {
         out_channels: this.deps.pairingCodeOutChannels ?? ["display"],
-        min_pin_length: this.minPinLength,
-      });
+        formats: ["digits"],
+      };
     }
-    return out;
+    return methods;
   }
 
   /**
@@ -232,7 +218,7 @@ export class PairingManager {
     this.pairingActivateCount += 1;
     this.attemptIndex = this.pairingActivateCount;
     const method = pairing?.method;
-    const supported = this.descriptors().map((d) => d.method);
+    const offered = this.supportedPairMethods();
     // pairing_psk exactly when the matched PSK is the Pairing PSK, a PIN method otherwise.
     const fitsPsk =
       (method === "pairing_psk") ===
@@ -249,7 +235,7 @@ export class PairingManager {
     }
     // A method the PSK disallows or the client no longer offers is something a
     // conformant server can produce, since its view of the config may be stale.
-    if (!fitsPsk || !supported.includes(method)) {
+    if (!fitsPsk || !Object.keys(offered).includes(method)) {
       this.abort("method_not_supported");
       return true;
     }
@@ -263,19 +249,17 @@ export class PairingManager {
       this.deps.onEvent?.("started");
       return true;
     }
-    if (method === "dynamic_pin") {
-      const length = pairing.pin_length;
-      // Same protocol-error treatment as a missing method: pin_length_unacceptable
-      // is defined over a value that is present but out of range.
-      if (typeof length !== "number" || !Number.isInteger(length)) {
+    if (method === "dynamic_pairing_code") {
+      const format = pairing.format;
+      // A missing format is a protocol error, like a missing method.
+      if (typeof format !== "string") {
         this.fail();
         return true;
       }
-      if (length < this.minPinLength || length > MAX_PIN_DIGITS) {
-        this.abort("pin_length_unacceptable");
+      if (!offered.dynamic_pairing_code!.formats.includes(format)) {
+        this.abort("method_not_supported");
         return true;
       }
-      this.pinLength = length;
       this.languages = readLanguages(pairing.languages);
     }
     if (this.isGestureGated() && !this.windowOpen) {
@@ -295,25 +279,26 @@ export class PairingManager {
 
   /**
    * Whether the selected method withholds client/pair-init until a window is
-   * open: static PIN always, dynamic PIN when escalated or the PIN is short.
+   * open: static pairing code always, dynamic pairing code when escalated.
    */
   private isGestureGated(): boolean {
-    if (this.method === "static_pin") return true;
-    if (this.method !== "dynamic_pin") return false;
-    return this.isDynamicPinEscalated() || this.pinLength! < SHORT_PIN_LENGTH;
+    if (this.method === "static_pairing_code") return true;
+    return (
+      this.method === "dynamic_pairing_code" && this.isDynamicPinEscalated()
+    );
   }
 
   /** server/pair-init: the server's nonce contribution (dynamic PIN). */
   onPairInit(payload: { nonce_A?: string }): void {
     // Leftover from an ended attempt (kept-open connection): discard silently.
     if (this.phase === "idle") return;
-    if (this.phase !== "await-init" || this.method !== "dynamic_pin") {
+    if (this.phase !== "await-init" || this.method !== "dynamic_pairing_code") {
       return this.fail();
     }
     const nonceA = this.decode(payload.nonce_A, NONCE_SIZE);
     if (!nonceA) return this.fail();
     const h = this.deps.handshakeHash();
-    const pin = derivePin(h, nonceA, this.nonceB!, this.pinLength!);
+    const pin = derivePin(h, nonceA, this.nonceB!);
     this.currentSid = this.sid(h, this.attemptIndex);
     this.cpace = CPace.start({
       role: "responder",
@@ -352,15 +337,15 @@ export class PairingManager {
     const serverKc = this.decode(payload.server_kc, TAG_SIZE);
     if (!serverKc) return this.fail();
     if (!this.cpace.verify(serverKc)) {
-      if (this.method === "dynamic_pin") this.recordFailure();
+      if (this.method === "dynamic_pairing_code") this.recordFailure();
       return this.abort("pin_mismatch");
     }
     // Reset on a verified server_kc, whether or not the attempt finalizes.
-    if (this.method === "dynamic_pin") this.resetFailures();
+    if (this.method === "dynamic_pairing_code") this.resetFailures();
     const confirm: { client_kc: string; nonce_B?: string } = {
       client_kc: base64urlEncode(this.cpace.tag()),
     };
-    if (this.method === "dynamic_pin") {
+    if (this.method === "dynamic_pairing_code") {
       confirm.nonce_B = base64urlEncode(this.nonceB!);
     }
     this.deps.sendControl({ type: "client/pair-confirm", payload: confirm });
@@ -400,7 +385,7 @@ export class PairingManager {
     this.closeWindow();
     this.armAttemptTimer();
     this.deps.onEvent?.("started");
-    if (this.method === "dynamic_pin") {
+    if (this.method === "dynamic_pairing_code") {
       this.nonceB = generateNonce();
       this.phase = "await-init";
       this.deps.sendControl({
@@ -493,7 +478,7 @@ export class PairingManager {
   private clearAttempt(): void {
     if (this.attemptTimer) clearTimeout(this.attemptTimer);
     this.attemptTimer = null;
-    if (this.method && PIN_METHODS.includes(this.method)) {
+    if (this.method && CODE_METHODS.includes(this.method)) {
       this.deps.onPairingCode?.(null);
     }
     this.pendingPsk = null;
@@ -502,7 +487,6 @@ export class PairingManager {
     this.cpace = null;
     this.currentSid = null;
     this.nonceB = null;
-    this.pinLength = null;
     this.languages = undefined;
   }
 
@@ -531,8 +515,8 @@ export class PairingManager {
     try {
       const raw = this.deps.storage?.getItem(FAILURES_STORAGE_KEY);
       if (!raw) return 0;
-      const stored = JSON.parse(raw) as Partial<Record<PairMethod, number>>;
-      return stored.dynamic_pin ?? 0;
+      const stored = JSON.parse(raw) as Record<string, number | undefined>;
+      return stored[FAILURES_FIELD] ?? 0;
     } catch {
       return 0;
     }
@@ -541,7 +525,7 @@ export class PairingManager {
   private saveFailures(): void {
     this.deps.storage?.setItem(
       FAILURES_STORAGE_KEY,
-      JSON.stringify({ dynamic_pin: this.failures }),
+      JSON.stringify({ [FAILURES_FIELD]: this.failures }),
     );
   }
 

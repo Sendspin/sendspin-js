@@ -200,7 +200,7 @@ describe("aiosendspin interop vector (empty-AD primitive)", () => {
   const yb = new Uint8Array(32).fill(0x22);
 
   it("derives the expected PIN", () => {
-    expect(derivePin(h, nonceA, nonceB, 6)).toBe("899599");
+    expect(derivePin(h, nonceA, nonceB)).toBe("899599");
   });
 
   // Domain-separated, so a bare SHA-256 of the nonce is not the commitment.
@@ -211,7 +211,7 @@ describe("aiosendspin interop vector (empty-AD primitive)", () => {
   });
 
   it("matches the reference generator, shares, and confirmation tags", () => {
-    const pin = derivePin(h, nonceA, nonceB, 6);
+    const pin = derivePin(h, nonceA, nonceB);
     const prs = utf8(pin);
     expect(toHex(calculateGenerator(prs, new Uint8Array(0), sid))).toBe(
       "83868197583cdca51bbb655ec3949040250b8789bdfb79503c255f6898de662b",
@@ -243,17 +243,18 @@ describe("derivePin", () => {
   const na = new Uint8Array(32).fill(2);
   const nb = new Uint8Array(32).fill(3);
 
-  it("zero-pads to the requested length", () => {
-    for (const len of [4, 6, 8, 12]) {
-      const pin = derivePin(h, na, nb, len);
-      expect(pin).toMatch(new RegExp(`^[0-9]{${len}}$`));
-    }
+  it("zero-pads to 6 digits", () => {
+    const codes = Array.from({ length: 64 }, (_, i) =>
+      derivePin(h, na, new Uint8Array(32).fill(i)),
+    );
+    for (const code of codes) expect(code).toMatch(/^[0-9]{6}$/);
+    expect(codes.some((code) => code.startsWith("0"))).toBe(true);
   });
 
   it("changes with any input", () => {
-    const base = derivePin(h, na, nb, 8);
-    expect(derivePin(new Uint8Array(32).fill(9), na, nb, 8)).not.toBe(base);
-    expect(derivePin(h, new Uint8Array(32).fill(9), nb, 8)).not.toBe(base);
-    expect(derivePin(h, na, new Uint8Array(32).fill(9), 8)).not.toBe(base);
+    const base = derivePin(h, na, nb);
+    expect(derivePin(new Uint8Array(32).fill(9), na, nb)).not.toBe(base);
+    expect(derivePin(h, new Uint8Array(32).fill(9), nb)).not.toBe(base);
+    expect(derivePin(h, na, new Uint8Array(32).fill(9))).not.toBe(base);
   });
 });

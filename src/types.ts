@@ -83,7 +83,7 @@ export interface ClientHello {
     name: string;
     supported_roles: string[];
     trust_level: "user" | "none";
-    supported_pair_methods?: PairMethodDescriptor[];
+    supported_pair_methods: SupportedPairMethods;
     unpaired_access: { enabled: boolean };
     device_info?: {
       product_name?: string;
@@ -261,23 +261,26 @@ export interface GroupUpdate {
   payload: GroupUpdatePayload;
 }
 
-export type PairMethod = "pairing_psk" | "dynamic_pin" | "static_pin";
+export type PairMethod =
+  "pairing_psk" | "dynamic_pairing_code" | "static_pairing_code";
 
-/** Out-channels through which a client can convey the dynamic PIN. */
-export type PairOutChannel = "display" | "speaker" | "other";
+/** Out-channels through which a client can convey the dynamic pairing code. */
+export type PairOutChannel = "display" | "speaker";
+
+/** Emission formats of the dynamic pairing code. */
+export type PairCodeFormat = "digits" | "qr_code";
 
 /** Where the operator can find a static pairing secret. */
 export type PairSecretLocation = "device" | "leaflet" | "operator";
 
-/** A client/hello pairing-method descriptor. */
-export interface PairMethodDescriptor {
-  method: PairMethod;
-  /** Dynamic PIN only: how the client can surface the derived PIN. */
-  out_channels?: PairOutChannel[];
-  /** Dynamic PIN only: shortest PIN length the client accepts (4-12). */
-  min_pin_length?: number;
-  /** Static PIN and Pairing PSK only: where the operator finds the secret. */
-  locations?: PairSecretLocation[];
+/** client/hello supported_pair_methods: the offered methods, keyed by method. */
+export interface SupportedPairMethods {
+  pairing_psk: { locations?: PairSecretLocation[] };
+  static_pairing_code?: { locations?: PairSecretLocation[] };
+  dynamic_pairing_code?: {
+    out_channels: PairOutChannel[];
+    formats: PairCodeFormat[];
+  };
 }
 
 export interface ClientInit {
@@ -298,9 +301,9 @@ export interface NoiseHandshake {
 /** Parameters of the pairing attempt a pairing server/activate admits. */
 export interface ActivatePairing {
   method: PairMethod;
-  /** Dynamic PIN only: the PIN length for this session (4-12). */
-  pin_length?: number;
-  /** Dynamic PIN only: BCP 47 tags in descending operator preference. */
+  /** Dynamic pairing code only: the emission format for this attempt. */
+  format?: PairCodeFormat;
+  /** Dynamic pairing code only: BCP 47 tags in descending operator preference. */
   languages?: string[];
 }
 
@@ -320,7 +323,7 @@ export interface ClientPairPending {
 
 export interface ClientPairInit {
   type: MessageType.CLIENT_PAIR_INIT;
-  /** commit_B (SHA-256 of nonce_B) is present in dynamic PIN, absent in static. */
+  /** commit_B (SHA-256 of nonce_B) is present in dynamic pairing, absent in static. */
   payload: { pairing_index: number; commit_B?: string };
 }
 
@@ -365,7 +368,6 @@ export type PairAbortReason =
   | "attempt_timeout"
   | "concurrent_attempt"
   | "method_not_supported"
-  | "pin_length_unacceptable"
   | "pin_mismatch"
   | "user_cancelled";
 
@@ -744,16 +746,6 @@ export interface SendspinCoreConfig {
    * languages passed to onPairingCode.
    */
   pairingCodeOutChannels?: PairOutChannel[];
-
-  /**
-   * Shortest dynamic PIN length this client accepts (4-12). Default 6.
-   * A compliant server always picks at least this length, so the client
-   * aborts only if a misbehaving server proposes a shorter one.
-   *
-   * Below 6 the client gesture-gates each attempt, so openPairingWindow()
-   * becomes mandatory for dynamic PIN pairing as well.
-   */
-  minPinLength?: number;
 
   /**
    * Enables the static pairing code method: this device's fixed 8-digit code.

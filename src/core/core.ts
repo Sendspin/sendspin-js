@@ -142,7 +142,6 @@ export class SendspinCore implements StreamHandler {
       storage: config.storage ?? null,
       onPairingCode: config.onPairingCode ?? null,
       pairingCodeOutChannels: config.pairingCodeOutChannels,
-      minPinLength: config.minPinLength,
       staticPairingCode: config.staticPairingCode,
       staticPairingCodeLocations: config.staticPairingCodeLocations,
       pairingPskLocations: config.pairingPskLocations,
@@ -151,7 +150,7 @@ export class SendspinCore implements StreamHandler {
 
     const helloContext = {
       trustLevel: () => this.handshakeInfo?.trustLevel ?? "none",
-      pairMethods: () => this.pairing.descriptors(),
+      pairMethods: () => this.pairing.supportedPairMethods(),
       unpairedAccess: config.unpairedAccess ?? true,
     };
 
@@ -518,8 +517,8 @@ export class SendspinCore implements StreamHandler {
 
   /**
    * Operator gesture that opens the pairing window (~5 minutes, admits one
-   * attempt). Required before each gesture-gated attempt: every static PIN
-   * attempt, and dynamic PIN when escalated or the PIN is shorter than 6.
+   * attempt). Required before each gesture-gated attempt: every static
+   * pairing code attempt, and dynamic pairing code ones when escalated.
    */
   openPairingWindow(): void {
     this.pairing.openPairingWindow();

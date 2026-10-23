@@ -186,7 +186,6 @@ const player = new SendspinPlayer({
   // Dynamic pairing: show the derived code to the operator (null = hide).
   // languages carries the operator's spoken-code preference, when the server sends one.
   onPairingCode: (code, languages) => showCodeDialog(code, languages),
-  minPinLength: 6,            // shortest dynamic PIN this client accepts (4-12)
   // Advertise "speaker" if the app can speak the code. `languages` says which language to use.
   pairingCodeOutChannels: ['display'],
   // Static pairing: this device's fixed 8-digit code, for devices with no display
@@ -215,9 +214,9 @@ The SDK supports all three pairing methods from the spec:
 
 Some attempts are **gesture-gated**: the SDK withholds `client/pair-init` until
 `openPairingWindow()` is called, signalling `client/pair-pending` meanwhile and
-firing `onPairing("pending")`. That applies to every static PIN attempt, and to
-dynamic PIN when the method has escalated or the server picked a PIN shorter
-than 6 digits. Ten consecutive dynamic-PIN failures escalate the method, and any
+firing `onPairing("pending")`. That applies to every static pairing code
+attempt, and to dynamic pairing code attempts when the method has escalated.
+Ten consecutive dynamic pairing code failures escalate the method, and any
 later success de-escalates it.
 
 ```typescript

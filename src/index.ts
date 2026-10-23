@@ -95,7 +95,6 @@ export class SendspinPlayer {
       onPairing: config.onPairing,
       onPairingCode: config.onPairingCode,
       pairingCodeOutChannels: config.pairingCodeOutChannels,
-      minPinLength: config.minPinLength,
       staticPairingCode: config.staticPairingCode,
       staticPairingCodeLocations: config.staticPairingCodeLocations,
       pairingPskLocations: config.pairingPskLocations,
@@ -345,8 +344,8 @@ export class SendspinPlayer {
 
   /**
    * Operator gesture that opens the pairing window (~5 minutes, admits one
-   * attempt). Required before each gesture-gated attempt: every static PIN
-   * attempt, and dynamic PIN when escalated or the PIN is shorter than 6.
+   * attempt). Required before each gesture-gated attempt: every static
+   * pairing code attempt, and dynamic pairing code ones when escalated.
    * The "pending" pairing event fires when an attempt is waiting on this.
    */
   openPairingWindow(): void {

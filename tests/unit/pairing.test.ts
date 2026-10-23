@@ -83,7 +83,6 @@ interface SetupOpts {
   staticPairingCode?: string;
   staticPairingCodeLocations?: PairSecretLocation[];
   pairingPskLocations?: PairSecretLocation[];
-  minPinLength?: number;
 }
 
 function setup(opts: SetupOpts = {}) {
@@ -105,7 +104,6 @@ function setup(opts: SetupOpts = {}) {
     storage: opts.storage ?? null,
     onPairingCode: onPairingCode as OnPin | null,
     pairingCodeOutChannels: opts.pairingCodeOutChannels,
-    minPinLength: opts.minPinLength,
     staticPairingCode: opts.staticPairingCode,
     staticPairingCodeLocations: opts.staticPairingCodeLocations,
     pairingPskLocations: opts.pairingPskLocations,
@@ -124,9 +122,9 @@ function lastOfType(
   return sent.filter((m) => m.type === type).at(-1);
 }
 
-/** A dynamic-PIN pairing activation, which now carries the PIN length. */
-function dynamic(pinLength = 6, languages?: string[]): ActivatePairing {
-  return { method: "dynamic_pin", pin_length: pinLength, languages };
+/** A dynamic pairing code activation in the digits format. */
+function dynamic(languages?: string[]): ActivatePairing {
+  return { method: "dynamic_pairing_code", format: "digits", languages };
 }
 
 /** Drive the server (initiator) side of a PIN PAKE against the manager. */
@@ -155,7 +153,7 @@ describe("PairingManager (pairing_psk)", () => {
 
   it("aborts an unsupported method and keeps the connection open", () => {
     const { sent, close, mgr } = setup();
-    mgr.onActivate(["pairing"], { method: "static_pin" }); // not configured
+    mgr.onActivate(["pairing"], { method: "static_pairing_code" }); // not configured
     expect(sent[0]!.type).toBe("pair/abort");
     expect(sent[0]!.payload!.reason).toBe("method_not_supported");
     expect(close).not.toHaveBeenCalled();
@@ -235,38 +233,38 @@ describe("PairingManager (pairing_psk)", () => {
   });
 });
 
-describe("client/hello descriptors", () => {
+describe("client/hello supported_pair_methods", () => {
   it("advertises only pairing_psk by default, with no locations hint", () => {
     const { mgr } = setup({ onPairingCode: null });
     // The hint says where the operator finds the secret, which only the
     // integrator knows, so an unconfigured client claims nothing.
-    expect(mgr.descriptors()).toEqual([{ method: "pairing_psk" }]);
+    expect(mgr.supportedPairMethods()).toEqual({ pairing_psk: {} });
   });
 
-  it("advertises dynamic_pin with out_channels and min_pin_length when onPairingCode is set", () => {
-    const { mgr } = setup({ onPairingCode: vi.fn(), minPinLength: 8 });
-    expect(mgr.descriptors()).toContainEqual({
-      method: "dynamic_pin",
+  it("advertises dynamic_pairing_code with out_channels and the digits format when onPairingCode is set", () => {
+    const { mgr } = setup({ onPairingCode: vi.fn() });
+    expect(mgr.supportedPairMethods().dynamic_pairing_code).toEqual({
       out_channels: ["display"],
-      min_pin_length: 8,
+      formats: ["digits"],
     });
   });
 
-  it("advertises the configured PIN out-channels", () => {
+  it("advertises the configured out-channels", () => {
     const { mgr } = setup({
       onPairingCode: vi.fn(),
       pairingCodeOutChannels: ["display", "speaker"],
     });
-    const dyn = mgr.descriptors().find((d) => d.method === "dynamic_pin")!;
-    expect(dyn.out_channels).toEqual(["display", "speaker"]);
+    expect(
+      mgr.supportedPairMethods().dynamic_pairing_code!.out_channels,
+    ).toEqual(["display", "speaker"]);
   });
 
-  it("advertises static_pin without a locations hint when unconfigured", () => {
+  it("advertises static_pairing_code without a locations hint when unconfigured", () => {
     const { mgr } = setup({
       onPairingCode: null,
       staticPairingCode: "12345678",
     });
-    expect(mgr.descriptors()).toContainEqual({ method: "static_pin" });
+    expect(mgr.supportedPairMethods().static_pairing_code).toEqual({});
   });
 
   it("omits an empty locations list rather than advertising it", () => {
@@ -275,7 +273,7 @@ describe("client/hello descriptors", () => {
       staticPairingCode: "12345678",
       staticPairingCodeLocations: [],
     });
-    expect(mgr.descriptors()).toContainEqual({ method: "static_pin" });
+    expect(mgr.supportedPairMethods().static_pairing_code).toEqual({});
   });
 
   it("advertises the configured secret locations", () => {
@@ -285,19 +283,10 @@ describe("client/hello descriptors", () => {
       staticPairingCodeLocations: ["device", "leaflet"],
       pairingPskLocations: ["leaflet"],
     });
-    const byMethod = Object.fromEntries(
-      mgr.descriptors().map((d) => [d.method, d.locations]),
-    );
-    expect(byMethod).toEqual({
-      pairing_psk: ["leaflet"],
-      static_pin: ["device", "leaflet"],
+    expect(mgr.supportedPairMethods()).toEqual({
+      pairing_psk: { locations: ["leaflet"] },
+      static_pairing_code: { locations: ["device", "leaflet"] },
     });
-  });
-
-  it("clamps min_pin_length into the 4-12 range", () => {
-    const { mgr } = setup({ onPairingCode: vi.fn(), minPinLength: 2 });
-    const dyn = mgr.descriptors().find((d) => d.method === "dynamic_pin")!;
-    expect(dyn.min_pin_length).toBe(4);
   });
 
   it("rejects a malformed static PIN", () => {
@@ -310,8 +299,7 @@ describe("client/hello descriptors", () => {
   });
 });
 
-describe("PairingManager (dynamic_pin)", () => {
-  const PIN_LENGTH = 6;
+describe("PairingManager (dynamic_pairing_code)", () => {
   const ESCALATION_THRESHOLD = 10;
 
   /** The PIN most recently surfaced to the app. */
@@ -324,7 +312,7 @@ describe("PairingManager (dynamic_pin)", () => {
 
   /** Drive one dynamic-PIN attempt through to a mismatched server tag. */
   function failAttempt(ctx: ReturnType<typeof setup>, index: number): void {
-    ctx.mgr.onActivate(["pairing"], dynamic(PIN_LENGTH));
+    ctx.mgr.onActivate(["pairing"], dynamic());
     // Once escalated, this attempt waits on a gesture instead of starting.
     const pending = lastOfType(ctx.sent, "client/pair-pending");
     if (pending?.payload!.pairing_index === index) ctx.mgr.openPairingWindow();
@@ -340,7 +328,7 @@ describe("PairingManager (dynamic_pin)", () => {
     ctx.mgr.onPairConfirm({ server_kc: base64urlEncode(badTag) });
   }
 
-  function runToConfirm(opts: SetupOpts = {}, pairing = dynamic(PIN_LENGTH)) {
+  function runToConfirm(opts: SetupOpts = {}, pairing = dynamic()) {
     const ctx = setup({
       category: "sentinel",
       onPairingCode: vi.fn(),
@@ -353,11 +341,11 @@ describe("PairingManager (dynamic_pin)", () => {
     const commitB = base64urlDecode(init.payload!.commit_B as string);
     expect(commitB).toHaveLength(32);
 
-    // server/pair-init carries only nonce_A: pin_length came with the activation.
+    // server/pair-init carries only nonce_A.
     const nonceA = new Uint8Array(32).fill(0xa1);
     ctx.mgr.onPairInit({ nonce_A: base64urlEncode(nonceA) });
     const pin = shownPin(ctx);
-    expect(pin).toMatch(new RegExp(`^[0-9]{${pairing.pin_length}}$`));
+    expect(pin).toMatch(/^[0-9]{6}$/);
 
     // server/pair-auth: the server's CPace share; expect client/pair-auth back.
     const server = serverPake(pin);
@@ -390,7 +378,7 @@ describe("PairingManager (dynamic_pin)", () => {
     ).toBe(true);
     const nonceB = base64urlDecode(confirm.payload!.nonce_B as string);
     expect(commitNonce(nonceB)).toEqual(commitB);
-    expect(derivePin(HANDSHAKE_HASH, nonceA, nonceB, 6)).toBe(shownPin);
+    expect(derivePin(HANDSHAKE_HASH, nonceA, nonceB)).toBe(shownPin);
 
     // client/pair-finalize follows back-to-back, carrying the wrapped PSK.
     const fin = lastOfType(sent, "client/pair-finalize")!;
@@ -412,7 +400,7 @@ describe("PairingManager (dynamic_pin)", () => {
   });
 
   it("forwards the activation's spoken-PIN languages alongside the PIN", () => {
-    const ctx = runToConfirm({}, dynamic(PIN_LENGTH, ["ca", "es", "en"]));
+    const ctx = runToConfirm({}, dynamic(["ca", "es", "en"]));
     const call = (
       ctx.onPairingCode as ReturnType<typeof vi.fn>
     ).mock.calls.find((c) => typeof c[0] === "string")!;
@@ -426,8 +414,8 @@ describe("PairingManager (dynamic_pin)", () => {
     ["a blank tag", ["en", ""]],
   ])("drops a languages hint that is %s", (_label, languages) => {
     const ctx = runToConfirm({}, {
-      method: "dynamic_pin",
-      pin_length: PIN_LENGTH,
+      method: "dynamic_pairing_code",
+      format: "digits",
       languages,
     } as ActivatePairing);
     const call = (
@@ -447,49 +435,30 @@ describe("PairingManager (dynamic_pin)", () => {
     expect(call[1]).toBeUndefined();
   });
 
-  it("aborts with pin_length_unacceptable when the activation's PIN is too short", () => {
+  it("fails closed when a dynamic_pairing_code activation omits format", () => {
     const { mgr, sent, close } = setup({
       category: "sentinel",
       onPairingCode: vi.fn(),
-      minPinLength: 6,
     });
-    mgr.onActivate(["pairing"], dynamic(4));
+    mgr.onActivate(["pairing"], { method: "dynamic_pairing_code" });
+    expect(lastOfType(sent, "pair/abort")).toBeUndefined();
+    expect(close).toHaveBeenCalled();
+  });
+
+  it("aborts with method_not_supported on a format the client does not offer", () => {
+    const { mgr, sent, close } = setup({
+      category: "sentinel",
+      onPairingCode: vi.fn(),
+    });
+    mgr.onActivate(["pairing"], {
+      method: "dynamic_pairing_code",
+      format: "qr_code",
+    });
     expect(lastOfType(sent, "pair/abort")!.payload!.reason).toBe(
-      "pin_length_unacceptable",
+      "method_not_supported",
     );
     expect(lastOfType(sent, "client/pair-init")).toBeUndefined();
     expect(close).not.toHaveBeenCalled();
-  });
-
-  it("aborts with pin_length_unacceptable above the 12-digit maximum", () => {
-    const { mgr, sent } = setup({
-      category: "sentinel",
-      onPairingCode: vi.fn(),
-    });
-    mgr.onActivate(["pairing"], dynamic(13));
-    expect(lastOfType(sent, "pair/abort")!.payload!.reason).toBe(
-      "pin_length_unacceptable",
-    );
-  });
-
-  it("fails closed on a non-integer pin_length", () => {
-    const { mgr, sent, close } = setup({
-      category: "sentinel",
-      onPairingCode: vi.fn(),
-    });
-    mgr.onActivate(["pairing"], dynamic(6.5));
-    expect(lastOfType(sent, "pair/abort")).toBeUndefined();
-    expect(close).toHaveBeenCalled();
-  });
-
-  it("fails closed when a dynamic_pin activation omits pin_length", () => {
-    const { mgr, sent, close } = setup({
-      category: "sentinel",
-      onPairingCode: vi.fn(),
-    });
-    mgr.onActivate(["pairing"], { method: "dynamic_pin" });
-    expect(lastOfType(sent, "pair/abort")).toBeUndefined();
-    expect(close).toHaveBeenCalled();
   });
 
   it("aborts with pin_mismatch and records a failure on a bad server tag", () => {
@@ -543,7 +512,7 @@ describe("PairingManager (dynamic_pin)", () => {
       onPairingCode: vi.fn(),
       storage,
     });
-    expect(mgr.descriptors().map((d) => d.method)).toContain("dynamic_pin");
+    expect(mgr.supportedPairMethods().dynamic_pairing_code).toBeDefined();
 
     mgr.onActivate(["pairing"], dynamic());
     expect(lastOfType(sent, "client/pair-pending")!.payload).toEqual({
@@ -568,7 +537,7 @@ describe("PairingManager (dynamic_pin)", () => {
       onPairingCode: vi.fn(),
       storage,
     });
-    ctx.mgr.onActivate(["pairing"], dynamic(PIN_LENGTH));
+    ctx.mgr.onActivate(["pairing"], dynamic());
     ctx.mgr.openPairingWindow();
     ctx.mgr.onPairInit({
       nonce_A: base64urlEncode(new Uint8Array(32).fill(0xa1)),
@@ -581,34 +550,10 @@ describe("PairingManager (dynamic_pin)", () => {
     ctx.mgr.onPairFinalize();
 
     expect(ctx.mgr.isDynamicPinEscalated()).toBe(false);
-    ctx.mgr.onActivate(["pairing"], dynamic(PIN_LENGTH));
+    ctx.mgr.onActivate(["pairing"], dynamic());
     expect(
       lastOfType(ctx.sent, "client/pair-init")!.payload!.pairing_index,
     ).toBe(2);
-  });
-
-  it("gesture-gates a PIN shorter than 6 digits even when not escalated", () => {
-    const { mgr, sent } = setup({
-      category: "sentinel",
-      onPairingCode: vi.fn(),
-      minPinLength: 4,
-    });
-    mgr.onActivate(["pairing"], dynamic(5));
-    expect(lastOfType(sent, "client/pair-pending")).toBeDefined();
-    expect(lastOfType(sent, "client/pair-init")).toBeUndefined();
-
-    mgr.openPairingWindow();
-    expect(lastOfType(sent, "client/pair-init")).toBeDefined();
-  });
-
-  it("sends pair-init immediately for a 6-digit PIN", () => {
-    const { mgr, sent } = setup({
-      category: "sentinel",
-      onPairingCode: vi.fn(),
-    });
-    mgr.onActivate(["pairing"], dynamic(6));
-    expect(lastOfType(sent, "client/pair-pending")).toBeUndefined();
-    expect(lastOfType(sent, "client/pair-init")).toBeDefined();
   });
 
   it("fails closed on a low-order server share", () => {
@@ -678,7 +623,7 @@ describe("PairingManager (dynamic_pin)", () => {
   });
 });
 
-describe("PairingManager (static_pin)", () => {
+describe("PairingManager (static_pairing_code)", () => {
   const STATIC_PIN = "31415926";
 
   function staticSetup() {
@@ -700,9 +645,9 @@ describe("PairingManager (static_pin)", () => {
 
   it("signals pair-pending and waits for the gesture before sending pair-init", () => {
     const ctx = staticSetup();
-    expect(ctx.mgr.onActivate(["pairing"], { method: "static_pin" })).toBe(
-      true,
-    );
+    expect(
+      ctx.mgr.onActivate(["pairing"], { method: "static_pairing_code" }),
+    ).toBe(true);
     expect(lastOfType(ctx.sent, "client/pair-pending")!.payload).toEqual({
       pairing_index: 1,
     });
@@ -733,7 +678,7 @@ describe("PairingManager (static_pin)", () => {
 
   it("reports an abandoned gesture-gated attempt so the app can drop its prompt", () => {
     const ctx = staticSetup();
-    ctx.mgr.onActivate(["pairing"], { method: "static_pin" });
+    ctx.mgr.onActivate(["pairing"], { method: "static_pairing_code" });
     expect(ctx.events).toEqual(["pending"]);
     // The server may leave pairing without first sending pair/abort, which is
     // only a SHOULD, so the client has to surface the end of the attempt itself.
@@ -744,8 +689,8 @@ describe("PairingManager (static_pin)", () => {
 
   it("supersedes a gesture-gated attempt and re-signals under the new index", () => {
     const ctx = staticSetup();
-    ctx.mgr.onActivate(["pairing"], { method: "static_pin" });
-    ctx.mgr.onActivate(["pairing"], { method: "static_pin" });
+    ctx.mgr.onActivate(["pairing"], { method: "static_pairing_code" });
+    ctx.mgr.onActivate(["pairing"], { method: "static_pairing_code" });
     // Without counting the second activate the eventual pair-init would carry a
     // stale index, which the server discards silently and pairing wedges.
     expect(lastOfType(ctx.sent, "client/pair-pending")!.payload).toEqual({
@@ -760,7 +705,7 @@ describe("PairingManager (static_pin)", () => {
   it("starts immediately, with no pair-pending, when the window was already open", () => {
     const ctx = staticSetup();
     ctx.mgr.openPairingWindow();
-    ctx.mgr.onActivate(["pairing"], { method: "static_pin" });
+    ctx.mgr.onActivate(["pairing"], { method: "static_pairing_code" });
     expect(lastOfType(ctx.sent, "client/pair-pending")).toBeUndefined();
     expect(lastOfType(ctx.sent, "client/pair-init")).toBeDefined();
   });
@@ -773,7 +718,7 @@ describe("PairingManager (static_pin)", () => {
       staticPairingCode: STATIC_PIN,
       storage,
     });
-    ctx.mgr.onActivate(["pairing"], { method: "static_pin" });
+    ctx.mgr.onActivate(["pairing"], { method: "static_pairing_code" });
     ctx.mgr.openPairingWindow();
     const server = serverPake(STATIC_PIN);
     ctx.mgr.onPairAuth({ pake_msg_1: base64urlEncode(server.publicShare) });
@@ -792,11 +737,11 @@ describe("PairingManager (static_pin)", () => {
   it("the window admits exactly one attempt", () => {
     const ctx = staticSetup();
     ctx.mgr.openPairingWindow();
-    ctx.mgr.onActivate(["pairing"], { method: "static_pin" });
+    ctx.mgr.onActivate(["pairing"], { method: "static_pairing_code" });
     completeFrom(ctx);
     ctx.mgr.onPairFinalize();
     // A new activate must wait for a fresh gesture.
-    ctx.mgr.onActivate(["pairing"], { method: "static_pin" });
+    ctx.mgr.onActivate(["pairing"], { method: "static_pairing_code" });
     const inits = ctx.sent.filter((m) => m.type === "client/pair-init");
     expect(inits).toHaveLength(1);
   });
@@ -807,7 +752,7 @@ describe("PairingManager (static_pin)", () => {
     // The window is device state: the spec closes it only on a drop of the
     // connection carrying its attempt, and no attempt is in flight here.
     ctx.mgr.reset();
-    ctx.mgr.onActivate(["pairing"], { method: "static_pin" });
+    ctx.mgr.onActivate(["pairing"], { method: "static_pairing_code" });
     expect(lastOfType(ctx.sent, "client/pair-pending")).toBeUndefined();
     expect(lastOfType(ctx.sent, "client/pair-init")).toBeDefined();
   });
@@ -822,7 +767,7 @@ describe("PairingManager timers", () => {
       category: "sentinel",
       onPairingCode: vi.fn(),
     });
-    mgr.onActivate(["pairing"], { method: "dynamic_pin", pin_length: 6 });
+    mgr.onActivate(["pairing"], dynamic());
     vi.advanceTimersByTime(120_000);
     expect(lastOfType(sent, "pair/abort")!.payload!.reason).toBe(
       "attempt_timeout",
@@ -838,7 +783,7 @@ describe("PairingManager timers", () => {
     });
     ctx.mgr.openPairingWindow();
     vi.advanceTimersByTime(300_000);
-    ctx.mgr.onActivate(["pairing"], { method: "static_pin" });
+    ctx.mgr.onActivate(["pairing"], { method: "static_pairing_code" });
     // Window expired: the attempt waits for a fresh gesture.
     expect(lastOfType(ctx.sent, "client/pair-init")).toBeUndefined();
     expect(ctx.close).not.toHaveBeenCalled();
@@ -850,7 +795,7 @@ describe("PairingManager timers", () => {
       onPairingCode: null,
       staticPairingCode: "31415926",
     });
-    ctx.mgr.onActivate(["pairing"], { method: "static_pin" });
+    ctx.mgr.onActivate(["pairing"], { method: "static_pairing_code" });
     vi.advanceTimersByTime(600_000);
     expect(ctx.close).not.toHaveBeenCalled();
     expect(lastOfType(ctx.sent, "pair/abort")).toBeUndefined();
@@ -865,7 +810,7 @@ describe("PairingManager timers", () => {
       onPairingCode: null,
       staticPairingCode: "31415926",
     });
-    ctx.mgr.onActivate(["pairing"], { method: "static_pin" });
+    ctx.mgr.onActivate(["pairing"], { method: "static_pairing_code" });
     ctx.mgr.openPairingWindow();
     vi.advanceTimersByTime(120_000);
     expect(lastOfType(ctx.sent, "pair/abort")!.payload!.reason).toBe(

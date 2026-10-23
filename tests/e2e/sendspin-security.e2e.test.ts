@@ -497,32 +497,37 @@ describe("Sendspin encryption and pairing E2E (aiosendspin)", () => {
     TEST_TIMEOUT_MS,
   );
 
-  // G47
-  it.fails(
-    "advertises the configured out-channels and secret locations",
-    async () => {
-      const connection = await connect({
-        clientName: "Descriptor hints client",
-        onPairingCode: () => undefined,
-        pairingCodeOutChannels: ["display", "speaker"],
-        staticPairingCode: "31415926",
-        staticPairingCodeLocations: ["device", "leaflet"],
-        pairingPskLocations: ["leaflet"],
-      });
+  it("advertises the configured out-channels and Pairing PSK locations", async () => {
+    const connection = await connect({
+      clientName: "Dynamic hints client",
+      onPairingCode: () => undefined,
+      pairingCodeOutChannels: ["display", "speaker"],
+      pairingPskLocations: ["leaflet"],
+    });
 
-      const methods = (await server.status(connection.core.clientId))
-        .supported_pair_methods;
-      expect(methods.dynamic_pairing_code?.out_channels).toEqual([
-        "display",
-        "speaker",
-      ]);
-      expect(methods.static_pairing_code?.locations).toEqual([
-        "device",
-        "leaflet",
-      ]);
-      expect(methods.pairing_psk?.locations).toEqual(["leaflet"]);
-    },
-  );
+    const methods = (await server.status(connection.core.clientId))
+      .supported_pair_methods;
+    expect(methods.dynamic_pairing_code?.out_channels).toEqual([
+      "display",
+      "speaker",
+    ]);
+    expect(methods.pairing_psk?.locations).toEqual(["leaflet"]);
+  });
+
+  it("advertises the configured static pairing code locations", async () => {
+    const connection = await connect({
+      clientName: "Static hints client",
+      staticPairingCode: "31415926",
+      staticPairingCodeLocations: ["device", "leaflet"],
+    });
+
+    const methods = (await server.status(connection.core.clientId))
+      .supported_pair_methods;
+    expect(methods.static_pairing_code?.locations).toEqual([
+      "device",
+      "leaflet",
+    ]);
+  });
 
   it("waits for the Static PIN window before pairing", async () => {
     const pin = randomInt(0, 100_000_000).toString().padStart(8, "0");

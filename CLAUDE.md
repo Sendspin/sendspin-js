@@ -79,7 +79,6 @@ Encryption and pairing options:
 - `storage`: Backing store for identity, PSKs, and pairing failure counters
 - `onPairing`: Pairing lifecycle callback
 - `onPairingCode`: Enables the dynamic pairing code method, receives the derived code
-- `minPinLength`: Shortest dynamic PIN this client accepts
 - `staticPairingCode`: Enables the static pairing code method with a fixed 8-digit code
 
 ## Sendspin Protocol Specification

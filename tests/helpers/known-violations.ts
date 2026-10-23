@@ -8,14 +8,6 @@ export interface KnownViolation {
 /** Non-compliance the client still shows, removed as each gap is fixed. */
 export const KNOWN_VIOLATIONS: readonly KnownViolation[] = [
   {
-    gap: "G13",
-    message: "client/hello sent supported_pair_methods as a list",
-  },
-  {
-    gap: "G14",
-    message: "client/hello offered the pre-rename PIN pairing methods",
-  },
-  {
     gap: "G20",
     message: "Pairing PSK client/pair-finalize sent without client/pair-init",
   },
