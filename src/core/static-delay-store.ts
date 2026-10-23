@@ -1,5 +1,5 @@
 /**
- * Persists the server-commanded static delay so it survives reboots and
+ * Persists the server-commanded output delay so it survives reboots and
  * reconnections, as the spec requires.
  */
 

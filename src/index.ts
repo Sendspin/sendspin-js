@@ -252,7 +252,7 @@ export class SendspinPlayer {
     this.core.setMuted(muted);
   }
 
-  // Set static delay (in milliseconds, 0-5000)
+  // Set output delay (in milliseconds, 0-5000)
   setSyncDelay(delayMs: number): void {
     this.core.setSyncDelay(delayMs);
   }
