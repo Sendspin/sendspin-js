@@ -245,6 +245,7 @@ export class StateManager {
 
   clearServerState(): void {
     this.clearPendingMetadata();
+    if (Object.keys(this._serverState).length === 0) return;
     this._serverState = {};
     this.notifyStateChange();
   }
