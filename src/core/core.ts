@@ -137,11 +137,11 @@ export class SendspinCore implements StreamHandler {
           plaintext,
         ),
       storage: config.storage ?? null,
-      onPin: config.onPairingPin ?? null,
-      pinOutChannels: config.pinOutChannels,
+      onPairingCode: config.onPairingCode ?? null,
+      pairingCodeOutChannels: config.pairingCodeOutChannels,
       minPinLength: config.minPinLength,
-      staticPin: config.staticPin,
-      staticPinLocations: config.staticPinLocations,
+      staticPairingCode: config.staticPairingCode,
+      staticPairingCodeLocations: config.staticPairingCodeLocations,
       pairingPskLocations: config.pairingPskLocations,
       onEvent: (e, d) => this.config.onPairing?.(e, d),
     });
@@ -531,7 +531,7 @@ export class SendspinCore implements StreamHandler {
     this.pairing.cancelPairing();
   }
 
-  /** Whether dynamic PIN has escalated to gesture-gating (10 failures). */
+  /** Whether dynamic pairing code has escalated to gesture-gating (10 failures). */
   isDynamicPinEscalated(): boolean {
     return this.pairing.isDynamicPinEscalated();
   }

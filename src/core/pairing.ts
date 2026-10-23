@@ -18,7 +18,7 @@ import {
   commitNonce,
   derivePin,
   generateNonce,
-  isValidStaticPin,
+  isValidStaticPairingCode,
 } from "./pake/pin";
 import { sha256 } from "@noble/hashes/sha2";
 
@@ -101,16 +101,16 @@ export interface PairingDeps {
   aeadSeal(key: Uint8Array, plaintext: Uint8Array): Uint8Array;
   /** Persists the dynamic-PIN failure counter. Null = in-memory only. */
   storage: SendspinStorage | null;
-  /** Enables dynamic_pin: surfaces the PIN (null = attempt ended, hide it). */
-  onPin: ((pin: string | null, languages?: string[]) => void) | null;
-  /** Channels advertised for dynamic PIN emission. Default ["display"]. */
-  pinOutChannels?: PairOutChannel[];
+  /** Enables dynamic_pin: surfaces the code (null = attempt ended, hide it). */
+  onPairingCode: ((code: string | null, languages?: string[]) => void) | null;
+  /** Channels advertised for dynamic pairing code emission. Default ["display"]. */
+  pairingCodeOutChannels?: PairOutChannel[];
   /** Shortest dynamic PIN length this client accepts. */
   minPinLength?: number;
-  /** Enables static_pin: this device's fixed 8-digit PIN. */
-  staticPin?: string;
-  /** Where the operator finds the static PIN. Omitted when unset. */
-  staticPinLocations?: PairSecretLocation[];
+  /** Enables static_pin: this device's fixed 8-digit pairing code. */
+  staticPairingCode?: string;
+  /** Where the operator finds the static pairing code. Omitted when unset. */
+  staticPairingCodeLocations?: PairSecretLocation[];
   /** Where the operator finds the Pairing PSK. Omitted when unset. */
   pairingPskLocations?: PairSecretLocation[];
   onEvent?(e: PairingEvent, detail?: string): void;
@@ -140,14 +140,17 @@ export class PairingManager {
   private readonly minPinLength: number;
 
   constructor(private deps: PairingDeps) {
-    if (deps.staticPin !== undefined && !isValidStaticPin(deps.staticPin)) {
-      throw new Error("staticPin must be exactly 8 decimal digits");
+    if (
+      deps.staticPairingCode !== undefined &&
+      !isValidStaticPairingCode(deps.staticPairingCode)
+    ) {
+      throw new Error("staticPairingCode must be exactly 8 decimal digits");
     }
     this.minPinLength = Math.min(
       MAX_PIN_DIGITS,
       Math.max(MIN_PIN_DIGITS, deps.minPinLength ?? DEFAULT_MIN_PIN_DIGITS),
     );
-    if (!deps.storage && deps.onPin) {
+    if (!deps.storage && deps.onPairingCode) {
       // Spec requires the failure counter to survive reboots. Without storage
       // it is in-memory only and escalation resets on restart.
       console.warn(
@@ -162,15 +165,18 @@ export class PairingManager {
     const out: PairMethodDescriptor[] = [
       withLocations({ method: "pairing_psk" }, this.deps.pairingPskLocations),
     ];
-    if (this.deps.staticPin !== undefined) {
+    if (this.deps.staticPairingCode !== undefined) {
       out.push(
-        withLocations({ method: "static_pin" }, this.deps.staticPinLocations),
+        withLocations(
+          { method: "static_pin" },
+          this.deps.staticPairingCodeLocations,
+        ),
       );
     }
-    if (this.deps.onPin) {
+    if (this.deps.onPairingCode) {
       out.push({
         method: "dynamic_pin",
-        out_channels: this.deps.pinOutChannels ?? ["display"],
+        out_channels: this.deps.pairingCodeOutChannels ?? ["display"],
         min_pin_length: this.minPinLength,
       });
     }
@@ -324,7 +330,7 @@ export class PairingManager {
       adb: CPACE_AD_B,
     });
     this.phase = "await-auth";
-    this.deps.onPin?.(pin, this.languages);
+    this.deps.onPairingCode?.(pin, this.languages);
   }
 
   /** server/pair-auth: the server's CPace public share (both PIN methods). */
@@ -417,7 +423,7 @@ export class PairingManager {
     this.currentSid = this.sid(h, this.attemptIndex);
     this.cpace = CPace.start({
       role: "responder",
-      prs: new TextEncoder().encode(this.deps.staticPin!),
+      prs: new TextEncoder().encode(this.deps.staticPairingCode!),
       sid: this.currentSid,
       ada: CPACE_AD_A,
       adb: CPACE_AD_B,
@@ -495,7 +501,7 @@ export class PairingManager {
     if (this.attemptTimer) clearTimeout(this.attemptTimer);
     this.attemptTimer = null;
     if (this.method && PIN_METHODS.includes(this.method)) {
-      this.deps.onPin?.(null);
+      this.deps.onPairingCode?.(null);
     }
     this.pendingPsk = null;
     this.phase = "idle";

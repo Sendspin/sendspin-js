@@ -62,10 +62,10 @@ interface ConnectOptions {
   suite?: SuiteId;
   storage?: SendspinStorage;
   onPairing?: SendspinCoreConfig["onPairing"];
-  onPairingPin?: SendspinCoreConfig["onPairingPin"];
-  pinOutChannels?: SendspinCoreConfig["pinOutChannels"];
-  staticPin?: string;
-  staticPinLocations?: SendspinCoreConfig["staticPinLocations"];
+  onPairingCode?: SendspinCoreConfig["onPairingCode"];
+  pairingCodeOutChannels?: SendspinCoreConfig["pairingCodeOutChannels"];
+  staticPairingCode?: string;
+  staticPairingCodeLocations?: SendspinCoreConfig["staticPairingCodeLocations"];
   pairingPskLocations?: SendspinCoreConfig["pairingPskLocations"];
   unpairedAccess?: boolean;
 }
@@ -130,10 +130,10 @@ async function connectCore(
     codecs: ["pcm"],
     unpairedAccess: options.unpairedAccess ?? false,
     onPairing: options.onPairing,
-    onPairingPin: options.onPairingPin,
-    pinOutChannels: options.pinOutChannels,
-    staticPin: options.staticPin,
-    staticPinLocations: options.staticPinLocations,
+    onPairingCode: options.onPairingCode,
+    pairingCodeOutChannels: options.pairingCodeOutChannels,
+    staticPairingCode: options.staticPairingCode,
+    staticPairingCodeLocations: options.staticPairingCodeLocations,
     pairingPskLocations: options.pairingPskLocations,
   });
   const statusPromise = server.waitForClient();
@@ -406,7 +406,7 @@ describe("Sendspin encryption and pairing E2E (aiosendspin)", () => {
         clientName: "Dynamic PIN client",
         suite: "aesgcm",
         storage,
-        onPairingPin: (pin) => {
+        onPairingCode: (pin) => {
           if (pin !== null) pins.push(pin);
         },
       });
@@ -455,7 +455,7 @@ describe("Sendspin encryption and pairing E2E (aiosendspin)", () => {
       const connection = await connect({
         clientName: "Dynamic PIN escalation client",
         storage,
-        onPairingPin: collectPin,
+        onPairingCode: collectPin,
       });
 
       for (let attempt = 0; attempt < 10; attempt++) {
@@ -478,7 +478,7 @@ describe("Sendspin encryption and pairing E2E (aiosendspin)", () => {
       const reconnected = await connect({
         clientName: "Dynamic PIN escalation client",
         storage,
-        onPairingPin: collectPin,
+        onPairingCode: collectPin,
       });
       // The counter survived the reconnect, so the method stays escalated: the
       // client withholds pair-init until the operator opens the window.
@@ -503,10 +503,10 @@ describe("Sendspin encryption and pairing E2E (aiosendspin)", () => {
     async () => {
       const connection = await connect({
         clientName: "Descriptor hints client",
-        onPairingPin: () => undefined,
-        pinOutChannels: ["display", "speaker"],
-        staticPin: "31415926",
-        staticPinLocations: ["device", "leaflet"],
+        onPairingCode: () => undefined,
+        pairingCodeOutChannels: ["display", "speaker"],
+        staticPairingCode: "31415926",
+        staticPairingCodeLocations: ["device", "leaflet"],
         pairingPskLocations: ["leaflet"],
       });
 
@@ -528,7 +528,7 @@ describe("Sendspin encryption and pairing E2E (aiosendspin)", () => {
     const pin = randomInt(0, 100_000_000).toString().padStart(8, "0");
     const connection = await connect({
       clientName: "Static PIN client",
-      staticPin: pin,
+      staticPairingCode: pin,
     });
 
     await server.beginCodePairing("static_pairing_code");
@@ -551,7 +551,7 @@ describe("Sendspin encryption and pairing E2E (aiosendspin)", () => {
       const connection = await connect({
         clientName: "Restart persistence client",
         storage,
-        onPairingPin: (pin) => {
+        onPairingCode: (pin) => {
           if (pin !== null) pins.push(pin);
         },
       });

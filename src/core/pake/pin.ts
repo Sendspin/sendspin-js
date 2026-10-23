@@ -13,7 +13,7 @@ export const STATIC_PIN_DIGITS = 8;
 const STATIC_PIN_RE = new RegExp(`^[0-9]{${STATIC_PIN_DIGITS}}$`);
 
 /** Whether pin is exactly 8 decimal digits, as the static-PIN method requires. */
-export function isValidStaticPin(pin: string): boolean {
+export function isValidStaticPairingCode(pin: string): boolean {
   return STATIC_PIN_RE.test(pin);
 }
 

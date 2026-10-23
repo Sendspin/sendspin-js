@@ -729,19 +729,21 @@ export interface SendspinCoreConfig {
   ) => void;
 
   /**
-   * Enables dynamic PIN pairing: called with the PIN the operator must enter
-   * into the server, and with null when the attempt ends (hide the PIN).
+   * Enables the dynamic pairing code method: called with the code the
+   * operator must enter into the server, and with null when the attempt ends (hide it).
    * languages carries the operator's preferred BCP 47 tags for spoken
    * emission, in descending preference, and is absent if the server sent none.
+   * When staticPairingCode is also set, the server picks one of the two.
    */
-  onPairingPin?: (pin: string | null, languages?: string[]) => void;
+  onPairingCode?: (code: string | null, languages?: string[]) => void;
 
   /**
-   * Channels through which this client conveys the dynamic PIN, advertised in
-   * the dynamic_pin descriptor. Default ["display"]. Advertise "speaker" when
-   * the app can speak the PIN, and honor the languages passed to onPairingPin.
+   * Channels through which this client conveys the dynamic pairing code,
+   * advertised in client/hello. Default ["display"].
+   * Advertise "speaker" when the app can speak the code, and honor the
+   * languages passed to onPairingCode.
    */
-  pinOutChannels?: PairOutChannel[];
+  pairingCodeOutChannels?: PairOutChannel[];
 
   /**
    * Shortest dynamic PIN length this client accepts (4-12). Default 6.
@@ -754,13 +756,15 @@ export interface SendspinCoreConfig {
   minPinLength?: number;
 
   /**
-   * Enables static PIN pairing: this device's fixed 8-digit PIN. The pairing
-   * window must be opened with openPairingWindow() before each attempt.
+   * Enables the static pairing code method: this device's fixed 8-digit code.
+   * The pairing window must be opened with openPairingWindow() before each
+   * attempt. Meant for devices with no display or speaker. When onPairingCode
+   * is also set, the server picks one of the two.
    */
-  staticPin?: string;
+  staticPairingCode?: string;
 
-  /** Where the operator finds the static PIN. Omitted when unset. */
-  staticPinLocations?: PairSecretLocation[];
+  /** Where the operator finds the static pairing code. Omitted when unset. */
+  staticPairingCodeLocations?: PairSecretLocation[];
 
   /** Where the operator finds the Pairing PSK. Omitted when unset. */
   pairingPskLocations?: PairSecretLocation[];

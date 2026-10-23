@@ -93,11 +93,11 @@ export class SendspinPlayer {
       reconnect: config.reconnect,
       onStateChange: config.onStateChange,
       onPairing: config.onPairing,
-      onPairingPin: config.onPairingPin,
-      pinOutChannels: config.pinOutChannels,
+      onPairingCode: config.onPairingCode,
+      pairingCodeOutChannels: config.pairingCodeOutChannels,
       minPinLength: config.minPinLength,
-      staticPin: config.staticPin,
-      staticPinLocations: config.staticPinLocations,
+      staticPairingCode: config.staticPairingCode,
+      staticPairingCodeLocations: config.staticPairingCodeLocations,
       pairingPskLocations: config.pairingPskLocations,
       suite: config.suite,
       unpairedAccess: config.unpairedAccess,
@@ -358,7 +358,7 @@ export class SendspinPlayer {
     this.core.cancelPairing();
   }
 
-  /** Whether dynamic PIN has escalated to gesture-gating (10 failures). */
+  /** Whether dynamic pairing code has escalated to gesture-gating (10 failures). */
   isDynamicPinEscalated(): boolean {
     return this.core.isDynamicPinEscalated();
   }

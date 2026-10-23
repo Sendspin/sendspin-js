@@ -76,11 +76,11 @@ Encryption and pairing options:
 - `suite`: Noise cipher suite, "chacha" (default) or "aesgcm"
 - `unpairedAccess`: Admit unpaired playback on the Sentinel PSK
 - `longTermPsks`: Preloaded long-term PSK records
-- `storage`: Backing store for identity, PSKs, and PIN lockout counters
+- `storage`: Backing store for identity, PSKs, and pairing failure counters
 - `onPairing`: Pairing lifecycle callback
-- `onPairingPin`: Enables dynamic PIN pairing, receives the derived PIN
+- `onPairingCode`: Enables the dynamic pairing code method, receives the derived code
 - `minPinLength`: Shortest dynamic PIN this client accepts
-- `staticPin`: Enables static PIN pairing with a fixed 8-digit PIN
+- `staticPairingCode`: Enables the static pairing code method with a fixed 8-digit code
 
 ## Sendspin Protocol Specification
 

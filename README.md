@@ -183,17 +183,18 @@ const player = new SendspinPlayer({
     // "pending" means the attempt is waiting for openPairingWindow().
     console.log('Pairing:', event, detail);
   },
-  // Dynamic PIN pairing: show the derived PIN to the operator (null = hide).
-  // languages carries the operator's spoken-PIN preference, when the server sends one.
-  onPairingPin: (pin, languages) => showPinDialog(pin, languages),
+  // Dynamic pairing: show the derived code to the operator (null = hide).
+  // languages carries the operator's spoken-code preference, when the server sends one.
+  onPairingCode: (code, languages) => showCodeDialog(code, languages),
   minPinLength: 6,            // shortest dynamic PIN this client accepts (4-12)
-  // Advertise "speaker" if the app can speak the PIN; `languages` says which language to use.
-  pinOutChannels: ['display'],
-  // Static PIN pairing: this device's fixed 8-digit PIN.
-  staticPin: '31415926',
+  // Advertise "speaker" if the app can speak the code. `languages` says which language to use.
+  pairingCodeOutChannels: ['display'],
+  // Static pairing: this device's fixed 8-digit code, for devices with no display
+  // or speaker. If both code methods are enabled, the server picks one.
+  staticPairingCode: '31415926',
   // Where the operator finds each secret, if you know. Any combination of
   // device | leaflet | operator. Omitted from client/hello when unset.
-  staticPinLocations: ['device', 'leaflet'],
+  staticPairingCodeLocations: ['device', 'leaflet'],
 });
 
 await player.connect();
@@ -205,12 +206,12 @@ exposed to an active man-in-the-middle. While it's on by default, you can set `u
 The SDK supports all three pairing methods from the spec:
 
 - **Pairing PSK** (always available): transfer the client-bound pairing token.
-- **Dynamic PIN** (enabled by `onPairingPin`): the server starts pairing, the
-  SDK derives a one-time PIN and passes it to `onPairingPin` for display; the
-  operator enters it into the server.
-- **Static PIN** (enabled by `staticPin`): the operator enters this device's
-  fixed 8-digit PIN into the server, then makes a local gesture that calls
-  `player.openPairingWindow()` (window lasts ~5 minutes, one attempt).
+- **Dynamic pairing code** (enabled by `onPairingCode`): the server starts
+  pairing, the SDK derives a one-time code and passes it to `onPairingCode` for
+  display, and the operator enters it into the server.
+- **Static pairing code** (enabled by `staticPairingCode`): the operator enters
+  this device's fixed 8-digit code into the server, then makes a local gesture
+  that calls `player.openPairingWindow()` (window lasts ~5 minutes, one attempt).
 
 Some attempts are **gesture-gated**: the SDK withholds `client/pair-init` until
 `openPairingWindow()` is called, signalling `client/pair-pending` meanwhile and

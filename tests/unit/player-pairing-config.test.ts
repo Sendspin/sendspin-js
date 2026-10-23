@@ -26,11 +26,11 @@ describe("SendspinPlayer pairing config", () => {
     const player = new SendspinPlayer({
       webSocket: {} as never,
       storage: memStorage(),
-      onPairingPin: () => undefined,
-      pinOutChannels: ["display", "speaker"],
+      onPairingCode: () => undefined,
+      pairingCodeOutChannels: ["display", "speaker"],
       minPinLength: 8,
-      staticPin: "12345678",
-      staticPinLocations: ["device", "leaflet"],
+      staticPairingCode: "12345678",
+      staticPairingCodeLocations: ["device", "leaflet"],
       pairingPskLocations: ["leaflet"],
     });
 
