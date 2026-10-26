@@ -123,8 +123,7 @@ class ChromeLikeAudioContext {
     return rawCurrentTime();
   }
   getOutputTimestamp():
-    | { contextTime: number; performanceTime: number }
-    | undefined {
+    { contextTime: number; performanceTime: number } | undefined {
     if (!this.outputTimestampEnabled) return undefined;
     // Playout clock: what is leaving the port right now.
     return {
