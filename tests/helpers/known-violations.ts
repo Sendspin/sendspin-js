@@ -8,18 +8,6 @@ export interface KnownViolation {
 /** Non-compliance the client still shows, removed as each gap is fixed. */
 export const KNOWN_VIOLATIONS: readonly KnownViolation[] = [
   {
-    gap: "G9",
-    message: "client/state omitted required player timing fields",
-  },
-  {
-    gap: "G9",
-    message: "client/state omitted volume despite declaring the volume command",
-  },
-  {
-    gap: "G9",
-    message: "client/state omitted muted despite declaring the mute command",
-  },
-  {
     gap: "G13",
     message: "client/hello sent supported_pair_methods as a list",
   },
@@ -30,14 +18,6 @@ export const KNOWN_VIOLATIONS: readonly KnownViolation[] = [
   {
     gap: "G20",
     message: "Pairing PSK client/pair-finalize sent without client/pair-init",
-  },
-  {
-    gap: "G22",
-    message: "client/state used the pre-rename 'static_delay_ms' key",
-  },
-  {
-    gap: "G23",
-    message: "client/state declared the pre-rename 'set_static_delay' command",
   },
   {
     gap: "G25",

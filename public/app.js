@@ -21,7 +21,7 @@ const STORAGE_KEYS = {
   SERVER_URL: "sendspin-server-url",
   VOLUME: "sendspin-volume",
   MUTED: "sendspin-muted",
-  // Shared with the SDK, which persists the static delay under this key.
+  // Shared with the SDK, which persists the output delay under this key.
   SYNC_DELAY: "sendspin-static-delay-ms-v2",
   REQUIRED_LEAD_TIME: "sendspin-required-lead-time",
   MIN_BUFFER: "sendspin-min-buffer",

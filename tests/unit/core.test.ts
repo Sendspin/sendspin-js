@@ -425,7 +425,7 @@ describe("SendspinCore.setSyncDelay", () => {
     expect(core.getSyncDelayMs()).toBe(5000);
     expect(cb).toHaveBeenCalledWith(5000);
     expect(send).toHaveBeenCalledTimes(1);
-    expect(send.mock.calls[0][0].payload.player.static_delay_ms).toBe(5000);
+    expect(send.mock.calls[0][0].payload.player.output_delay_ms).toBe(5000);
   });
 
   it("seeds the initial sync delay from config (clamped)", () => {
@@ -437,7 +437,7 @@ describe("SendspinCore.setSyncDelay", () => {
   });
 });
 
-describe("SendspinCore static delay persistence", () => {
+describe("SendspinCore output delay persistence", () => {
   it("persists a server-commanded delay change to storage", () => {
     const storage = makeStorage();
     const core = new SendspinCore({
@@ -448,6 +448,27 @@ describe("SendspinCore static delay persistence", () => {
     core.handleSyncDelayChange(123);
 
     expect(storage.data.get(STATIC_DELAY_KEY)).toBe("123");
+  });
+
+  it("persists and reports a server set_output_delay command", () => {
+    const storage = makeStorage();
+    const core = new SendspinCore({ baseUrl: "http://h", storage });
+    const send = spySend(core);
+    activatePlayer(core, send);
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (core as any).routeControl({
+      type: "server/command",
+      payload: {
+        player: { command: "set_output_delay", output_delay_ms: 9999 },
+      },
+    });
+
+    expect(storage.data.get(STATIC_DELAY_KEY)).toBe("5000");
+    expect(send.mock.calls.at(-1)![0].payload.player.output_delay_ms).toBe(
+      5000,
+    );
+    core._stateManager.clearAllIntervals();
   });
 
   it("restores a persisted delay on a fresh core with the same storage", () => {

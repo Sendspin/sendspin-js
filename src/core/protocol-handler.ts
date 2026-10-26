@@ -32,17 +32,7 @@ const STATE_UPDATE_INTERVAL = 5000; // 5 seconds
 const DEFAULT_REQUIRED_LEAD_TIME_MS = 250;
 const DEFAULT_MIN_BUFFER_MS = 250;
 
-type PlayerStatePayload = NonNullable<ClientState["payload"]["player"]>;
-
-// Snapshot of the diffable player fields. supported_commands is static, sent
-// only in the initial full state, so it is not tracked here.
-interface SentPlayerState {
-  volume: number;
-  muted: boolean;
-  static_delay_ms: number;
-  required_lead_time_ms: number;
-  min_buffer_ms: number;
-}
+const PLAYER_COMMANDS = ["volume", "mute", "set_output_delay"] as const;
 
 function toBufferMs(value: number, name: string): number {
   if (!isFinite(value) || value < 0) {
@@ -90,11 +80,7 @@ export class ProtocolHandler {
   private activated = false;
   private activeRoles: Set<string> | null = null;
   private pairingSuspended = false;
-
-  // Last player payload sent to the current server connection, or null when no
-  // full state has been sent yet. Cleared on (re)connect so the first send is
-  // full again.
-  private lastSentPlayer: SentPlayerState | null = null;
+  private lastSentState: string | null = null;
 
   constructor(
     private sender: MessageSender,
@@ -198,6 +184,7 @@ export class ProtocolHandler {
       return;
     }
     this.activated = true;
+    this.lastSentState = null;
     this.sendStateUpdate();
     this.timeSyncManager.startAndSchedule();
 
@@ -306,8 +293,6 @@ export class ProtocolHandler {
       if (typeof navigator !== "undefined" && navigator.mediaSession) {
         navigator.mediaSession.playbackState = "paused";
       }
-
-      this.sendStateUpdate();
     }
   }
 
@@ -341,8 +326,8 @@ export class ProtocolHandler {
         }
         break;
 
-      case "set_static_delay": {
-        const delay = playerCommand.static_delay_ms;
+      case "set_output_delay": {
+        const delay = playerCommand.output_delay_ms;
         if (typeof delay === "number" && isFinite(delay)) {
           const clamped = clampSyncDelayMs(delay);
           this.streamHandler.handleSyncDelayChange(clamped);
@@ -350,6 +335,9 @@ export class ProtocolHandler {
         }
         break;
       }
+
+      default:
+        return;
     }
 
     // Reset periodic timer first, then send state with commanded values.
@@ -385,8 +373,6 @@ export class ProtocolHandler {
         },
       },
     };
-    // Reset so the first client/state after connect is a full snapshot.
-    this.lastSentPlayer = null;
     this.sender.sendControl(hello);
   }
 
@@ -400,12 +386,11 @@ export class ProtocolHandler {
     this.sendStateUpdate();
   }
 
-  // Send state update. The first send after a (re)connect is a full snapshot;
-  // later sends are deltas carrying only changed fields, which the server merges.
+  // Send the full state, skipped when identical to the last one sent.
   // When skipHardwareRead is true, use stateManager values instead of reading from hardware.
   // This avoids race conditions when responding to volume commands.
   sendStateUpdate(skipHardwareRead = false): void {
-    if (this.pairingSuspended) return;
+    if (!this.activated) return;
     let volume = this.stateManager.volume;
     let muted = this.stateManager.muted;
     if (!skipHardwareRead && this.useHardwareVolume && this.getExternalVolume) {
@@ -415,43 +400,23 @@ export class ProtocolHandler {
       muted = externalVol.muted;
     }
 
-    const syncDelayMs = this.streamHandler.getSyncDelayMs();
-    const staticDelayMs = clampSyncDelayMs(syncDelayMs);
-
     const payload: ClientState["payload"] = {
       available: true,
     };
-    if (this.activeRoles === null || this.activeRoles.has("player@v1")) {
-      const current: SentPlayerState = {
+    if (this.activeRoles?.has("player@v1")) {
+      payload.player = {
         volume,
         muted,
-        static_delay_ms: staticDelayMs,
+        output_delay_ms: clampSyncDelayMs(this.streamHandler.getSyncDelayMs()),
         required_lead_time_ms: this.requiredLeadTimeMs,
         min_buffer_ms: this.minBufferMs,
+        supported_commands: [...PLAYER_COMMANDS],
       };
-
-      const last = this.lastSentPlayer;
-      if (last === null) {
-        // Full state: every field plus the static supported_commands.
-        payload.player = {
-          ...current,
-          supported_commands: ["set_static_delay"],
-        };
-      } else {
-        // Delta: only changed fields.
-        const player: PlayerStatePayload = {};
-        if (current.static_delay_ms !== last.static_delay_ms)
-          player.static_delay_ms = current.static_delay_ms;
-        if (current.volume !== last.volume) player.volume = current.volume;
-        if (current.muted !== last.muted) player.muted = current.muted;
-        if (current.required_lead_time_ms !== last.required_lead_time_ms)
-          player.required_lead_time_ms = current.required_lead_time_ms;
-        if (current.min_buffer_ms !== last.min_buffer_ms)
-          player.min_buffer_ms = current.min_buffer_ms;
-        payload.player = player;
-      }
-      this.lastSentPlayer = current;
     }
+
+    const serialized = JSON.stringify(payload);
+    if (serialized === this.lastSentState) return;
+    this.lastSentState = serialized;
 
     const message: ClientState = {
       type: "client/state" as MessageType.CLIENT_STATE,
