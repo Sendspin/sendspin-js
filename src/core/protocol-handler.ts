@@ -287,14 +287,18 @@ export class ProtocolHandler {
     const roles = message.payload?.roles;
     if (!roles || roles.includes("player")) {
       console.log("Sendspin: Stream ended");
-      this.streamHandler.handleStreamEnd();
+      this.endPlayerStream();
+    }
+  }
 
-      this.stateManager.currentStreamFormat = null;
-      this.stateManager.isPlaying = false;
+  private endPlayerStream(): void {
+    this.streamHandler.handleStreamEnd();
 
-      if (typeof navigator !== "undefined" && navigator.mediaSession) {
-        navigator.mediaSession.playbackState = "paused";
-      }
+    this.stateManager.currentStreamFormat = null;
+    this.stateManager.isPlaying = false;
+
+    if (typeof navigator !== "undefined" && navigator.mediaSession) {
+      navigator.mediaSession.playbackState = "paused";
     }
   }
 
