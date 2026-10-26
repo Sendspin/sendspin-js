@@ -78,7 +78,6 @@ export class ProtocolHandler {
   private timeSyncManager: TimeSyncManager;
   private activated = false;
   private activeRoles: Set<string> | null = null;
-  private pairingSuspended = false;
   private lastSentState: string | null = null;
 
   constructor(
@@ -171,7 +170,6 @@ export class ProtocolHandler {
   // Handle server/activate: start the initial client/state, time-sync, and
   // periodic state updates. Guarded so a repeat activate is a no-op.
   private handleServerActivate(message: ServerActivate): void {
-    this.pairingSuspended = false;
     let rolesChanged = false;
     if (message.payload.active_roles !== undefined) {
       const nextRoles = new Set(message.payload.active_roles);
@@ -212,21 +210,12 @@ export class ProtocolHandler {
     this.timeSyncManager.stop();
   }
 
-  suspendForPairing(): void {
-    this.pairingSuspended = true;
-    this.activated = false;
-    this.activeRoles = new Set();
-    this.timeSyncManager.stop();
-    this.stateManager.clearStateUpdateInterval();
-  }
-
   /**
    * Clear the activate guard so the next server/activate (e.g. after a reconnect on a
    * reused handler) restarts time-sync and state updates.
    * @internal called by SendspinCore on transport close, not part of the public API.
    */
   resetActivation(preserveActiveRoles = false): void {
-    this.pairingSuspended = false;
     this.activated = false;
     if (!preserveActiveRoles) this.activeRoles = null;
     this.timeSyncManager.stop();
@@ -446,8 +435,7 @@ export class ProtocolHandler {
     command: T,
     params: ControllerCommands[T],
   ): void {
-    if (this.pairingSuspended || !this.activeRoles?.has("controller@v1"))
-      return;
+    if (!this.activeRoles?.has("controller@v1")) return;
     let fields = params as object;
     if (command === "volume") {
       const { volume } = params as ControllerCommands["volume"];

@@ -177,8 +177,8 @@ export class SendspinCore implements StreamHandler {
     );
   }
 
-  // Route decrypted control messages from the transport. Pairing consumes its
-  // own activate/finalize/abort; everything else goes to the protocol handler.
+  // Route decrypted control messages from the transport. Pairing handles its
+  // own pair messages and also sees every server/activate.
   private routeControl(
     msg: { type: string; payload?: unknown },
     receivedAtUs: number,
@@ -188,12 +188,8 @@ export class SendspinCore implements StreamHandler {
         activities?: string[];
         pairing?: ActivatePairing;
       };
-      if (p.activities?.includes("pairing")) {
-        this.protocolHandler.suspendForPairing();
-      }
-      const consumed = this.pairing.onActivate(p.activities ?? [], p.pairing);
-      if (!consumed)
-        this.protocolHandler.handleServerMessage(msg as never, receivedAtUs);
+      this.protocolHandler.handleServerMessage(msg as never, receivedAtUs);
+      this.pairing.onActivate(p.activities ?? [], p.pairing);
       return;
     }
     if (msg.type === "server/pair-init") {

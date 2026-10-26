@@ -403,13 +403,11 @@ export class SendspinTransport {
     }
     this.activeRoles = result.activeRoles;
     this.clearTimeout();
-    const queuedCommands =
-      !msg.payload.activities.includes("pairing") &&
-      this.activeRoles.includes("controller@v1")
-        ? this.outboundQueue.filter(
-            (queued) => (queued as { type?: string }).type === "client/command",
-          )
-        : [];
+    const queuedCommands = this.activeRoles.includes("controller@v1")
+      ? this.outboundQueue.filter(
+          (queued) => (queued as { type?: string }).type === "client/command",
+        )
+      : [];
     this.quiesced = false;
     this.outboundQueue = [];
     this.cb.onControlMessage(

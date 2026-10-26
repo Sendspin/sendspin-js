@@ -366,22 +366,6 @@ describe("ProtocolHandler extra", () => {
       });
     });
 
-    it("suspends periodic traffic until pairing ends", () => {
-      const handler = makeHandler();
-      activate(handler);
-      send.mockClear();
-
-      handler.suspendForPairing();
-      handler.sendStateUpdate();
-      handler.sendCommand("play", undefined as never);
-      vi.advanceTimersByTime(5000);
-      expect(lastSent(send, "client/state")).toBeUndefined();
-      expect(lastSent(send, "client/command")).toBeUndefined();
-
-      activate(handler);
-      expect(lastSent(send, "client/state")).toBeDefined();
-    });
-
     it("re-sends the initial client/state on activate after resetActivation", () => {
       const handler = makeHandler();
       activate(handler);

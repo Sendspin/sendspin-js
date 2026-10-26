@@ -381,6 +381,33 @@ describe("SendspinCore command + state forwarding", () => {
     core.disconnect();
   });
 
+  it("keeps player state and controller commands during a pairing activation", () => {
+    core = new SendspinCore({
+      baseUrl: "http://h",
+      staticPairingCode: "12345678",
+    });
+    const send = spySend(core);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (core as any).routeControl({
+      type: "server/activate",
+      payload: {
+        activities: ["playback", "pairing"],
+        active_roles: ["player@v1", "controller@v1"],
+        pairing: { method: "static_pairing_code" },
+      },
+    });
+    const state = send.mock.calls
+      .map((call) => call[0])
+      .find((msg) => msg.type === "client/state");
+    expect(state.payload.player).toBeDefined();
+
+    seedController(core, ["play"]);
+    send.mockClear();
+    core.sendCommand("play", undefined);
+    expect(send.mock.calls[0][0].type).toBe("client/command");
+    core.disconnect();
+  });
+
   it("setVolume clamps in state manager and sends a client/state update", () => {
     const send = spySend(core);
     activatePlayer(core, send);
