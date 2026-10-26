@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { PskStore } from "../../../src/core/noise/psk";
 import { pskId, SENTINEL_PSK_ID } from "../../../src/core/noise/constants";
+import { base64urlEncode } from "../../../src/core/noise/base64url";
 import type { SendspinStorage } from "../../../src/types";
 
 function memStorage(): SendspinStorage {
@@ -18,26 +19,11 @@ describe("PskStore", () => {
     expect(store.lookup("nope")).toBeNull();
   });
 
-  it("adds stored-pubkey and shared-PSK long-term records", () => {
-    const store = new PskStore(null);
-    const bound = new Uint8Array(32).fill(1);
-    const shared = new Uint8Array(32).fill(2);
-    store.addLongTerm(bound, "SERVERID");
-    store.addLongTerm(shared);
-    expect(store.lookup(pskId(bound))?.serverId).toBe("SERVERID");
-    expect(store.lookup(pskId(shared))?.serverId).toBeUndefined();
-  });
-
-  it("removes stored-pubkey but keeps shared-PSK on removeByPskId", () => {
-    const store = new PskStore(null);
-    const bound = new Uint8Array(32).fill(3);
-    const shared = new Uint8Array(32).fill(4);
-    store.addLongTerm(bound, "S");
-    store.addLongTerm(shared);
-    store.removeByPskId(pskId(bound));
-    store.removeByPskId(pskId(shared));
-    expect(store.lookup(pskId(bound))).toBeNull();
-    expect(store.lookup(pskId(shared))).not.toBeNull();
+  it("skips a stored long-term record without a server_id", () => {
+    const s = memStorage();
+    const psk = new Uint8Array(32).fill(2);
+    s.setItem("sendspin-psks", JSON.stringify([{ psk: base64urlEncode(psk) }]));
+    expect(new PskStore(s).lookup(pskId(psk))).toBeNull();
   });
 
   it("creates a stable pairing PSK and reloads records from storage", () => {

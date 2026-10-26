@@ -98,6 +98,7 @@ export class SendspinCore implements StreamHandler {
 
     this.pskStore = new PskStore(config.storage ?? null);
     for (const r of config.longTermPsks ?? []) {
+      if (!r.serverId) throw new Error("longTermPsks entries need a serverId");
       this.pskStore.addLongTerm(base64urlDecode(r.psk), r.serverId);
     }
     // Standing candidate: a server may re-handshake to it before the app reads pairingPsk.
