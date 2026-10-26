@@ -501,7 +501,10 @@ export class SendspinCore implements StreamHandler {
     return this.identity.clientId;
   }
 
-  /** The client's Pairing PSK (base64url), for the operator to enter into the server. */
+  /**
+   * The client's Pairing PSK (base64url). Keep it secret, and show the
+   * operator pairingToken, not this.
+   */
   get pairingPsk(): string {
     return base64urlEncode(this.pskStore.getOrCreatePairingPsk());
   }

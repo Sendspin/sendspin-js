@@ -188,12 +188,12 @@ const player = new SendspinPlayer({
   onPairingCode: (code, languages) => showCodeDialog(code, languages),
   // Advertise "speaker" if the app can speak the code. `languages` says which language to use.
   pairingCodeOutChannels: ['display'],
-  // Static pairing: this device's fixed 8-digit code, for devices with no display
-  // or speaker. If both code methods are enabled, the server picks one.
-  staticPairingCode: '31415926',
+  // Or, for devices with no display or speaker: a fixed 8-digit code,
+  // random and unique per device. Avoid setting both code methods.
+  // staticPairingCode: deviceStaticCode,
   // Where the operator finds each secret, if you know. Any combination of
   // device | leaflet | operator. Omitted from client/hello when unset.
-  staticPairingCodeLocations: ['device', 'leaflet'],
+  // staticPairingCodeLocations: ['device', 'leaflet'],
 });
 
 await player.connect();

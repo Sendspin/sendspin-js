@@ -72,6 +72,7 @@ const pairingPinHint = document.getElementById("pairing-pin-hint");
 const pairingPendingGroup = document.getElementById("pairing-pending-group");
 const cancelPairingBtn = document.getElementById("cancel-pairing");
 const staticPinInput = document.getElementById("static-pin");
+const staticPinBothEl = document.getElementById("static-pin-both");
 const staticPinLocationInputs = document.querySelectorAll(
   "#static-pin-locations input[type=checkbox]",
 );
@@ -614,6 +615,7 @@ function loadSettings() {
   if (savedStaticPin !== null) {
     staticPinInput.value = savedStaticPin;
   }
+  staticPinBothEl.hidden = !isValidStaticPin(staticPinInput.value);
 
   for (const [inputs, key] of [
     [staticPinLocationInputs, STORAGE_KEYS.STATIC_PIN_LOCATIONS],
@@ -1051,6 +1053,7 @@ function init() {
   });
   staticPinInput.addEventListener("change", () => {
     const pin = staticPinInput.value.trim();
+    staticPinBothEl.hidden = !isValidStaticPin(pin);
     if (pin && !isValidStaticPin(pin)) {
       showToast("Static pairing code must be exactly 8 digits", "error");
       return;

@@ -328,11 +328,18 @@ export class SendspinPlayer {
     return this.core.clientId;
   }
 
-  /** The client's Pairing PSK (base64url) for the operator to enter server-side. */
+  /**
+   * The client's Pairing PSK (base64url). Keep it secret, and show the
+   * operator pairingToken, not this.
+   */
   get pairingPsk(): string {
     return this.core.pairingPsk;
   }
 
+  /**
+   * The token the operator enters on the server to pair. Keep it secret,
+   * since anyone with it can pair.
+   */
   get pairingToken(): string {
     return this.core.pairingToken;
   }
@@ -343,10 +350,12 @@ export class SendspinPlayer {
   }
 
   /**
-   * Operator gesture that opens the pairing window (~5 minutes, admits one
-   * attempt). Required before each gesture-gated attempt: every static
-   * pairing code attempt, and dynamic pairing code ones when escalated.
-   * The "pending" pairing event fires when an attempt is waiting on this.
+   * Allows one pairing attempt in the next 5 minutes.
+   * Call it only when the user presses a pairing button on the device, never
+   * because the server asked.
+   * Static code pairing always needs it. Dynamic code pairing needs it after
+   * 10 failed attempts.
+   * onPairing("pending") fires while an attempt waits for it.
    */
   openPairingWindow(): void {
     this.core.openPairingWindow();

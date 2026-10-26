@@ -643,10 +643,11 @@ export interface SendspinCoreConfig {
   defaultSyncDelay?: number;
 
   /**
-   * Storage for persisting SDK state (cached output latency and the
-   * server-commanded output delay). SendspinCore persists only when this is
-   * provided. SendspinPlayer defaults it to localStorage. Pass null to
-   * disable persistence.
+   * Storage for persisting SDK state: the identity key, the Pairing PSK,
+   * paired server keys, the pairing failure count, cached output latency and
+   * the server-commanded output delay. Keys are stored as plain text.
+   * SendspinCore persists only when this is provided. SendspinPlayer defaults
+   * it to localStorage. Pass null to disable persistence.
    */
   storage?: SendspinStorage | null;
 
@@ -731,34 +732,38 @@ export interface SendspinCoreConfig {
   ) => void;
 
   /**
-   * Enables the dynamic pairing code method: called with the code the
-   * operator must enter into the server, and with null when the attempt ends (hide it).
-   * languages carries the operator's preferred BCP 47 tags for spoken
-   * emission, in descending preference, and is absent if the server sent none.
-   * When staticPairingCode is also set, the server picks one of the two.
+   * Setting it turns on dynamic code pairing.
+   * Called with a code to show or speak to the operator, who enters it on the
+   * server. Called with null when the attempt ends, so hide the code then.
+   * languages lists the operator's preferred languages for speaking it, most
+   * preferred first, if the server sent any.
+   * Avoid setting both this and staticPairingCode.
    */
   onPairingCode?: (code: string | null, languages?: string[]) => void;
 
   /**
-   * Channels through which this client conveys the dynamic pairing code,
-   * advertised in client/hello. Default ["display"].
-   * Advertise "speaker" when the app can speak the code, and honor the
-   * languages passed to onPairingCode.
+   * How the app presents the pairing code. Default ["display"].
+   * Add "speaker" only if the app reads the code aloud in the languages
+   * passed to onPairingCode.
    */
   pairingCodeOutChannels?: PairOutChannel[];
 
   /**
-   * Enables the static pairing code method: this device's fixed 8-digit code.
-   * The pairing window must be opened with openPairingWindow() before each
-   * attempt. Meant for devices with no display or speaker. When onPairingCode
-   * is also set, the server picks one of the two.
+   * This device's fixed 8-digit pairing code, for devices with no display or
+   * speaker. Setting it turns on static code pairing.
+   * Use a secure random code that is unique to each device.
+   * Call openPairingWindow() before each attempt.
+   * Avoid setting both this and onPairingCode.
    */
   staticPairingCode?: string;
 
   /** Where the operator finds the static pairing code. Omitted when unset. */
   staticPairingCodeLocations?: PairSecretLocation[];
 
-  /** Where the operator finds the Pairing PSK. Omitted when unset. */
+  /**
+   * Where the operator finds the Pairing PSK. Omitted when unset.
+   * Print it only as a QR code of pairingToken.
+   */
   pairingPskLocations?: PairSecretLocation[];
 
   /** Callback when player state changes (local or from server). */
