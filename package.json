@@ -24,6 +24,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "eslint . --fix --ignore-path .gitignore",
+    "lint:check": "eslint . --ignore-path .gitignore",
     "prepare": "husky",
     "prepublishOnly": "npm run build"
   },
