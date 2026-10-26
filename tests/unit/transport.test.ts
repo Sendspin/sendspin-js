@@ -52,6 +52,7 @@ describe("SendspinTransport", () => {
     } as MessageEvent);
     expect(h.cb.onControlMessage).toHaveBeenCalledWith(
       expect.objectContaining({ type: "server/hello" }),
+      expect.any(Number),
     );
 
     // outbound control decrypts on the server

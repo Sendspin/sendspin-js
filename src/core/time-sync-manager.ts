@@ -142,7 +142,7 @@ export class TimeSyncManager {
   }
 
   // Handle server/time response
-  handleServerTime(message: ServerTime): void {
+  handleServerTime(message: ServerTime, receivedAtUs: number): void {
     if (
       !this.timeSyncBurstActive ||
       this.timeSyncInFlightClientTransmitted === null
@@ -161,7 +161,7 @@ export class TimeSyncManager {
       return;
     }
 
-    const T4 = Math.floor(performance.now() * 1000); // client received time
+    const T4 = receivedAtUs;
     const T2 = message.payload.server_received;
     const T3 = message.payload.server_transmitted;
 

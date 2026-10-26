@@ -164,10 +164,13 @@ describe("transport re-handshake", () => {
     deliverActivate(h, newServerSession, ["playback"], undefined);
 
     expect(h.ws.disconnected).toBe(false);
-    expect(h.cb.onControlMessage).toHaveBeenLastCalledWith({
-      type: "server/activate",
-      payload: { activities: ["playback"], active_roles: ["player@v1"] },
-    });
+    expect(h.cb.onControlMessage).toHaveBeenLastCalledWith(
+      {
+        type: "server/activate",
+        payload: { activities: ["playback"], active_roles: ["player@v1"] },
+      },
+      expect.any(Number),
+    );
   });
 
   it("retains a queued command when playback restores the controller role", () => {

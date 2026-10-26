@@ -35,10 +35,13 @@ describe("transport server/activate active_roles", () => {
       data: activate(serverSession, { activities: ["playback"] }),
     } as MessageEvent);
     expect(h.ws.disconnected).toBe(false);
-    expect(h.cb.onControlMessage).toHaveBeenLastCalledWith({
-      type: "server/activate",
-      payload: { activities: ["playback"], active_roles: [] },
-    });
+    expect(h.cb.onControlMessage).toHaveBeenLastCalledWith(
+      {
+        type: "server/activate",
+        payload: { activities: ["playback"], active_roles: [] },
+      },
+      expect.any(Number),
+    );
   });
 
   it("forwards the persisted active_roles when a later activate omits them", () => {
@@ -55,9 +58,12 @@ describe("transport server/activate active_roles", () => {
       data: activate(serverSession, { activities: [] }),
     } as MessageEvent);
     expect(h.ws.disconnected).toBe(false);
-    expect(h.cb.onControlMessage).toHaveBeenLastCalledWith({
-      type: "server/activate",
-      payload: { activities: [], active_roles: ["player@v1"] },
-    });
+    expect(h.cb.onControlMessage).toHaveBeenLastCalledWith(
+      {
+        type: "server/activate",
+        payload: { activities: [], active_roles: ["player@v1"] },
+      },
+      expect.any(Number),
+    );
   });
 });
