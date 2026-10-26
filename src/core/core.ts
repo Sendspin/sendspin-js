@@ -320,6 +320,8 @@ export class SendspinCore implements StreamHandler {
 
   async connect(): Promise<void> {
     const onOpen = () => {
+      // Reset on open, not close, since buffered audio keeps using the old filter after a drop.
+      this.timeFilter.reset();
       this._onConnectionOpen?.();
       this.transport.start();
     };
