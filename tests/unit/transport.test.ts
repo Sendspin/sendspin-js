@@ -73,8 +73,8 @@ describe("SendspinTransport", () => {
     expect(got[9]).toBe(0xaa);
 
     // fragmentation: origType 4, two parts
-    const f1 = new Uint8Array([2, 4, 1, 2, 3]); // [more][origType=4][data 1,2,3]
-    const f2 = new Uint8Array([3, 4, 5]); // [end][data 4,5]
+    const f1 = new Uint8Array([1, 0x02, 4, 1, 2, 3]); // [1][first][origType=4][data 1,2,3]
+    const f2 = new Uint8Array([1, 0x01, 4, 5]); // [1][last][data 4,5]
     h.transport.handleRaw({
       data: serverSession.encrypt(f1).buffer,
     } as MessageEvent);
