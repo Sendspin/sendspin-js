@@ -187,6 +187,9 @@ export class ProtocolHandler {
       ) {
         this.endPlayerStream();
       }
+      this.stateManager.discardRoleState(
+        removedRoles.map((role) => role.split("@")[0]),
+      );
     }
     if (this.activated) {
       if (rolesChanged) this.sendStateUpdate();

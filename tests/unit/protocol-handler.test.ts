@@ -391,6 +391,42 @@ describe("ProtocolHandler extra", () => {
       expect(stateManager.isPlaying).toBe(false);
     });
 
+    it("discards the state of removed roles, including a scheduled metadata update", () => {
+      const onStateChange = vi.fn();
+      stateManager = new StateManager(onStateChange);
+      const handler = makeHandler();
+      dispatch(handler, {
+        type: "server/activate",
+        payload: {
+          activities: ["playback"],
+          active_roles: ["metadata@v1", "controller@v1"],
+        },
+      });
+      stateManager.updateServerState({
+        controller: {
+          supported_commands: ["play"],
+          volume: 50,
+          muted: false,
+          repeat: "off",
+          shuffle: false,
+        },
+        metadata: { timestamp: 0 },
+      });
+      stateManager.updateServerState({ metadata: { timestamp: 1 } }, 1000);
+
+      dispatch(handler, {
+        type: "server/activate",
+        payload: { activities: ["playback"], active_roles: ["controller@v1"] },
+      });
+
+      expect(Object.keys(stateManager.serverState)).toEqual(["controller"]);
+      expect(Object.keys(onStateChange.mock.lastCall![0].serverState)).toEqual([
+        "controller",
+      ]);
+      vi.advanceTimersByTime(1000);
+      expect(Object.keys(stateManager.serverState)).toEqual(["controller"]);
+    });
+
     it("re-sends the initial client/state on activate after resetActivation", () => {
       const handler = makeHandler();
       activate(handler);
