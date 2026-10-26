@@ -79,7 +79,10 @@ function clientControlTypes(ws: MockWS, session: NoiseSession): string[] {
 }
 
 /** Drive the server side (initiator) of KKpsk2 to transport mode. */
-function completeHandshake(ws: MockWS): {
+function completeHandshake(
+  ws: MockWS,
+  server = SUITES.chacha.generateKeypair(),
+): {
   serverSession: NoiseSession;
   serverId: string;
   server: ReturnType<typeof SUITES.chacha.generateKeypair>;
@@ -89,7 +92,6 @@ function completeHandshake(ws: MockWS): {
   const clientInitStr = ws.sent[0] as string;
   const clientId = JSON.parse(clientInitStr).payload.client_id as string;
 
-  const server = SUITES.chacha.generateKeypair();
   const serverId = base64urlEncode(server.publicKey);
   const serverInitStr = JSON.stringify({
     type: "server/init",
@@ -111,7 +113,9 @@ function completeHandshake(ws: MockWS): {
   });
   const m1 = ini.writeMessage(
     MSG1,
-    utf8.encode(JSON.stringify({ psk_id: SENTINEL_PSK_ID })),
+    utf8.encode(
+      JSON.stringify({ psk_id: SENTINEL_PSK_ID, psk_category: "sn" }),
+    ),
   );
   inject(
     ws,
@@ -145,6 +149,7 @@ function rehandshakeTo(
   server: ReturnType<typeof SUITES.chacha.generateKeypair>,
   clientId: string,
   psk: Uint8Array,
+  category: string,
 ): { session: NoiseSession; hash: Uint8Array } {
   const ini = new HandshakeState({
     suite: SUITES.chacha,
@@ -156,7 +161,7 @@ function rehandshakeTo(
   });
   const rm1 = ini.writeMessage(
     MSG1,
-    utf8.encode(JSON.stringify({ psk_id: pskId(psk) })),
+    utf8.encode(JSON.stringify({ psk_id: pskId(psk), psk_category: category })),
   );
   serverSend(ws, prev, {
     type: "noise/handshake",
@@ -282,7 +287,9 @@ describe("SendspinCore encryption wiring", () => {
     });
     const rm1 = ini.writeMessage(
       MSG1,
-      utf8.encode(JSON.stringify({ psk_id: pskId(pairingPsk) })),
+      utf8.encode(
+        JSON.stringify({ psk_id: pskId(pairingPsk), psk_category: "pr" }),
+      ),
     );
     serverSend(ws, serverSession, {
       type: "noise/handshake",
@@ -339,6 +346,7 @@ describe("SendspinCore encryption wiring", () => {
       server,
       clientId,
       pairingPsk,
+      "pr",
     );
 
     // Pairing activate -> client mints a PSK and sends client/pair-finalize.
@@ -369,6 +377,7 @@ describe("SendspinCore encryption wiring", () => {
       server,
       clientId,
       pairingPsk,
+      "pr",
     );
 
     // A late server/pair-finalize is now a no-op: nothing persists, no event.
@@ -379,14 +388,22 @@ describe("SendspinCore encryption wiring", () => {
   it("retains a controller command across re-handshake when the role remains active", async () => {
     const ws = new MockWS();
     const longTermPsk = new Uint8Array(32).fill(77);
+    const server = SUITES.chacha.generateKeypair();
     const core = new SendspinCore({
       webSocket: ws as unknown as WebSocket,
       storage: memStorage(),
-      longTermPsks: [{ psk: base64urlEncode(longTermPsk) }],
+      longTermPsks: [
+        {
+          psk: base64urlEncode(longTermPsk),
+          serverId: base64urlEncode(server.publicKey),
+        },
+      ],
     });
     await core.connect();
-    const { serverSession, server, clientId, priorHash } =
-      completeHandshake(ws);
+    const { serverSession, clientId, priorHash } = completeHandshake(
+      ws,
+      server,
+    );
 
     serverSend(ws, serverSession, { type: "server/hello", payload: {} });
     for (const frame of binaryFrames(ws)) serverSession.decrypt(frame);
@@ -421,6 +438,7 @@ describe("SendspinCore encryption wiring", () => {
       server,
       clientId,
       longTermPsk,
+      "lt",
     );
     const newSessionStart = binaryFrames(ws).length;
     core.sendCommand("play", undefined);

@@ -13,7 +13,7 @@ export interface PskEntry {
   psk: Uint8Array;
   pskId: string;
   category: PskCategory;
-  /** Present on stored-pubkey long-term records; undefined for shared-PSK and sentinel/pairing. */
+  /** The server a long-term PSK is bound to. Undefined for sentinel and pairing. */
   serverId?: string;
 }
 
@@ -51,6 +51,7 @@ export class PskStore {
       try {
         const records = JSON.parse(raw) as StoredRecord[];
         for (const r of records) {
+          if (!r.serverId) continue;
           const psk = base64urlDecode(r.psk);
           this.add({
             psk,
@@ -89,7 +90,7 @@ export class PskStore {
     return this.entries.get(id) ?? null;
   }
 
-  addLongTerm(psk: Uint8Array, serverId?: string): PskEntry {
+  addLongTerm(psk: Uint8Array, serverId: string): PskEntry {
     const e: PskEntry = {
       psk,
       pskId: pskId(psk),
@@ -101,10 +102,9 @@ export class PskStore {
     return e;
   }
 
-  /** Remove a long-term entry unless it is a shared-PSK record (no serverId). */
   removeByPskId(id: string): void {
     const e = this.entries.get(id);
-    if (!e || e.category !== "long_term" || e.serverId === undefined) return;
+    if (!e || e.category !== "long_term") return;
     this.entries.delete(id);
     this.persistLongTerm();
   }

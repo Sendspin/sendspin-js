@@ -713,10 +713,9 @@ export interface SendspinCoreConfig {
   unpairedAccess?: boolean;
 
   /**
-   * Pre-provisioned long-term PSK records (base64url psk, optional serverId).
-   * serverId present = stored-pubkey model; omitted = shared-PSK.
+   * Pre-provisioned long-term PSK records (base64url psk and the serverId it is bound to).
    */
-  longTermPsks?: Array<{ psk: string; serverId?: string }>;
+  longTermPsks?: Array<{ psk: string; serverId: string }>;
 
   /**
    * Callback for pairing lifecycle events. "pending" means the attempt is

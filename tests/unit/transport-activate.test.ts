@@ -30,7 +30,7 @@ describe("transport server/activate active_roles", () => {
   it("treats a first activate without active_roles as carrying empty roles", () => {
     const h = harness();
     const lt = new Uint8Array(32).fill(21);
-    const { serverSession } = completeHandshakeWithPsk(h, lt, /*bound*/ true);
+    const { serverSession } = completeHandshakeWithPsk(h, lt);
     h.transport.handleRaw({
       data: activate(serverSession, { activities: ["playback"] }),
     } as MessageEvent);
@@ -44,7 +44,7 @@ describe("transport server/activate active_roles", () => {
   it("forwards the persisted active_roles when a later activate omits them", () => {
     const h = harness();
     const lt = new Uint8Array(32).fill(23);
-    const { serverSession } = completeHandshakeWithPsk(h, lt, /*bound*/ true);
+    const { serverSession } = completeHandshakeWithPsk(h, lt);
     h.transport.handleRaw({
       data: activate(serverSession, {
         activities: ["playback"],

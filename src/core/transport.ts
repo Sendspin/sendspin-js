@@ -1,16 +1,18 @@
 import type { WebSocketManager } from "./websocket-manager";
 import type { Identity } from "./noise/identity";
-import type { PskStore, PskEntry } from "./noise/psk";
+import type { PskStore, PskEntry, PskCategory } from "./noise/psk";
 import type { SuiteId } from "./noise/suites";
 import { SUITES, SUITE_WIRE_NAME } from "./noise/suites";
 import { HandshakeState, MSG1, MSG2 } from "./noise/handshake";
 import { NoiseSession } from "./noise/session";
 import { base64urlEncode, base64urlDecode } from "./noise/base64url";
+import { SENTINEL_PSK_ID } from "./noise/constants";
 import { authorizeActivate } from "./activate-authorization";
 import type { GoodbyeReason } from "../types";
 
 const utf8 = new TextEncoder();
 const dutf8 = new TextDecoder();
+const strictUtf8 = new TextDecoder("utf-8", { fatal: true });
 const HANDSHAKE_TIMEOUT_MS = 30000;
 const MAX_TRANSPORT_PLAINTEXT = 65519; // 65535 - 16 (tag); includes the type byte
 const MAX_TRANSPORT_CIPHERTEXT = MAX_TRANSPORT_PLAINTEXT + 16; // Noise transport message cap
@@ -30,6 +32,30 @@ export interface TransportCallbacks {
   onHandshakeComplete(info: HandshakeInfo): void;
   onControlMessage(msg: { type: string; payload?: unknown }): void;
   onBinaryMessage(bytes: Uint8Array): void;
+}
+
+const PSK_CATEGORY_CODES = new Map<unknown, PskCategory>([
+  ["lt", "long_term"],
+  ["pr", "pairing"],
+  ["sn", "sentinel"],
+]);
+
+/** Parse the Noise message 1 payload. Throws when it is malformed. */
+function parseNoise1Payload(bytes: Uint8Array): {
+  pskId: string;
+  category: PskCategory;
+} {
+  const { psk_id, psk_category } = (JSON.parse(strictUtf8.decode(bytes)) ??
+    {}) as Record<string, unknown>;
+  const category = PSK_CATEGORY_CODES.get(psk_category);
+  if (
+    typeof psk_id !== "string" ||
+    !/^[A-Za-z0-9_-]{43}$/.test(psk_id) ||
+    category === undefined
+  ) {
+    throw new Error("Sendspin: malformed noise/handshake payload");
+  }
+  return { pskId: psk_id, category };
 }
 
 function concat(a: Uint8Array, b: Uint8Array): Uint8Array {
@@ -195,16 +221,8 @@ export class SendspinTransport {
 
   private processNoise1(data: Uint8Array): void {
     const payload1 = this.hs!.readMessage(MSG1, data); // static-DH only; throws => fail
-    const { psk_id } = JSON.parse(dutf8.decode(payload1)) as { psk_id: string };
-    const entry = this.deps.pskStore.lookup(psk_id);
-    if (!entry) return this.fail();
-    if (
-      entry.category === "long_term" &&
-      entry.serverId !== undefined &&
-      entry.serverId !== this.serverId
-    ) {
-      return this.fail();
-    }
+    const entry =
+      this.matchPsk(payload1) ?? this.deps.pskStore.lookup(SENTINEL_PSK_ID)!;
     this.hs!.setPsk(entry.psk);
     const m2 = this.hs!.writeMessage(MSG2, utf8.encode("{}"));
     this.wsManager.sendText(
@@ -219,6 +237,17 @@ export class SendspinTransport {
     this.clearTimeout();
     this.lastHandshakeHash = this.hs!.handshakeHash;
     this.cb.onHandshakeComplete(this.handshakeInfo!);
+  }
+
+  /** Stored PSK selected by a Noise message 1 payload, or null on a lookup miss. */
+  private matchPsk(payload1: Uint8Array): PskEntry | null {
+    const { pskId, category } = parseNoise1Payload(payload1);
+    const entry = this.deps.pskStore.lookup(pskId);
+    if (entry?.category !== category) return null;
+    if (category === "long_term" && entry.serverId !== this.serverId) {
+      throw new Error("Sendspin: long-term PSK bound to another server");
+    }
+    return entry;
   }
 
   /** Route one decrypted plaintext frame on its leading message-type byte. */
@@ -283,7 +312,12 @@ export class SendspinTransport {
 
   protected handleControl(msg: { type: string; payload?: unknown }): void {
     if (msg.type === "noise/handshake") {
-      this.handleRehandshake(msg as { payload: { data: string } });
+      try {
+        this.handleRehandshake(msg as { payload: { data: string } });
+      } catch {
+        return this.fail();
+      }
+      this.cb.onHandshakeComplete(this.handshakeInfo!);
       return;
     }
     if (msg.type === "server/activate") {
@@ -314,19 +348,12 @@ export class SendspinTransport {
       rs: base64urlDecode(this.serverId),
     });
     const payload1 = newHs.readMessage(MSG1, base64urlDecode(msg.payload.data));
-    const { psk_id } = JSON.parse(dutf8.decode(payload1)) as { psk_id: string };
-    const entry = this.deps.pskStore.lookup(psk_id);
-    if (!entry) return this.fail();
-    if (
-      entry.category === "long_term" &&
-      entry.serverId !== undefined &&
-      entry.serverId !== this.serverId
-    ) {
-      return this.fail();
-    }
+    const entry = this.matchPsk(payload1);
+    if (!entry)
+      throw new Error("Sendspin: psk_id lookup miss in a re-handshake");
     newHs.setPsk(entry.psk);
     const m2 = newHs.writeMessage(MSG2, utf8.encode("{}"));
-    // Hold periodic outbound traffic until the post-re-handshake server/activate.
+    // Hold outbound traffic until the post-re-handshake server/activate.
     this.quiesced = true;
     this.armTimeout();
     // Send msg 2 under the CURRENT keys, then swap.
@@ -337,7 +364,6 @@ export class SendspinTransport {
     this.session = new NoiseSession("responder", newHs.split());
     this.matched = entry;
     this.lastHandshakeHash = newHs.handshakeHash;
-    this.cb.onHandshakeComplete(this.handshakeInfo!);
   }
 
   protected handleActivate(msg: {
@@ -392,25 +418,15 @@ export class SendspinTransport {
     this.close();
   }
 
-  // Hold normal traffic during a re-handshake. client/hello must still flow or
-  // the post-re-handshake server/activate would deadlock.
-  private static readonly QUIESCED_TYPES = new Set([
-    "client/command",
-    "client/time",
-    "client/state",
-  ]);
-
   sendControl(msg: object): void {
     if (this.state !== "transport" || !this.session) {
       console.warn("Sendspin: sendControl before transport ready");
       return;
     }
-    const type = (msg as { type?: string }).type;
-    if (
-      this.quiesced &&
-      type !== undefined &&
-      SendspinTransport.QUIESCED_TYPES.has(type)
-    ) {
+    // Hold outbound traffic during a re-handshake. client/hello still flows, since
+    // a non-compliant server re-sends server/hello and awaits client/hello before
+    // the post-re-handshake server/activate.
+    if (this.quiesced && (msg as { type?: string }).type !== "client/hello") {
       this.outboundQueue.push(msg);
       return;
     }

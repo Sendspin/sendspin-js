@@ -19,11 +19,7 @@ describe("transport server/unpair", () => {
   it("removes a stored-pubkey record and closes", () => {
     const h = harness();
     const lt = new Uint8Array(32).fill(11);
-    const { serverSession } = completeHandshakeWithPsk(
-      h,
-      lt,
-      /*serverId bound*/ true,
-    );
+    const { serverSession } = completeHandshakeWithPsk(h, lt);
     const frame = concat(
       Uint8Array.of(0),
       utf8.encode(JSON.stringify({ type: "server/unpair", payload: {} })),
@@ -32,25 +28,6 @@ describe("transport server/unpair", () => {
       data: serverSession.encrypt(frame).buffer,
     } as MessageEvent);
     expect(h.store.lookup(pskId(lt))).toBeNull();
-    expect(h.ws.disconnected).toBe(true);
-  });
-
-  it("keeps a shared-PSK record but still closes", () => {
-    const h = harness();
-    const lt = new Uint8Array(32).fill(12);
-    const { serverSession } = completeHandshakeWithPsk(
-      h,
-      lt,
-      /*serverId bound*/ false,
-    );
-    const frame = concat(
-      Uint8Array.of(0),
-      utf8.encode(JSON.stringify({ type: "server/unpair", payload: {} })),
-    );
-    h.transport.handleRaw({
-      data: serverSession.encrypt(frame).buffer,
-    } as MessageEvent);
-    expect(h.store.lookup(pskId(lt))).not.toBeNull();
     expect(h.ws.disconnected).toBe(true);
   });
 

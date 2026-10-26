@@ -176,7 +176,7 @@ const player = new SendspinPlayer({
   suite: 'chacha',            // "chacha" (default) or "aesgcm"
   unpairedAccess: true,       // admit unpaired playback; default true (see note below)
   longTermPsks: [
-    { psk: 'base64url-psk', serverId: 'optional-server-id' },
+    { psk: 'base64url-psk', serverId: 'base64url-server-id' },
   ],
   onPairing: (event, detail) => {
     // event: "pending" | "started" | "finalized" | "aborted"

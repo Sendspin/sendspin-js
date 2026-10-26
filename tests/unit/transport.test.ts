@@ -1,11 +1,14 @@
 import { describe, it, expect, vi } from "vitest";
-import { harness, completeHandshake } from "./transport-harness";
-import { SUITES } from "../../src/core/noise/suites";
-import { HandshakeState, MSG1, MSG2 } from "../../src/core/noise/handshake";
 import {
-  base64urlEncode,
-  base64urlDecode,
-} from "../../src/core/noise/base64url";
+  harness,
+  completeHandshake,
+  noise1Payload,
+  readNoise2,
+  sendNoise1,
+} from "./transport-harness";
+import { SUITES } from "../../src/core/noise/suites";
+import { base64urlEncode } from "../../src/core/noise/base64url";
+import { SENTINEL_PSK, SENTINEL_PSK_ID } from "../../src/core/noise/constants";
 
 const utf8 = new TextEncoder();
 const concat = (a: Uint8Array, b: Uint8Array) => {
@@ -82,39 +85,65 @@ describe("SendspinTransport", () => {
     expect(Array.from(frag)).toEqual([4, 1, 2, 3, 4, 5]);
   });
 
-  it("closes on a psk_id miss", () => {
+  it("completes an initial handshake with the Sentinel PSK on a psk_id miss", () => {
     const h = harness();
-    h.transport.start();
-    const clientId = JSON.parse(h.ws.sentText[0]).payload.client_id as string;
+    const unknown = new Uint8Array(32).fill(1);
+    const { ini } = sendNoise1(h, SENTINEL_PSK, noise1Payload(unknown, "lt"));
+
+    readNoise2(h, ini);
+    expect(h.ws.disconnected).toBe(false);
+    expect(h.transport.handshakeInfo?.category).toBe("sentinel");
+  });
+
+  it("treats a PSK held under another category as a miss", () => {
+    const h = harness();
     const server = SUITES.chacha.generateKeypair();
-    const serverInitStr = JSON.stringify({
-      type: "server/init",
-      payload: { server_id: base64urlEncode(server.publicKey), version: 1 },
-    });
-    h.transport.handleRaw({ data: serverInitStr } as MessageEvent);
-    const prologue = concat(
-      utf8.encode(h.ws.sentText[0]),
-      utf8.encode(serverInitStr),
+    const lt = new Uint8Array(32).fill(2);
+    h.store.addLongTerm(lt, base64urlEncode(server.publicKey));
+    const { ini } = sendNoise1(
+      h,
+      SENTINEL_PSK,
+      noise1Payload(lt, "pr"),
+      server,
     );
-    const ini = new HandshakeState({
-      suite: SUITES.chacha,
-      role: "initiator",
-      prologue,
-      s: server,
-      rs: base64urlDecode(clientId),
-      psk: new Uint8Array(32).fill(1),
-    });
-    const m1 = ini.writeMessage(
-      MSG1,
-      utf8.encode(JSON.stringify({ psk_id: "unknown-psk-id" })),
-    );
-    h.transport.handleRaw({
-      data: JSON.stringify({
-        type: "noise/handshake",
-        payload: { data: base64urlEncode(m1) },
-      }),
-    } as MessageEvent);
+
+    readNoise2(h, ini);
+    expect(h.transport.handshakeInfo?.category).toBe("sentinel");
+  });
+
+  it("closes when the matched long-term PSK is bound to another server", () => {
+    const h = harness();
+    const other = SUITES.chacha.generateKeypair();
+    const lt = new Uint8Array(32).fill(3);
+    h.store.addLongTerm(lt, base64urlEncode(other.publicKey));
+    sendNoise1(h, lt, noise1Payload(lt, "lt"));
+
     expect(h.ws.disconnected).toBe(true);
+    expect(h.ws.sentText).toHaveLength(1);
+  });
+
+  const invalidUtf8 = utf8.encode(
+    `{"psk_id":"${SENTINEL_PSK_ID}","psk_category":"sn","x":"_"}`,
+  );
+  invalidUtf8[invalidUtf8.length - 3] = 0xff;
+  it.each([
+    ["no psk_category", { psk_id: SENTINEL_PSK_ID }],
+    [
+      "an unknown psk_category",
+      { psk_id: SENTINEL_PSK_ID, psk_category: "xx" },
+    ],
+    ["a short psk_id", { psk_id: "abc", psk_category: "sn" }],
+    ["invalid UTF-8", invalidUtf8],
+  ])("closes without falling back on a payload with %s", (_, payload) => {
+    const h = harness();
+    const bytes =
+      payload instanceof Uint8Array
+        ? payload
+        : utf8.encode(JSON.stringify(payload));
+    sendNoise1(h, SENTINEL_PSK, bytes);
+
+    expect(h.ws.disconnected).toBe(true);
+    expect(h.ws.sentText).toHaveLength(1);
   });
 
   it("closes on a bad server/init version", () => {
