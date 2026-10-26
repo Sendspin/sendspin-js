@@ -125,6 +125,10 @@ header h1 {
   font-size: 0.875rem;
 }
 
+.form-group small[hidden] {
+  display: none;
+}
+
 .button-group {
   display: flex;
   gap: 0.75rem;

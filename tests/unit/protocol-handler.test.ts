@@ -19,7 +19,7 @@ import type { StreamHandler } from "../../src/internal-types";
 function makeHelloContext(overrides: Partial<HelloContext> = {}): HelloContext {
   return {
     trustLevel: () => "none",
-    pairMethods: () => [{ method: "pairing_psk" }],
+    pairMethods: () => ({ pairing_psk: {} }),
     unpairedAccess: true,
     ...overrides,
   };
@@ -244,9 +244,7 @@ describe("ProtocolHandler extra", () => {
       const payload = hello.payload as Record<string, unknown>;
       expect(payload.name).toBe("Living Room");
       expect(payload.supported_roles).toContain("player@v1");
-      expect(payload.supported_pair_methods).toEqual([
-        { method: "pairing_psk" },
-      ]);
+      expect(payload.supported_pair_methods).toEqual({ pairing_psk: {} });
 
       const support = payload["player@v1_support"] as Record<string, unknown>;
       expect(support.supported_commands).toEqual(["volume", "mute"]);
@@ -260,16 +258,6 @@ describe("ProtocolHandler extra", () => {
         sample_rate: expect.any(Number),
         bit_depth: expect.any(Number),
       });
-    });
-
-    it("omits pairing_psk from supported_pair_methods when pairing is unavailable", () => {
-      helloContext = makeHelloContext({ pairMethods: () => [] });
-      const handler = makeHandler();
-      handler.sendClientHello();
-
-      const hello = lastSent(send, "client/hello")!;
-      const payload = hello.payload as Record<string, unknown>;
-      expect(payload.supported_pair_methods).toEqual([]);
     });
 
     it("advertises a buffer capacity covering the stream-ahead depth", () => {

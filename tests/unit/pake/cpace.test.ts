@@ -7,7 +7,7 @@ import {
   lvCat,
   prependLen,
 } from "../../../src/core/pake/cpace";
-import { commitNonce, derivePin } from "../../../src/core/pake/pin";
+import { commitNonce, derivePairingCode } from "../../../src/core/pake/pin";
 
 function hex(s: string): Uint8Array {
   const out = new Uint8Array(s.length / 2);
@@ -186,22 +186,17 @@ describe("low-order peer shares (draft B.1.10)", () => {
   });
 });
 
-// CPace primitive vector generated with the aiosendspin reference implementation
+// CPace primitive vector generated with a reference implementation
 // (empty CI/ADs, sid = "sendspin-pair-pake-v1" || h). It predates the spec's
 // ADa/ADb = "server"/"client" and the sid attempt counter, so it pins the
 // primitive with empty AD; Sendspin's wire instantiation is covered in
-// pairing.test.ts. Re-pin against updated aiosendspin when available.
-describe("aiosendspin interop vector (empty-AD primitive)", () => {
+// pairing.test.ts. Re-pin against an updated reference when available.
+describe("reference interop vector (empty-AD primitive)", () => {
   const h = new Uint8Array(Array.from({ length: 32 }, (_, i) => i));
-  const nonceA = new Uint8Array(32).fill(0xaa);
   const nonceB = new Uint8Array(32).fill(0xbb);
   const sid = new Uint8Array([...utf8("sendspin-pair-pake-v1"), ...h]);
   const ya = new Uint8Array(32).fill(0x11);
   const yb = new Uint8Array(32).fill(0x22);
-
-  it("derives the expected PIN", () => {
-    expect(derivePin(h, nonceA, nonceB, 6)).toBe("899599");
-  });
 
   // Domain-separated, so a bare SHA-256 of the nonce is not the commitment.
   it("commits a nonce under the pair-commit label", () => {
@@ -211,8 +206,8 @@ describe("aiosendspin interop vector (empty-AD primitive)", () => {
   });
 
   it("matches the reference generator, shares, and confirmation tags", () => {
-    const pin = derivePin(h, nonceA, nonceB, 6);
-    const prs = utf8(pin);
+    // The fixed PRS the reference vector was generated with.
+    const prs = utf8("899599");
     expect(toHex(calculateGenerator(prs, new Uint8Array(0), sid))).toBe(
       "83868197583cdca51bbb655ec3949040250b8789bdfb79503c255f6898de662b",
     );
@@ -238,22 +233,36 @@ describe("aiosendspin interop vector (empty-AD primitive)", () => {
   });
 });
 
-describe("derivePin", () => {
+describe("derivePairingCode", () => {
   const h = new Uint8Array(32).fill(1);
   const na = new Uint8Array(32).fill(2);
   const nb = new Uint8Array(32).fill(3);
 
-  it("zero-pads to the requested length", () => {
-    for (const len of [4, 6, 8, 12]) {
-      const pin = derivePin(h, na, nb, len);
-      expect(pin).toMatch(new RegExp(`^[0-9]{${len}}$`));
-    }
+  // Computed separately from the spec formula: SHA-256(label || h || nonce_A || nonce_B) mod 10^6.
+  it("derives the spec's code for a known input", () => {
+    expect(
+      derivePairingCode(
+        new Uint8Array(Array.from({ length: 32 }, (_, i) => i)),
+        new Uint8Array(32).fill(0xaa),
+        new Uint8Array(32).fill(0xbb),
+      ),
+    ).toBe("268642");
+  });
+
+  it("zero-pads to 6 digits", () => {
+    const codes = Array.from({ length: 64 }, (_, i) =>
+      derivePairingCode(h, na, new Uint8Array(32).fill(i)),
+    );
+    for (const code of codes) expect(code).toMatch(/^[0-9]{6}$/);
+    expect(codes.some((code) => code.startsWith("0"))).toBe(true);
   });
 
   it("changes with any input", () => {
-    const base = derivePin(h, na, nb, 8);
-    expect(derivePin(new Uint8Array(32).fill(9), na, nb, 8)).not.toBe(base);
-    expect(derivePin(h, new Uint8Array(32).fill(9), nb, 8)).not.toBe(base);
-    expect(derivePin(h, na, new Uint8Array(32).fill(9), 8)).not.toBe(base);
+    const base = derivePairingCode(h, na, nb);
+    expect(derivePairingCode(new Uint8Array(32).fill(9), na, nb)).not.toBe(
+      base,
+    );
+    expect(derivePairingCode(h, new Uint8Array(32).fill(9), nb)).not.toBe(base);
+    expect(derivePairingCode(h, na, new Uint8Array(32).fill(9))).not.toBe(base);
   });
 });

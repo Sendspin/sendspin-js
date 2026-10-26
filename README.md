@@ -183,17 +183,17 @@ const player = new SendspinPlayer({
     // "pending" means the attempt is waiting for openPairingWindow().
     console.log('Pairing:', event, detail);
   },
-  // Dynamic PIN pairing: show the derived PIN to the operator (null = hide).
-  // languages carries the operator's spoken-PIN preference, when the server sends one.
-  onPairingPin: (pin, languages) => showPinDialog(pin, languages),
-  minPinLength: 6,            // shortest dynamic PIN this client accepts (4-12)
-  // Advertise "speaker" if the app can speak the PIN; `languages` says which language to use.
-  pinOutChannels: ['display'],
-  // Static PIN pairing: this device's fixed 8-digit PIN.
-  staticPin: '31415926',
+  // Dynamic pairing: show the derived code to the operator (null = hide).
+  // languages carries the operator's spoken-code preference, when the server sends one.
+  onPairingCode: (code, languages) => showCodeDialog(code, languages),
+  // Advertise "speaker" if the app can speak the code. `languages` says which language to use.
+  pairingCodeOutChannels: ['display'],
+  // Or, for devices with no display or speaker: a fixed 8-digit code,
+  // random and unique per device. Avoid setting both code methods.
+  // staticPairingCode: deviceStaticCode,
   // Where the operator finds each secret, if you know. Any combination of
   // device | leaflet | operator. Omitted from client/hello when unset.
-  staticPinLocations: ['device', 'leaflet'],
+  // staticPairingCodeLocations: ['device', 'leaflet'],
 });
 
 await player.connect();
@@ -205,23 +205,23 @@ exposed to an active man-in-the-middle. While it's on by default, you can set `u
 The SDK supports all three pairing methods from the spec:
 
 - **Pairing PSK** (always available): transfer the client-bound pairing token.
-- **Dynamic PIN** (enabled by `onPairingPin`): the server starts pairing, the
-  SDK derives a one-time PIN and passes it to `onPairingPin` for display; the
-  operator enters it into the server.
-- **Static PIN** (enabled by `staticPin`): the operator enters this device's
-  fixed 8-digit PIN into the server, then makes a local gesture that calls
-  `player.openPairingWindow()` (window lasts ~5 minutes, one attempt).
+- **Dynamic pairing code** (enabled by `onPairingCode`): the server starts
+  pairing, the SDK derives a one-time code and passes it to `onPairingCode` for
+  display, and the operator enters it into the server.
+- **Static pairing code** (enabled by `staticPairingCode`): the operator enters
+  this device's fixed 8-digit code into the server, then makes a local gesture
+  that calls `player.openPairingWindow()` (window lasts ~5 minutes, one attempt).
 
 Some attempts are **gesture-gated**: the SDK withholds `client/pair-init` until
 `openPairingWindow()` is called, signalling `client/pair-pending` meanwhile and
-firing `onPairing("pending")`. That applies to every static PIN attempt, and to
-dynamic PIN when the method has escalated or the server picked a PIN shorter
-than 6 digits. Ten consecutive dynamic-PIN failures escalate the method, and any
+firing `onPairing("pending")`. That applies to every static pairing code
+attempt, and to dynamic pairing code attempts when the method has escalated.
+Ten consecutive dynamic pairing code failures escalate the method, and any
 later success de-escalates it.
 
 ```typescript
 console.log('Client ID:', player.clientId);              // 43-char base64url pubkey
-console.log('Pairing token:', player.pairingToken);      // spec version 0, or null without storage
+console.log('Pairing token:', player.pairingToken);      // spec version 0
 
 // Rotate the Pairing PSK (e.g. if it may have leaked)
 const newPsk = player.rotatePairingPsk();
@@ -237,9 +237,9 @@ activation arrives without one and the client closes the connection as a
 protocol error, logging the reason to the console.
 
 `player.pairingToken` is the version 0 token defined by the current specification.
-Identity and pairing require `storage` (defaults to `localStorage`); without
-it, `clientId` is still generated per session but `pairingPsk`,
-`pairingToken`, and `rotatePairingPsk()` return `null`.
+Identity and pairing persist in `storage` (defaults to `localStorage`). Without
+it, `clientId`, the Pairing PSK and any paired server are kept in memory only,
+so a reload needs a fresh pairing.
 
 Apps that key their own state on the client id can read it before a player
 exists. A player built afterwards on the same storage adopts this identity.

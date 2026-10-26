@@ -72,6 +72,7 @@ const pairingPinHint = document.getElementById("pairing-pin-hint");
 const pairingPendingGroup = document.getElementById("pairing-pending-group");
 const cancelPairingBtn = document.getElementById("cancel-pairing");
 const staticPinInput = document.getElementById("static-pin");
+const staticPinBothEl = document.getElementById("static-pin-both");
 const staticPinLocationInputs = document.querySelectorAll(
   "#static-pin-locations input[type=checkbox]",
 );
@@ -253,7 +254,7 @@ function resetStatusDisplay() {
  */
 function updatePairingDisplay() {
   clientIdEl.textContent = player.clientId;
-  pairingTokenEl.textContent = pairingTokenForDisplay();
+  pairingTokenEl.textContent = player.pairingToken;
   updateEscalationDisplay();
 }
 
@@ -268,10 +269,6 @@ function selectedLocations(inputs) {
     .map((input) => input.value);
   // undefined omits the hint; an empty list would advertise nothing useful.
   return picked.length ? picked : undefined;
-}
-
-function pairingTokenForDisplay() {
-  return player.pairingToken ?? "(no storage)";
 }
 
 /**
@@ -304,15 +301,15 @@ function onPairing(event, detail) {
 }
 
 /**
- * Show or hide the dynamic pairing PIN (null = attempt ended). languages is
- * the server's spoken-PIN preference, absent when it sent none.
+ * Show or hide the dynamic pairing code (null = attempt ended). languages is
+ * the server's spoken-code preference, absent when it sent none.
  */
-function onPairingPin(pin, languages) {
+function onPairingCode(pin, languages) {
   pairingPinGroup.hidden = pin === null;
   pairingPinEl.textContent = pin ?? "-";
   pairingPinHint.textContent = languages?.length
-    ? `Enter this PIN into the server. Spoken preference: ${languages.join(", ")}.`
-    : "Enter this PIN into the server to complete pairing.";
+    ? `Enter this code into the server. Spoken preference: ${languages.join(", ")}.`
+    : "Enter this code into the server to complete pairing.";
   if (pin === null) {
     // Stop mid-utterance: the attempt this PIN belonged to is over.
     if (typeof speechSynthesis !== "undefined") speechSynthesis.cancel();
@@ -618,6 +615,7 @@ function loadSettings() {
   if (savedStaticPin !== null) {
     staticPinInput.value = savedStaticPin;
   }
+  staticPinBothEl.hidden = !isValidStaticPin(staticPinInput.value);
 
   for (const [inputs, key] of [
     [staticPinLocationInputs, STORAGE_KEYS.STATIC_PIN_LOCATIONS],
@@ -810,18 +808,18 @@ async function connect() {
         showToast(`Server set sync delay to ${delayMs}ms`, "info");
       },
       unpairedAccess: unpairedAccessCheckbox.checked,
-      // Enables static-PIN pairing only once the field holds a complete PIN.
-      staticPin: isValidStaticPin(staticPinInput.value)
+      // Enables static pairing only once the field holds a complete code.
+      staticPairingCode: isValidStaticPin(staticPinInput.value)
         ? staticPinInput.value
         : undefined,
       // Omitted entirely when nothing is picked: the hint is optional.
-      staticPinLocations: selectedLocations(staticPinLocationInputs),
+      staticPairingCodeLocations: selectedLocations(staticPinLocationInputs),
       pairingPskLocations: selectedLocations(pairingPskLocationInputs),
-      pinOutChannels: pinSpeakerInput.checked
+      pairingCodeOutChannels: pinSpeakerInput.checked
         ? ["display", "speaker"]
         : ["display"],
       onPairing,
-      onPairingPin,
+      onPairingCode,
       onStateChange,
     });
 
@@ -1050,17 +1048,19 @@ function init() {
   rotatePskBtn.addEventListener("click", () => {
     if (!player) return;
     player.rotatePairingPsk();
-    pairingTokenEl.textContent = pairingTokenForDisplay();
+    pairingTokenEl.textContent = player.pairingToken;
     showToast("Pairing token rotated", "success");
   });
   staticPinInput.addEventListener("change", () => {
     const pin = staticPinInput.value.trim();
+    staticPinBothEl.hidden = !isValidStaticPin(pin);
     if (pin && !isValidStaticPin(pin)) {
-      showToast("Static PIN must be exactly 8 digits", "error");
+      showToast("Static pairing code must be exactly 8 digits", "error");
       return;
     }
     localStorage.setItem(STORAGE_KEYS.STATIC_PIN, pin);
-    if (player) showToast("Static PIN applies on the next connect", "info");
+    if (player)
+      showToast("Static pairing code applies on the next connect", "info");
   });
   const locationGroups = [
     [staticPinLocationInputs, STORAGE_KEYS.STATIC_PIN_LOCATIONS],

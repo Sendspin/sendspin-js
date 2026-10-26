@@ -369,23 +369,23 @@
               >Open the pairing window to continue.</span
             >
             <small
-              >The server is waiting on the operator gesture. Static PIN needs
-              one every attempt; dynamic PIN only when escalated or the PIN is
-              shorter than 6 digits.</small
+              >The server is waiting on the operator gesture. Static pairing
+              needs one every attempt, and dynamic pairing only when
+              escalated.</small
             >
           </div>
           <div class="form-group" id="pairing-pin-group" hidden>
-            <label>Pairing PIN</label>
+            <label>Pairing code</label>
             <code id="pairing-pin" class="pairing-value">-</code>
             <button id="cancel-pairing" class="btn btn-secondary">
               Cancel pairing
             </button>
             <small id="pairing-pin-hint"
-              >Enter this PIN into the server to complete pairing.</small
+              >Enter this code into the server to complete pairing.</small
             >
           </div>
           <div class="form-group">
-            <label for="static-pin">Static PIN (8 digits)</label>
+            <label for="static-pin">Static pairing code (8 digits)</label>
             <input
               type="text"
               id="static-pin"
@@ -397,13 +397,17 @@
               Open pairing window
             </button>
             <small
-              >Optional fixed device PIN; enables static-PIN pairing on the
-              next connect. Open the window (~5 min) before each gesture-gated
+              >Optional fixed device code. It enables static pairing on the next
+              connect. Open the window (~5 min) before each gesture-gated
               attempt.</small
+            >
+            <small id="static-pin-both" hidden
+              >Dynamic pairing is also on. Real devices should offer only one
+              code method.</small
             >
           </div>
           <div class="form-group" id="static-pin-locations">
-            <label>Static PIN locations</label>
+            <label>Static pairing code locations</label>
             <label>
               <input type="checkbox" value="device" />
               Printed on the device
@@ -444,18 +448,18 @@
           <div class="form-group">
             <label>
               <input type="checkbox" id="pin-speaker" />
-              Speak the dynamic PIN
+              Speak the dynamic pairing code
             </label>
             <small
-              >Advertises the "speaker" out-channel and reads the PIN aloud in
+              >Advertises the "speaker" out-channel and reads the code aloud in
               the server's preferred language.</small
             >
           </div>
           <div class="form-group">
-            <label>Dynamic PIN escalated</label>
+            <label>Dynamic pairing escalated</label>
             <span id="pin-escalated" class="status-value">-</span>
             <small
-              >After 10 failed attempts every dynamic-PIN attempt needs a
+              >After 10 failed attempts every dynamic pairing attempt needs a
               gesture, until one succeeds.</small
             >
           </div>

@@ -10,7 +10,6 @@ import type {
   GoodbyeReason,
   GroupUpdate,
   MessageType,
-  PairMethodDescriptor,
   ServerCommand,
   ServerActivate,
   ServerMessage,
@@ -19,6 +18,7 @@ import type {
   StreamClear,
   StreamEnd,
   StreamStart,
+  SupportedPairMethods,
 } from "../types";
 import type { StreamHandler } from "../internal-types";
 import { clampVolume, type StateManager } from "./state-manager";
@@ -47,8 +47,7 @@ export interface MessageSender {
 
 export interface HelloContext {
   trustLevel(): "user" | "none";
-  /** Pairing-method descriptors for client/hello ([] = pairing unavailable). */
-  pairMethods(): PairMethodDescriptor[];
+  pairMethods(): SupportedPairMethods;
   unpairedAccess: boolean;
 }
 

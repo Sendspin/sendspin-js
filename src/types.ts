@@ -83,7 +83,7 @@ export interface ClientHello {
     name: string;
     supported_roles: string[];
     trust_level: "user" | "none";
-    supported_pair_methods?: PairMethodDescriptor[];
+    supported_pair_methods: SupportedPairMethods;
     unpaired_access: { enabled: boolean };
     device_info?: {
       product_name?: string;
@@ -261,23 +261,26 @@ export interface GroupUpdate {
   payload: GroupUpdatePayload;
 }
 
-export type PairMethod = "pairing_psk" | "dynamic_pin" | "static_pin";
+export type PairMethod =
+  "pairing_psk" | "dynamic_pairing_code" | "static_pairing_code";
 
-/** Out-channels through which a client can convey the dynamic PIN. */
-export type PairOutChannel = "display" | "speaker" | "other";
+/** Out-channels through which a client can convey the dynamic pairing code. */
+export type PairOutChannel = "display" | "speaker";
+
+/** Emission formats of the dynamic pairing code. */
+export type PairCodeFormat = "digits" | "qr_code";
 
 /** Where the operator can find a static pairing secret. */
 export type PairSecretLocation = "device" | "leaflet" | "operator";
 
-/** A client/hello pairing-method descriptor. */
-export interface PairMethodDescriptor {
-  method: PairMethod;
-  /** Dynamic PIN only: how the client can surface the derived PIN. */
-  out_channels?: PairOutChannel[];
-  /** Dynamic PIN only: shortest PIN length the client accepts (4-12). */
-  min_pin_length?: number;
-  /** Static PIN and Pairing PSK only: where the operator finds the secret. */
-  locations?: PairSecretLocation[];
+/** client/hello supported_pair_methods: the offered methods, keyed by method. */
+export interface SupportedPairMethods {
+  pairing_psk: { locations?: PairSecretLocation[] };
+  static_pairing_code?: { locations?: PairSecretLocation[] };
+  dynamic_pairing_code?: {
+    out_channels: PairOutChannel[];
+    formats: PairCodeFormat[];
+  };
 }
 
 export interface ClientInit {
@@ -298,9 +301,9 @@ export interface NoiseHandshake {
 /** Parameters of the pairing attempt a pairing server/activate admits. */
 export interface ActivatePairing {
   method: PairMethod;
-  /** Dynamic PIN only: the PIN length for this session (4-12). */
-  pin_length?: number;
-  /** Dynamic PIN only: BCP 47 tags in descending operator preference. */
+  /** Dynamic pairing code only: the emission format for this attempt. */
+  format?: PairCodeFormat;
+  /** Dynamic pairing code only: BCP 47 tags in descending operator preference. */
   languages?: string[];
 }
 
@@ -320,7 +323,7 @@ export interface ClientPairPending {
 
 export interface ClientPairInit {
   type: MessageType.CLIENT_PAIR_INIT;
-  /** commit_B (SHA-256 of nonce_B) is present in dynamic PIN, absent in static. */
+  /** commit_B (SHA-256 of nonce_B) is present in dynamic pairing, absent in static. */
   payload: { pairing_index: number; commit_B?: string };
 }
 
@@ -346,8 +349,8 @@ export interface ServerPairConfirm {
 
 export interface ClientPairConfirm {
   type: MessageType.CLIENT_PAIR_CONFIRM;
-  /** nonce_B (preimage of commit_B) is present in dynamic PIN only. */
-  payload: { client_kc: string; nonce_B?: string };
+  /** wrapped_nonce_B (sealed preimage of commit_B) is present in dynamic pairing only. */
+  payload: { client_kc: string; wrapped_nonce_B?: string };
 }
 
 export interface ClientPairFinalize {
@@ -365,8 +368,7 @@ export type PairAbortReason =
   | "attempt_timeout"
   | "concurrent_attempt"
   | "method_not_supported"
-  | "pin_length_unacceptable"
-  | "pin_mismatch"
+  | "pairing_code_mismatch"
   | "user_cancelled";
 
 export interface PairAbort {
@@ -641,10 +643,11 @@ export interface SendspinCoreConfig {
   defaultSyncDelay?: number;
 
   /**
-   * Storage for persisting SDK state (cached output latency and the
-   * server-commanded output delay). SendspinCore persists only when this is
-   * provided. SendspinPlayer defaults it to localStorage. Pass null to
-   * disable persistence.
+   * Storage for persisting SDK state: the identity key, the Pairing PSK,
+   * paired server keys, the pairing failure count, cached output latency and
+   * the server-commanded output delay. Keys are stored as plain text.
+   * SendspinCore persists only when this is provided. SendspinPlayer defaults
+   * it to localStorage. Pass null to disable persistence.
    */
   storage?: SendspinStorage | null;
 
@@ -729,40 +732,38 @@ export interface SendspinCoreConfig {
   ) => void;
 
   /**
-   * Enables dynamic PIN pairing: called with the PIN the operator must enter
-   * into the server, and with null when the attempt ends (hide the PIN).
-   * languages carries the operator's preferred BCP 47 tags for spoken
-   * emission, in descending preference, and is absent if the server sent none.
+   * Setting it turns on dynamic code pairing.
+   * Called with a code to show or speak to the operator, who enters it on the
+   * server. Called with null when the attempt ends, so hide the code then.
+   * languages lists the operator's preferred languages for speaking it, most
+   * preferred first, if the server sent any.
+   * Avoid setting both this and staticPairingCode.
    */
-  onPairingPin?: (pin: string | null, languages?: string[]) => void;
+  onPairingCode?: (code: string | null, languages?: string[]) => void;
 
   /**
-   * Channels through which this client conveys the dynamic PIN, advertised in
-   * the dynamic_pin descriptor. Default ["display"]. Advertise "speaker" when
-   * the app can speak the PIN, and honor the languages passed to onPairingPin.
+   * How the app presents the pairing code. Default ["display"].
+   * Add "speaker" only if the app reads the code aloud in the languages
+   * passed to onPairingCode.
    */
-  pinOutChannels?: PairOutChannel[];
+  pairingCodeOutChannels?: PairOutChannel[];
 
   /**
-   * Shortest dynamic PIN length this client accepts (4-12). Default 6.
-   * A compliant server always picks at least this length, so the client
-   * aborts only if a misbehaving server proposes a shorter one.
-   *
-   * Below 6 the client gesture-gates each attempt, so openPairingWindow()
-   * becomes mandatory for dynamic PIN pairing as well.
+   * This device's fixed 8-digit pairing code, for devices with no display or
+   * speaker. Setting it turns on static code pairing.
+   * Use a secure random code that is unique to each device.
+   * Call openPairingWindow() before each attempt.
+   * Avoid setting both this and onPairingCode.
    */
-  minPinLength?: number;
+  staticPairingCode?: string;
+
+  /** Where the operator finds the static pairing code. Omitted when unset. */
+  staticPairingCodeLocations?: PairSecretLocation[];
 
   /**
-   * Enables static PIN pairing: this device's fixed 8-digit PIN. The pairing
-   * window must be opened with openPairingWindow() before each attempt.
+   * Where the operator finds the Pairing PSK. Omitted when unset.
+   * Print it only as a QR code of pairingToken.
    */
-  staticPin?: string;
-
-  /** Where the operator finds the static PIN. Omitted when unset. */
-  staticPinLocations?: PairSecretLocation[];
-
-  /** Where the operator finds the Pairing PSK. Omitted when unset. */
   pairingPskLocations?: PairSecretLocation[];
 
   /** Callback when player state changes (local or from server). */

@@ -476,14 +476,24 @@ describe("SendspinCore encryption wiring", () => {
     expect(core.pairingToken).not.toBe(token);
   });
 
-  it("returns null pairing credentials without storage", () => {
+  it("offers pairing_psk without storage", async () => {
+    const ws = new MockWS();
     const core = new SendspinCore({
-      webSocket: new MockWS() as unknown as WebSocket,
+      webSocket: ws as unknown as WebSocket,
       storage: null,
     });
-    expect(core.pairingPsk).toBeNull();
-    expect(core.pairingToken).toBeNull();
-    expect("getPairingToken" in core).toBe(false);
-    expect(core.rotatePairingPsk()).toBeNull();
+    expect(core.pairingToken).toMatch(/^SP:0/);
+    await core.connect();
+    const { serverSession } = completeHandshake(ws);
+    const before = ws.sent.length;
+    serverSend(ws, serverSession, { type: "server/hello", payload: {} });
+    const clientHello = JSON.parse(
+      new TextDecoder().decode(
+        serverSession.decrypt(ws.sent[before] as Uint8Array).subarray(1),
+      ),
+    );
+    expect(clientHello.payload.supported_pair_methods).toEqual({
+      pairing_psk: {},
+    });
   });
 });

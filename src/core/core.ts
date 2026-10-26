@@ -48,7 +48,6 @@ export class SendspinCore implements StreamHandler {
   private delayStore: StaticDelayStore;
 
   private identity: Identity;
-  private hasStorage: boolean;
   private pskStore: PskStore;
   private transport: SendspinTransport;
   private pairing: PairingManager;
@@ -68,7 +67,11 @@ export class SendspinCore implements StreamHandler {
   private _onConnectionClose?: () => void;
 
   constructor(config: SendspinCoreConfig) {
-    this.hasStorage = (config.storage ?? null) !== null;
+    if (!config.storage) {
+      console.warn(
+        "Sendspin: no storage provided, so the identity, Pairing PSK, paired servers and pairing failure count are kept in memory only and reset on reload.",
+      );
+    }
     this.identity = Identity.loadOrCreate(config.storage ?? null);
     const clientName =
       config.clientName ??
@@ -98,7 +101,7 @@ export class SendspinCore implements StreamHandler {
       this.pskStore.addLongTerm(base64urlDecode(r.psk), r.serverId);
     }
     // Standing candidate: a server may re-handshake to it before the app reads pairingPsk.
-    if (this.hasStorage) this.pskStore.getOrCreatePairingPsk();
+    this.pskStore.getOrCreatePairingPsk();
 
     this.transport = new SendspinTransport(
       this.wsManager,
@@ -137,18 +140,17 @@ export class SendspinCore implements StreamHandler {
           plaintext,
         ),
       storage: config.storage ?? null,
-      onPin: config.onPairingPin ?? null,
-      pinOutChannels: config.pinOutChannels,
-      minPinLength: config.minPinLength,
-      staticPin: config.staticPin,
-      staticPinLocations: config.staticPinLocations,
+      onPairingCode: config.onPairingCode ?? null,
+      pairingCodeOutChannels: config.pairingCodeOutChannels,
+      staticPairingCode: config.staticPairingCode,
+      staticPairingCodeLocations: config.staticPairingCodeLocations,
       pairingPskLocations: config.pairingPskLocations,
       onEvent: (e, d) => this.config.onPairing?.(e, d),
     });
 
     const helloContext = {
       trustLevel: () => this.handshakeInfo?.trustLevel ?? "none",
-      pairMethods: () => (this.hasStorage ? this.pairing.descriptors() : []),
+      pairMethods: () => this.pairing.supportedPairMethods(),
       unpairedAccess: config.unpairedAccess ?? true,
     };
 
@@ -499,28 +501,27 @@ export class SendspinCore implements StreamHandler {
     return this.identity.clientId;
   }
 
-  /** The client's Pairing PSK (base64url), for the operator to enter into the server. Null without storage. */
-  get pairingPsk(): string | null {
-    return this.hasStorage
-      ? base64urlEncode(this.pskStore.getOrCreatePairingPsk())
-      : null;
+  /**
+   * The client's Pairing PSK (base64url). Keep it secret, and show the
+   * operator pairingToken, not this.
+   */
+  get pairingPsk(): string {
+    return base64urlEncode(this.pskStore.getOrCreatePairingPsk());
   }
 
-  get pairingToken(): string | null {
-    const pairingPsk = this.pairingPsk;
-    return pairingPsk ? encodePairingToken(this.clientId, pairingPsk) : null;
+  get pairingToken(): string {
+    return encodePairingToken(this.clientId, this.pairingPsk);
   }
 
-  rotatePairingPsk(): string | null {
-    if (!this.hasStorage) return null;
+  rotatePairingPsk(): string {
     this.pskStore.rotatePairingPsk();
     return this.pairingPsk;
   }
 
   /**
    * Operator gesture that opens the pairing window (~5 minutes, admits one
-   * attempt). Required before each gesture-gated attempt: every static PIN
-   * attempt, and dynamic PIN when escalated or the PIN is shorter than 6.
+   * attempt). Required before each gesture-gated attempt: every static
+   * pairing code attempt, and dynamic pairing code ones when escalated.
    */
   openPairingWindow(): void {
     this.pairing.openPairingWindow();
@@ -531,7 +532,7 @@ export class SendspinCore implements StreamHandler {
     this.pairing.cancelPairing();
   }
 
-  /** Whether dynamic PIN has escalated to gesture-gating (10 failures). */
+  /** Whether dynamic pairing code has escalated to gesture-gating (10 failures). */
   isDynamicPinEscalated(): boolean {
     return this.pairing.isDynamicPinEscalated();
   }
