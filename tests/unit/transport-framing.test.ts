@@ -26,11 +26,8 @@ describe("transport frame validation", () => {
     expect(h.cb.onBinaryMessage).not.toHaveBeenCalled();
   });
 
-  const json = (msg: object) =>
-    Uint8Array.of(0, ...new TextEncoder().encode(JSON.stringify(msg)));
-
   it.each([
-    ["a fragment missing its flags byte", [[1]]],
+    ["a fragment missing its flags byte", [[1, 0x02, 4], [1]]],
     ["a first fragment missing its orig_type byte", [[1, 0x02]]],
     ["a nonzero reserved flag bit", [[1, 0x07, 4]]],
     ["an orig_type of 1", [[1, 0x03, 1]]],
@@ -44,7 +41,15 @@ describe("transport frame validation", () => {
     ],
     [
       "a non-fragment message while a fragment is in flight",
-      [[1, 0x02, 0, 1], json({ type: "server/hello", payload: {} })],
+      [
+        [1, 0x02, 0, 1],
+        [
+          0,
+          ...new TextEncoder().encode(
+            JSON.stringify({ type: "server/hello", payload: {} }),
+          ),
+        ],
+      ],
     ],
   ])("closes on %s", (_, frames) => {
     const h = harness();
