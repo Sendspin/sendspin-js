@@ -120,7 +120,8 @@ export class SendspinCore implements StreamHandler {
           this.pairing.reset();
           this.protocolHandler.resetActivation(isRehandshake);
         },
-        onControlMessage: (msg) => this.routeControl(msg),
+        onControlMessage: (msg, receivedAtUs) =>
+          this.routeControl(msg, receivedAtUs),
         onBinaryMessage: (bytes) =>
           this.handleBinaryMessage(bytes.buffer as ArrayBuffer),
       },
@@ -178,7 +179,10 @@ export class SendspinCore implements StreamHandler {
 
   // Route decrypted control messages from the transport. Pairing consumes its
   // own activate/finalize/abort; everything else goes to the protocol handler.
-  private routeControl(msg: { type: string; payload?: unknown }): void {
+  private routeControl(
+    msg: { type: string; payload?: unknown },
+    receivedAtUs: number,
+  ): void {
     if (msg.type === "server/activate") {
       const p = (msg.payload ?? {}) as {
         activities?: string[];
@@ -188,7 +192,8 @@ export class SendspinCore implements StreamHandler {
         this.protocolHandler.suspendForPairing();
       }
       const consumed = this.pairing.onActivate(p.activities ?? [], p.pairing);
-      if (!consumed) this.protocolHandler.handleServerMessage(msg as never);
+      if (!consumed)
+        this.protocolHandler.handleServerMessage(msg as never, receivedAtUs);
       return;
     }
     if (msg.type === "server/pair-init") {
@@ -213,7 +218,7 @@ export class SendspinCore implements StreamHandler {
         ((msg.payload ?? {}) as { reason?: string }).reason ?? "",
       );
     }
-    this.protocolHandler.handleServerMessage(msg as never);
+    this.protocolHandler.handleServerMessage(msg as never, receivedAtUs);
   }
 
   private onTransportClose(): void {

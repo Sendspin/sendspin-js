@@ -118,7 +118,7 @@ export class ProtocolHandler {
   }
 
   // Handle server messages
-  handleServerMessage(message: ServerMessage): void {
+  handleServerMessage(message: ServerMessage, receivedAtUs: number): void {
     switch (message.type) {
       case "server/hello":
         this.handleServerHello();
@@ -129,7 +129,10 @@ export class ProtocolHandler {
         break;
 
       case "server/time":
-        this.timeSyncManager.handleServerTime(message as ServerTime);
+        this.timeSyncManager.handleServerTime(
+          message as ServerTime,
+          receivedAtUs,
+        );
         break;
 
       case "stream/start":

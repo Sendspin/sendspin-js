@@ -40,7 +40,7 @@ function makeStreamHandler(): StreamHandler &
 
 // Dispatch a parsed server message through the real entry point.
 const dispatch = (handler: ProtocolHandler, msg: unknown): void =>
-  handler.handleServerMessage(msg as never);
+  handler.handleServerMessage(msg as never, 0);
 
 function makeStreamHandlerWithDelay(
   syncDelayMs = 0,

@@ -30,7 +30,10 @@ export interface HandshakeInfo {
 
 export interface TransportCallbacks {
   onHandshakeComplete(info: HandshakeInfo): void;
-  onControlMessage(msg: { type: string; payload?: unknown }): void;
+  onControlMessage(
+    msg: { type: string; payload?: unknown },
+    receivedAtUs: number,
+  ): void;
   onBinaryMessage(bytes: Uint8Array): void;
 }
 
@@ -164,6 +167,7 @@ export class SendspinTransport {
   }
 
   handleRaw(event: MessageEvent): void {
+    const receivedAtUs = Math.floor(performance.now() * 1000);
     if (this.state === "transport") {
       if (typeof event.data === "string") return this.fail(); // unexpected cleartext
       let plain: Uint8Array;
@@ -178,7 +182,7 @@ export class SendspinTransport {
       // A malformed payload or a throwing app callback must not close the socket
       // or disable reconnect. Log and keep the connection.
       try {
-        this.dispatchPlain(plain);
+        this.dispatchPlain(plain, receivedAtUs);
       } catch (e) {
         console.warn("Sendspin: dropped malformed transport message", e);
       }
@@ -251,14 +255,17 @@ export class SendspinTransport {
   }
 
   /** Route one decrypted plaintext frame on its leading message-type byte. */
-  private dispatchPlain(full: Uint8Array): void {
+  private dispatchPlain(full: Uint8Array, receivedAtUs: number): void {
     const type = full[0];
     // The body view is built per branch: the binary path below is the hot one
     // and reads only `full`.
     if (type === 0) {
-      this.handleControl(JSON.parse(dutf8.decode(full.subarray(1))));
+      this.handleControl(
+        JSON.parse(dutf8.decode(full.subarray(1))),
+        receivedAtUs,
+      );
     } else if (type === 2 || type === 3) {
-      this.handleFragment(type, full.subarray(1));
+      this.handleFragment(type, full.subarray(1), receivedAtUs);
     } else {
       // full is the decrypt output: exclusively owned, offset 0, exact length,
       // type byte intact. Hand it over without re-copying.
@@ -266,7 +273,11 @@ export class SendspinTransport {
     }
   }
 
-  private handleFragment(type: number, body: Uint8Array): void {
+  private handleFragment(
+    type: number,
+    body: Uint8Array,
+    receivedAtUs: number,
+  ): void {
     if (type === 2 && this.frag === null) {
       if (body.length < 1) return this.fail();
       // Reject a fragment whose inner type is itself a fragment marker.
@@ -304,13 +315,19 @@ export class SendspinTransport {
     }
     this.frag = null;
     if (origType === 0) {
-      this.handleControl(JSON.parse(dutf8.decode(assembled.subarray(1))));
+      this.handleControl(
+        JSON.parse(dutf8.decode(assembled.subarray(1))),
+        receivedAtUs,
+      );
     } else {
       this.cb.onBinaryMessage(assembled);
     }
   }
 
-  protected handleControl(msg: { type: string; payload?: unknown }): void {
+  protected handleControl(
+    msg: { type: string; payload?: unknown },
+    receivedAtUs: number,
+  ): void {
     if (msg.type === "noise/handshake") {
       try {
         this.handleRehandshake(msg as { payload: { data: string } });
@@ -329,6 +346,7 @@ export class SendspinTransport {
             active_roles?: string[];
           };
         },
+        receivedAtUs,
       );
       return;
     }
@@ -336,7 +354,7 @@ export class SendspinTransport {
       this.handleUnpair();
       return;
     }
-    this.cb.onControlMessage(msg);
+    this.cb.onControlMessage(msg, receivedAtUs);
   }
 
   private handleRehandshake(msg: { payload: { data: string } }): void {
@@ -366,13 +384,16 @@ export class SendspinTransport {
     this.lastHandshakeHash = newHs.handshakeHash;
   }
 
-  protected handleActivate(msg: {
-    type: string;
-    payload: {
-      activities: string[];
-      active_roles?: string[];
-    };
-  }): void {
+  protected handleActivate(
+    msg: {
+      type: string;
+      payload: {
+        activities: string[];
+        active_roles?: string[];
+      };
+    },
+    receivedAtUs: number,
+  ): void {
     const result = authorizeActivate(
       this.matched!.category,
       msg.payload.activities,
@@ -395,10 +416,13 @@ export class SendspinTransport {
         : [];
     this.quiesced = false;
     this.outboundQueue = [];
-    this.cb.onControlMessage({
-      ...msg,
-      payload: { ...msg.payload, active_roles: this.activeRoles },
-    });
+    this.cb.onControlMessage(
+      {
+        ...msg,
+        payload: { ...msg.payload, active_roles: this.activeRoles },
+      },
+      receivedAtUs,
+    );
     for (const command of queuedCommands) this.encryptSend(command);
   }
 
