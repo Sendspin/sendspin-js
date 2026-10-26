@@ -177,6 +177,25 @@ describe("SendspinCore (offline)", () => {
       expect(core.isPlaying).toBe(false);
       expect(core.isConnected).toBe(false);
     });
+
+    it("a transport close reports the cached group state as cleared", () => {
+      const onStateChange = vi.fn();
+      const observed = new SendspinCore({
+        baseUrl: "http://127.0.0.1:9",
+        onStateChange,
+      });
+      observed._stateManager.updateGroupState({
+        playback_state: "playing",
+        group_id: "g1",
+        group_name: "Kitchen",
+      });
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (observed as any).onTransportClose();
+
+      expect(observed._stateManager.groupState).toEqual({});
+      expect(onStateChange.mock.lastCall?.[0].groupState).toEqual({});
+    });
   });
 });
 

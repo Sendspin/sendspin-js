@@ -243,10 +243,15 @@ export class StateManager {
     this.notifyStateChange();
   }
 
-  clearServerState(): void {
+  clearConnectionState(): void {
     this.clearPendingMetadata();
-    if (Object.keys(this._serverState).length === 0) return;
+    if (
+      Object.keys(this._serverState).length === 0 &&
+      Object.keys(this._groupState).length === 0
+    )
+      return;
     this._serverState = {};
+    this._groupState = {};
     this.notifyStateChange();
   }
 

@@ -178,7 +178,7 @@ describe("StateManager", () => {
 
     it("drops the held update when the server state is cleared", () => {
       sm.updateServerState({ metadata: { timestamp: 2, title: "Next" } }, 1000);
-      sm.clearServerState();
+      sm.clearConnectionState();
 
       vi.advanceTimersByTime(1000);
 
@@ -186,15 +186,15 @@ describe("StateManager", () => {
     });
   });
 
-  describe("clearServerState", () => {
+  describe("clearConnectionState", () => {
     it("notifies only when there is server state to clear", () => {
       const cb = vi.fn();
       const sm2 = new StateManager(cb);
       sm2.updateServerState({ metadata: { timestamp: 1, title: "Song" } });
       cb.mockClear();
 
-      sm2.clearServerState();
-      sm2.clearServerState();
+      sm2.clearConnectionState();
+      sm2.clearConnectionState();
 
       expect(cb).toHaveBeenCalledTimes(1);
       expect(cb.mock.calls[0][0].serverState).toEqual({});

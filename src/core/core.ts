@@ -225,7 +225,7 @@ export class SendspinCore implements StreamHandler {
     this.protocolHandler.stopTimeSync();
     this.protocolHandler.resetActivation();
     this.pairing.reset();
-    this.stateManager.clearServerState();
+    this.stateManager.clearConnectionState();
     // Stop periodic state-update sends so they don't spam
     // "WebSocket not connected" warnings after the transport is gone.
     this.stateManager.clearStateUpdateInterval();
