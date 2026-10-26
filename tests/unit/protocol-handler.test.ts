@@ -366,6 +366,31 @@ describe("ProtocolHandler extra", () => {
       });
     });
 
+    it("ends the player stream when player@v1 is removed", () => {
+      const handler = makeHandler();
+      activate(handler);
+      dispatch(handler, {
+        type: "stream/start",
+        payload: {
+          player: {
+            codec: "pcm",
+            sample_rate: 48000,
+            channels: 2,
+            bit_depth: 16,
+          },
+        },
+      });
+
+      dispatch(handler, {
+        type: "server/activate",
+        payload: { activities: ["playback"], active_roles: [] },
+      });
+
+      expect(streamHandler.handleStreamEnd).toHaveBeenCalledTimes(1);
+      expect(stateManager.currentStreamFormat).toBeNull();
+      expect(stateManager.isPlaying).toBe(false);
+    });
+
     it("re-sends the initial client/state on activate after resetActivation", () => {
       const handler = makeHandler();
       activate(handler);

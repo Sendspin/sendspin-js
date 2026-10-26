@@ -168,16 +168,25 @@ export class ProtocolHandler {
   }
 
   // Handle server/activate: start the initial client/state, time-sync, and
-  // periodic state updates. Guarded so a repeat activate is a no-op.
+  // periodic state updates. A repeat activate only applies role changes.
   private handleServerActivate(message: ServerActivate): void {
     let rolesChanged = false;
     if (message.payload.active_roles !== undefined) {
       const nextRoles = new Set(message.payload.active_roles);
+      const removedRoles = [...(this.activeRoles ?? [])].filter(
+        (role) => !nextRoles.has(role),
+      );
       rolesChanged =
         this.activeRoles === null ||
-        nextRoles.size !== this.activeRoles.size ||
-        [...nextRoles].some((role) => !this.activeRoles!.has(role));
+        removedRoles.length > 0 ||
+        nextRoles.size !== this.activeRoles.size;
       this.activeRoles = nextRoles;
+      if (
+        removedRoles.includes("player@v1") &&
+        this.stateManager.currentStreamFormat !== null
+      ) {
+        this.endPlayerStream();
+      }
     }
     if (this.activated) {
       if (rolesChanged) this.sendStateUpdate();
