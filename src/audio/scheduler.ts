@@ -341,6 +341,7 @@ export class AudioScheduler {
       return;
     }
     if (
+      !this.timeFilter.is_synchronized ||
       !this.stateManager.isPlaying ||
       this.nextPlaybackTime === 0 ||
       this.lastScheduledServerTime === 0

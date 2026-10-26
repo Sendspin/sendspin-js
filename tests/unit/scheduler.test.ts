@@ -436,6 +436,26 @@ describe("AudioScheduler clock-not-synced gating", () => {
     scheduler.processAudioQueue();
     expect(ctx.startedSources.length).toBe(1);
   });
+
+  it("keeps scheduled audio playing while the filter is unsynchronized", () => {
+    const { scheduler, ctx, tf } = setup();
+    for (let i = 0; i < 20; i++) {
+      scheduler.handleDecodedChunk(makeChunk(nowUs() + i * 100_000, 0));
+    }
+    scheduler.processAudioQueue();
+    expect(ctx.startedSources.length).toBeGreaterThan(0);
+
+    // A reset filter maps server time far from the scheduled audio.
+    tf.synchronized = false;
+    tf.clientOffsetUs = 60_000_000;
+    for (let i = 0; i < 8; i++) {
+      nowMsValue += 250;
+      ctx.currentTime += 0.25;
+      (scheduler as any).checkRecorrection();
+    }
+
+    expect(ctx.startedSources.every((src) => src.stopped === null)).toBe(true);
+  });
 });
 
 describe("AudioScheduler generation / seek handling", () => {
