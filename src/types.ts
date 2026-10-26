@@ -401,11 +401,7 @@ export type ServerMessage =
   | GroupUpdate;
 
 export type ClientMessage =
-  | ClientHello
-  | ClientTime
-  | ClientState
-  | ClientCommand
-  | ClientGoodbye;
+  ClientHello | ClientTime | ClientState | ClientCommand | ClientGoodbye;
 
 export type StreamFormat = {
   codec: string;

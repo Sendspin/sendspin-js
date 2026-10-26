@@ -23,7 +23,7 @@ jobs:
       - name: Install dependencies
         run: yarn install --frozen-lockfile
       - name: Lint
-        run: yarn lint
+        run: yarn lint:check
       - name: Build and type check
         run: yarn build
 
