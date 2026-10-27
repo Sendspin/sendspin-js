@@ -206,13 +206,13 @@ export class PairingManager {
     this.abort("user_cancelled");
   }
 
-  /** Called for every server/activate. Returns true if it consumed a pairing activation. */
-  onActivate(activities: string[], pairing?: ActivatePairing): boolean {
+  /** Called for every server/activate. */
+  onActivate(activities: string[], pairing?: ActivatePairing): void {
     const isPairing = activities.includes("pairing");
     if (!isPairing) {
       // Non-pairing activate in place of pair-finalize = leave-pairing.
       this.abandonAttempt("server_cancelled");
-      return false;
+      return;
     }
     // A pairing activate arriving mid-attempt supersedes it: the server has
     // moved on, and any message still carrying the old index is discarded.
@@ -234,13 +234,13 @@ export class PairingManager {
         "sendspin: server/activate carried no pairing method, so the server is not speaking the current specification.",
       );
       this.fail();
-      return true;
+      return;
     }
     // A method the PSK disallows or the client no longer offers is something a
     // conformant server can produce, since its view of the config may be stale.
     if (!fitsPsk || !Object.keys(offered).includes(method)) {
       this.abort("method_not_supported");
-      return true;
+      return;
     }
     this.method = method;
     if (method === "pairing_psk") {
@@ -250,18 +250,18 @@ export class PairingManager {
       this.phase = "await-finalize";
       this.armAttemptTimer();
       this.deps.onEvent?.("started");
-      return true;
+      return;
     }
     if (method === "dynamic_pairing_code") {
       const format = pairing.format;
       // A missing format is a protocol error, like a missing method.
       if (typeof format !== "string") {
         this.fail();
-        return true;
+        return;
       }
       if (!offered.dynamic_pairing_code!.formats.includes(format)) {
         this.abort("method_not_supported");
-        return true;
+        return;
       }
       this.languages = readLanguages(pairing.languages);
     }
@@ -274,10 +274,9 @@ export class PairingManager {
         payload: { pairing_index: this.attemptIndex },
       });
       this.deps.onEvent?.("pending");
-      return true;
+      return;
     }
     this.startAttempt();
-    return true;
   }
 
   /**

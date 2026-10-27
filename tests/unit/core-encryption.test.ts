@@ -308,6 +308,7 @@ describe("SendspinCore encryption wiring", () => {
 
     // Without the fix, core's cached category snapshot stays "sentinel" and
     // PairingManager aborts with method_not_supported instead of finalizing.
+    const before = ws.sent.length;
     serverSend(ws, newServerSession, {
       type: "server/activate",
       payload: {
@@ -317,11 +318,17 @@ describe("SendspinCore encryption wiring", () => {
       },
     });
 
-    const reply = ws.sent[ws.sent.length - 1] as Uint8Array;
-    const replyMsg = JSON.parse(
-      new TextDecoder().decode(newServerSession.decrypt(reply).subarray(1)),
-    );
-    expect(replyMsg.type).toBe("client/pair-finalize");
+    const replyTypes = ws.sent
+      .slice(before)
+      .map(
+        (frame) =>
+          JSON.parse(
+            new TextDecoder().decode(
+              newServerSession.decrypt(frame as Uint8Array).subarray(1),
+            ),
+          ).type,
+      );
+    expect(replyTypes).toContain("client/pair-finalize");
   });
 
   it("drops an in-flight pairing PSK across a re-handshake, so a late finalize does not persist", async () => {
@@ -350,6 +357,7 @@ describe("SendspinCore encryption wiring", () => {
     );
 
     // Pairing activate -> client mints a PSK and sends client/pair-finalize.
+    const before = ws.sent.length;
     serverSend(ws, s1.session, {
       type: "server/activate",
       payload: {
@@ -359,15 +367,18 @@ describe("SendspinCore encryption wiring", () => {
       },
     });
     expect(events).toContain("started");
-    // Consume the pair-finalize frame to keep s1's recv nonce aligned.
-    const finType = JSON.parse(
-      new TextDecoder().decode(
-        s1.session
-          .decrypt(ws.sent[ws.sent.length - 1] as Uint8Array)
-          .subarray(1),
-      ),
-    ).type;
-    expect(finType).toBe("client/pair-finalize");
+    // Consume every reply frame to keep s1's recv nonce aligned.
+    const replyTypes = ws.sent
+      .slice(before)
+      .map(
+        (frame) =>
+          JSON.parse(
+            new TextDecoder().decode(
+              s1.session.decrypt(frame as Uint8Array).subarray(1),
+            ),
+          ).type,
+      );
+    expect(replyTypes).toContain("client/pair-finalize");
 
     // Re-handshake #2: must reset the in-flight pairing state.
     const s2 = rehandshakeTo(

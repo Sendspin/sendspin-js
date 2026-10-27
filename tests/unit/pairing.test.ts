@@ -141,7 +141,7 @@ function serverPake(pin: string, index = 1) {
 describe("PairingManager (pairing_psk)", () => {
   it("finalizes a pairing_psk flow and persists a bound record", () => {
     const { store, sent, mgr } = setup();
-    expect(mgr.onActivate(["pairing"], { method: "pairing_psk" })).toBe(true);
+    mgr.onActivate(["pairing"], { method: "pairing_psk" });
     const fin = sent[0] as { type: string; payload: { long_term_psk: string } };
     expect(fin.type).toBe("client/pair-finalize");
     expect(fin.payload.long_term_psk).toHaveLength(43);
@@ -163,7 +163,7 @@ describe("PairingManager (pairing_psk)", () => {
     const { sent, close, mgr } = setup();
     // Spec: "A client ignores this field when activities does not include
     // 'pairing'". No abort, no close, and no attempt started.
-    expect(mgr.onActivate(["playback"], { method: "pairing_psk" })).toBe(false);
+    mgr.onActivate(["playback"], { method: "pairing_psk" });
     expect(sent).toEqual([]);
     expect(close).not.toHaveBeenCalled();
   });
@@ -209,8 +209,8 @@ describe("PairingManager (pairing_psk)", () => {
 
   it("supersedes a running attempt when another pairing activate arrives", () => {
     const { sent, events, mgr } = setup();
-    expect(mgr.onActivate(["pairing"], { method: "pairing_psk" })).toBe(true);
-    expect(mgr.onActivate(["pairing"], { method: "pairing_psk" })).toBe(true);
+    mgr.onActivate(["pairing"], { method: "pairing_psk" });
+    mgr.onActivate(["pairing"], { method: "pairing_psk" });
     // The first attempt is abandoned and the second mints its own PSK, so the
     // client's activate count keeps pace with the server's.
     const finalizes = sent.filter((m) => m.type === "client/pair-finalize");
@@ -334,7 +334,7 @@ describe("PairingManager (dynamic_pairing_code)", () => {
       onPairingCode: vi.fn(),
       ...opts,
     });
-    expect(ctx.mgr.onActivate(["pairing"], pairing)).toBe(true);
+    ctx.mgr.onActivate(["pairing"], pairing);
 
     // client/pair-init carries commit_B = SHA-256(nonce_B).
     const init = lastOfType(ctx.sent, "client/pair-init")!;
@@ -652,9 +652,7 @@ describe("PairingManager (static_pairing_code)", () => {
 
   it("signals pair-pending and waits for the gesture before sending pair-init", () => {
     const ctx = staticSetup();
-    expect(
-      ctx.mgr.onActivate(["pairing"], { method: "static_pairing_code" }),
-    ).toBe(true);
+    ctx.mgr.onActivate(["pairing"], { method: "static_pairing_code" });
     expect(lastOfType(ctx.sent, "client/pair-pending")!.payload).toEqual({
       pairing_index: 1,
     });

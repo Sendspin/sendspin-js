@@ -366,20 +366,65 @@ describe("ProtocolHandler extra", () => {
       });
     });
 
-    it("suspends periodic traffic until pairing ends", () => {
+    it("ends the player stream when player@v1 is removed", () => {
       const handler = makeHandler();
       activate(handler);
-      send.mockClear();
+      dispatch(handler, {
+        type: "stream/start",
+        payload: {
+          player: {
+            codec: "pcm",
+            sample_rate: 48000,
+            channels: 2,
+            bit_depth: 16,
+          },
+        },
+      });
 
-      handler.suspendForPairing();
-      handler.sendStateUpdate();
-      handler.sendCommand("play", undefined as never);
-      vi.advanceTimersByTime(5000);
-      expect(lastSent(send, "client/state")).toBeUndefined();
-      expect(lastSent(send, "client/command")).toBeUndefined();
+      dispatch(handler, {
+        type: "server/activate",
+        payload: { activities: ["playback"], active_roles: [] },
+      });
 
-      activate(handler);
-      expect(lastSent(send, "client/state")).toBeDefined();
+      expect(streamHandler.handleStreamEnd).toHaveBeenCalledTimes(1);
+      expect(stateManager.currentStreamFormat).toBeNull();
+      expect(stateManager.isPlaying).toBe(false);
+    });
+
+    it("discards the state of removed roles, including a scheduled metadata update", () => {
+      const onStateChange = vi.fn();
+      stateManager = new StateManager(onStateChange);
+      const handler = makeHandler();
+      dispatch(handler, {
+        type: "server/activate",
+        payload: {
+          activities: ["playback"],
+          active_roles: ["metadata@v1", "controller@v1"],
+        },
+      });
+      stateManager.updateServerState({
+        controller: {
+          supported_commands: ["play"],
+          volume: 50,
+          muted: false,
+          repeat: "off",
+          shuffle: false,
+        },
+        metadata: { timestamp: 0 },
+      });
+      stateManager.updateServerState({ metadata: { timestamp: 1 } }, 1000);
+
+      dispatch(handler, {
+        type: "server/activate",
+        payload: { activities: ["playback"], active_roles: ["controller@v1"] },
+      });
+
+      expect(Object.keys(stateManager.serverState)).toEqual(["controller"]);
+      expect(Object.keys(onStateChange.mock.lastCall![0].serverState)).toEqual([
+        "controller",
+      ]);
+      vi.advanceTimersByTime(1000);
+      expect(Object.keys(stateManager.serverState)).toEqual(["controller"]);
     });
 
     it("re-sends the initial client/state on activate after resetActivation", () => {

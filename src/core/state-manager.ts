@@ -243,6 +243,17 @@ export class StateManager {
     this.notifyStateChange();
   }
 
+  discardRoleState(families: string[]): void {
+    if (families.includes("metadata")) this.clearPendingMetadata();
+    if (!families.some((family) => family in this._serverState)) return;
+    this._serverState = Object.fromEntries(
+      Object.entries(this._serverState).filter(
+        ([key]) => !families.includes(key),
+      ),
+    ) as ServerStatePayload;
+    this.notifyStateChange();
+  }
+
   clearConnectionState(): void {
     this.clearPendingMetadata();
     if (
