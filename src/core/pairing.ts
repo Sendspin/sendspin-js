@@ -135,6 +135,8 @@ export class PairingManager {
   /** The activation's spoken-PIN language preferences, in descending order. */
   private languages: string[] | undefined;
   private failures: number;
+  /** Set once the client sends pair/abort, until the next server/activate. */
+  private discardStray = false;
 
   constructor(private deps: PairingDeps) {
     if (
@@ -208,6 +210,7 @@ export class PairingManager {
 
   /** Called for every server/activate. */
   onActivate(activities: string[], pairing?: ActivatePairing): void {
+    this.discardStray = false;
     const isPairing = activities.includes("pairing");
     if (!isPairing) {
       // Non-pairing activate in place of pair-finalize = leave-pairing.
@@ -292,8 +295,7 @@ export class PairingManager {
 
   /** server/pair-init: the server's nonce contribution (dynamic PIN). */
   onPairInit(payload: { nonce_A?: string }): void {
-    // Leftover from an ended attempt (kept-open connection): discard silently.
-    if (this.phase === "idle") return;
+    if (this.phase === "idle") return this.strayMessage();
     if (this.phase !== "await-init" || this.method !== "dynamic_pairing_code") {
       return this.fail();
     }
@@ -315,7 +317,7 @@ export class PairingManager {
 
   /** server/pair-auth: the server's CPace public share (both PIN methods). */
   onPairAuth(payload: { pake_msg_1?: string }): void {
-    if (this.phase === "idle") return; // leftover from an ended attempt
+    if (this.phase === "idle") return this.strayMessage();
     if (this.phase !== "await-auth" || !this.cpace) return this.fail();
     const peerShare = this.decode(payload.pake_msg_1, SHARE_SIZE);
     if (!peerShare) return this.fail();
@@ -334,7 +336,7 @@ export class PairingManager {
 
   /** server/pair-confirm: verify the server's tag, then confirm and finalize. */
   onPairConfirm(payload: { server_kc?: string }): void {
-    if (this.phase === "idle") return; // leftover from an ended attempt
+    if (this.phase === "idle") return this.strayMessage();
     if (this.phase !== "await-confirm" || !this.cpace) return this.fail();
     const serverKc = this.decode(payload.server_kc, TAG_SIZE);
     if (!serverKc) return this.fail();
@@ -359,7 +361,8 @@ export class PairingManager {
   }
 
   onPairFinalize(): void {
-    if (!this.pendingPsk) return;
+    if (this.phase === "idle") return this.strayMessage();
+    if (this.phase !== "await-finalize" || !this.pendingPsk) return this.fail();
     this.deps.pskStore.addLongTerm(this.pendingPsk, this.deps.serverId());
     this.clearAttempt();
     this.deps.onEvent?.("finalized");
@@ -379,6 +382,7 @@ export class PairingManager {
   /** Discard any in-flight pairing state and the activate counter (on handshake/close). */
   reset(): void {
     this.clearAttempt();
+    this.discardStray = false;
     this.pairingActivateCount = 0;
     this.attemptIndex = 0;
   }
@@ -471,6 +475,7 @@ export class PairingManager {
    */
   private abort(reason: PairAbortReason): void {
     this.clearAttempt();
+    this.discardStray = true;
     this.deps.sendControl({ type: "pair/abort", payload: { reason } });
     this.deps.onEvent?.("aborted", reason);
     if (reason === "concurrent_attempt") this.deps.close();
@@ -480,6 +485,14 @@ export class PairingManager {
   private fail(): void {
     this.clearAttempt();
     this.deps.close();
+  }
+
+  /**
+   * A pairing message with no attempt running. Messages still in flight after
+   * the client's own pair/abort are discarded, anything else is out of sequence.
+   */
+  private strayMessage(): void {
+    if (!this.discardStray) this.fail();
   }
 
   private clearAttempt(): void {

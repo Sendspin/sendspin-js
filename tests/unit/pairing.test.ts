@@ -222,11 +222,13 @@ describe("PairingManager (pairing_psk)", () => {
   });
 
   it("discards the pending PSK on leave-pairing (non-pairing activate)", () => {
-    const { store, sent, mgr } = setup();
+    const { store, sent, close, mgr } = setup();
     mgr.onActivate(["pairing"], { method: "pairing_psk" });
     const fin = sent[0] as { payload: { long_term_psk: string } };
     mgr.onActivate(["playback"]); // leave pairing without finalize
-    mgr.onPairFinalize(); // must be a no-op now
+    // The server left pairing itself, so a later server/pair-finalize is out of sequence.
+    mgr.onPairFinalize();
+    expect(close).toHaveBeenCalled();
     expect(
       store.lookup(pskId(base64urlDecode(fin.payload.long_term_psk))),
     ).toBeNull();
@@ -620,13 +622,50 @@ describe("PairingManager (dynamic_pairing_code)", () => {
     ).toBe(2);
   });
 
-  it("silently discards a stray pairing message after the attempt ended", () => {
+  it("fails closed on server/pair-finalize before the client finalized", () => {
+    const ctx = runToConfirm();
+    ctx.mgr.onPairFinalize();
+    expect(ctx.close).toHaveBeenCalled();
+  });
+
+  it("fails closed on a pairing message when no attempt ran", () => {
+    const ctx = setup({ category: "sentinel", onPairingCode: vi.fn() });
+    ctx.mgr.onPairAuth({ pake_msg_1: base64urlEncode(new Uint8Array(32)) });
+    expect(ctx.close).toHaveBeenCalled();
+  });
+
+  it.each([
+    [
+      "server/pair-init",
+      (mgr: PairingManager) =>
+        mgr.onPairInit({ nonce_A: base64urlEncode(new Uint8Array(32)) }),
+    ],
+    [
+      "server/pair-auth",
+      (mgr: PairingManager) =>
+        mgr.onPairAuth({ pake_msg_1: base64urlEncode(new Uint8Array(32)) }),
+    ],
+    [
+      "server/pair-confirm",
+      (mgr: PairingManager) =>
+        mgr.onPairConfirm({ server_kc: base64urlEncode(new Uint8Array(64)) }),
+    ],
+    ["server/pair-finalize", (mgr: PairingManager) => mgr.onPairFinalize()],
+  ])("silently discards a stray %s after the client aborted", (_type, send) => {
     const ctx = setup({ category: "sentinel", onPairingCode: vi.fn() });
     ctx.mgr.onActivate(["pairing"], dynamic());
     ctx.mgr.cancelPairing(); // attempt ends, connection stays open
-    // A late server/pair-auth for the ended attempt is ignored, not fatal.
-    ctx.mgr.onPairAuth({ pake_msg_1: base64urlEncode(new Uint8Array(32)) });
+    send(ctx.mgr);
     expect(ctx.close).not.toHaveBeenCalled();
+  });
+
+  it("stops discarding stray pairing messages at the next server/activate", () => {
+    const ctx = setup({ category: "sentinel", onPairingCode: vi.fn() });
+    ctx.mgr.onActivate(["pairing"], dynamic());
+    ctx.mgr.cancelPairing();
+    ctx.mgr.onActivate(["playback"]);
+    ctx.mgr.onPairAuth({ pake_msg_1: base64urlEncode(new Uint8Array(32)) });
+    expect(ctx.close).toHaveBeenCalled();
   });
 });
 
