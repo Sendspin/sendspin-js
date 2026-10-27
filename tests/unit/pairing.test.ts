@@ -783,7 +783,7 @@ describe("PairingManager (static_pairing_code)", () => {
     expect(storage.data.get("sendspin-pair-failures")).toBeUndefined();
   });
 
-  it("the window admits exactly one attempt", () => {
+  it("closes the window on a completed pairing", () => {
     const ctx = staticSetup();
     ctx.mgr.openPairingWindow();
     ctx.mgr.onActivate(["pairing"], { method: "static_pairing_code" });
@@ -795,15 +795,62 @@ describe("PairingManager (static_pairing_code)", () => {
     expect(inits).toHaveLength(1);
   });
 
-  it("reset preserves a pre-opened pairing window", () => {
+  it("closes the window on its fifth failed attempt", () => {
     const ctx = staticSetup();
     ctx.mgr.openPairingWindow();
-    // The window is device state: the spec closes it only on a drop of the
-    // connection carrying its attempt, and no attempt is in flight here.
-    ctx.mgr.reset();
+    for (let index = 1; index <= 5; index++) {
+      ctx.mgr.onActivate(["pairing"], { method: "static_pairing_code" });
+      expect(
+        lastOfType(ctx.sent, "client/pair-init")!.payload!.pairing_index,
+      ).toBe(index);
+      const server = serverPake(STATIC_PIN, index);
+      ctx.mgr.onPairAuth({ pake_msg_1: base64urlEncode(server.publicShare) });
+      const auth = lastOfType(ctx.sent, "client/pair-auth")!;
+      server.derive(base64urlDecode(auth.payload!.pake_msg_2 as string));
+      const badTag = server.tag().slice();
+      badTag[0] ^= 1;
+      ctx.mgr.onPairConfirm({ server_kc: base64urlEncode(badTag) });
+    }
+    ctx.mgr.onActivate(["pairing"], { method: "static_pairing_code" });
+    expect(lastOfType(ctx.sent, "client/pair-pending")!.payload).toEqual({
+      pairing_index: 6,
+    });
+  });
+
+  it("closes the window when the connection carrying its attempt drops", () => {
+    const ctx = staticSetup();
+    ctx.mgr.openPairingWindow();
+    ctx.mgr.onActivate(["pairing"], { method: "static_pairing_code" });
+    ctx.mgr.onConnectionClosed();
+    ctx.mgr.onActivate(["pairing"], { method: "static_pairing_code" });
+    expect(lastOfType(ctx.sent, "client/pair-pending")).toBeDefined();
+  });
+
+  it("keeps the window bound when reopened during an attempt", () => {
+    const ctx = staticSetup();
+    ctx.mgr.openPairingWindow();
+    ctx.mgr.onActivate(["pairing"], { method: "static_pairing_code" });
+    ctx.mgr.openPairingWindow();
+    ctx.mgr.onConnectionClosed();
+    ctx.mgr.onActivate(["pairing"], { method: "static_pairing_code" });
+    expect(lastOfType(ctx.sent, "client/pair-pending")).toBeDefined();
+  });
+
+  it("keeps a window with no attempt open across a drop", () => {
+    const ctx = staticSetup();
+    ctx.mgr.openPairingWindow();
+    ctx.mgr.onConnectionClosed();
     ctx.mgr.onActivate(["pairing"], { method: "static_pairing_code" });
     expect(lastOfType(ctx.sent, "client/pair-pending")).toBeUndefined();
     expect(lastOfType(ctx.sent, "client/pair-init")).toBeDefined();
+  });
+
+  it("closes an open window on cancelPairing with no attempt running", () => {
+    const ctx = staticSetup();
+    ctx.mgr.openPairingWindow();
+    ctx.mgr.cancelPairing();
+    ctx.mgr.onActivate(["pairing"], { method: "static_pairing_code" });
+    expect(lastOfType(ctx.sent, "client/pair-pending")).toBeDefined();
   });
 });
 
@@ -874,6 +921,22 @@ describe("PairingManager timers", () => {
     // The gesture still starts the attempt after the wait.
     ctx.mgr.openPairingWindow();
     expect(lastOfType(ctx.sent, "client/pair-init")).toBeDefined();
+  });
+
+  it("keeps the window open after a timed-out attempt", () => {
+    const ctx = setup({
+      category: "sentinel",
+      onPairingCode: null,
+      staticPairingCode: "31415926",
+    });
+    ctx.mgr.openPairingWindow();
+    ctx.mgr.onActivate(["pairing"], { method: "static_pairing_code" });
+    vi.advanceTimersByTime(120_000);
+    ctx.mgr.onActivate(["pairing"], { method: "static_pairing_code" });
+    expect(lastOfType(ctx.sent, "client/pair-pending")).toBeUndefined();
+    expect(
+      lastOfType(ctx.sent, "client/pair-init")!.payload!.pairing_index,
+    ).toBe(2);
   });
 
   it("static attempts also honor the attempt timeout", () => {

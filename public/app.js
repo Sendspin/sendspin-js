@@ -1092,7 +1092,7 @@ function init() {
       return;
     }
     player.openPairingWindow();
-    showToast("Pairing window open (~5 minutes, one attempt)", "info");
+    showToast("Pairing window open (~5 minutes)", "info");
   });
   releasePairingHoldBtn.addEventListener("click", () => {
     if (!player) {

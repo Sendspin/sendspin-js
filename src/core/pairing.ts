@@ -43,8 +43,10 @@ const CPACE_AD_A = utf8("server");
 const CPACE_AD_B = utf8("client");
 /** A PIN pairing attempt must complete within this bound (spec: 2 minutes). */
 const ATTEMPT_TIMEOUT_MS = 120_000;
-/** Lifetime of an open pairing window, from the gesture until client/pair-init. */
+/** Lifetime of a pairing window, from the gesture. */
 const WINDOW_LIFETIME_MS = 300_000;
+/** A pairing window closes on this many failed server_kc verifications. */
+const WINDOW_FAILURE_LIMIT = 5;
 /** Rounds since the last verified server_kc that hold dynamic attempts back. */
 const ROUND_LIMIT = 20;
 /** Persisted round count (dynamic pairing code only, not partitioned by server). */
@@ -124,6 +126,9 @@ export class PairingManager {
   private windowTimer: ReturnType<typeof setTimeout> | null = null;
   /** Whether the operator's pairing-window gesture is currently live. */
   private windowOpen = false;
+  /** Whether the open window carried an attempt on the current connection. */
+  private windowBound = false;
+  private windowFailures = 0;
   /** The CPace sid for the current PIN attempt (for PSK wrapping). */
   private currentSid: Uint8Array | null = null;
   /** Pairing server/activate messages received since the last Noise handshake. */
@@ -191,33 +196,32 @@ export class PairingManager {
   }
 
   /**
-   * Operator gesture that opens the pairing window. If an attempt is already
-   * waiting on it the attempt starts immediately, otherwise the window admits
-   * one attempt within its lifetime (~5 minutes).
+   * Operator gesture that opens the pairing window for about 5 minutes. If an
+   * attempt is already waiting on it the attempt starts immediately.
    */
   openPairingWindow(): void {
-    if (this.phase === "held-back" && this.method === "static_pairing_code") {
-      this.startAttempt();
-      return;
-    }
-    this.windowOpen = true;
+    // Keep the binding, since an attempt may be running on this connection.
     if (this.windowTimer) clearTimeout(this.windowTimer);
+    this.windowOpen = true;
+    this.windowFailures = 0;
     this.windowTimer = setTimeout(() => this.closeWindow(), WINDOW_LIFETIME_MS);
+    if (this.phase === "held-back" && !this.isHeldBack()) this.startAttempt();
   }
 
-  /**
-   * Close the pairing window. The window is device state, not connection
-   * state: it survives handshakes and drops until an attempt consumes it or
-   * its lifetime runs out.
-   */
   private closeWindow(): void {
     this.windowOpen = false;
+    this.windowBound = false;
+    this.windowFailures = 0;
     if (this.windowTimer) clearTimeout(this.windowTimer);
     this.windowTimer = null;
   }
 
-  /** Cancel an in-progress pairing attempt (sends pair/abort user_cancelled). */
+  /**
+   * Operator cancellation: close the pairing window and cancel any attempt
+   * with pair/abort user_cancelled.
+   */
   cancelPairing(): void {
+    this.closeWindow();
     if (this.phase === "idle") return;
     this.abort("user_cancelled");
   }
@@ -367,6 +371,10 @@ export class PairingManager {
       ) {
         return this.retry();
       }
+      if (this.method === "static_pairing_code") {
+        this.windowFailures += 1;
+        if (this.windowFailures >= WINDOW_FAILURE_LIMIT) this.closeWindow();
+      }
       return this.abort("pairing_code_mismatch");
     }
     // Reset on a verified server_kc, whether or not the attempt finalizes.
@@ -390,6 +398,7 @@ export class PairingManager {
     if (this.phase !== "await-finalize" || !this.pendingPsk) return this.fail();
     this.deps.pskStore.addLongTerm(this.pendingPsk, this.deps.serverId());
     this.clearAttempt();
+    this.closeWindow();
     this.deps.onEvent?.("finalized");
   }
 
@@ -404,6 +413,12 @@ export class PairingManager {
     this.deps.onEvent?.("aborted", reason);
   }
 
+  /** Close a pairing window bound to the dropped connection, then reset. */
+  onConnectionClosed(): void {
+    if (this.windowBound) this.closeWindow();
+    this.reset();
+  }
+
   /** Discard any in-flight pairing state and the activate counter (on handshake/close). */
   reset(): void {
     this.clearAttempt();
@@ -412,10 +427,9 @@ export class PairingManager {
     this.attemptIndex = 0;
   }
 
-  /** Send client/pair-init. The window's lifetime ends here (spec: it runs
-   * from the gesture until client/pair-init is sent). */
+  /** Send client/pair-init. A static attempt binds the window to this connection. */
   private startAttempt(): void {
-    this.closeWindow();
+    if (this.method === "static_pairing_code") this.windowBound = true;
     this.armAttemptTimer();
     this.deps.onEvent?.("started");
     if (this.method === "dynamic_pairing_code") {

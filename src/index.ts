@@ -350,7 +350,9 @@ export class SendspinPlayer {
   }
 
   /**
-   * Allows one pairing attempt in the next 5 minutes.
+   * Opens the pairing window for 5 minutes. It admits pairing attempts on
+   * the connection that carries its first, and closes on a completed pairing,
+   * the fifth wrong code, a drop of that connection, or cancelPairing().
    * Call it only when the user presses a pairing button on the device, never
    * because the server asked.
    * Static code pairing always needs it.
@@ -360,7 +362,7 @@ export class SendspinPlayer {
     this.core.openPairingWindow();
   }
 
-  /** Cancel an in-progress pairing attempt (sends pair/abort user_cancelled). */
+  /** Close the pairing window and cancel an in-progress attempt with pair/abort user_cancelled. */
   cancelPairing(): void {
     this.core.cancelPairing();
   }

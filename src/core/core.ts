@@ -225,7 +225,7 @@ export class SendspinCore implements StreamHandler {
     this.handshakeInfo = null;
     this.protocolHandler.stopTimeSync();
     this.protocolHandler.resetActivation();
-    this.pairing.reset();
+    this.pairing.onConnectionClosed();
     this.stateManager.clearConnectionState();
     // Stop periodic state-update sends so they don't spam
     // "WebSocket not connected" warnings after the transport is gone.
@@ -521,14 +521,14 @@ export class SendspinCore implements StreamHandler {
   }
 
   /**
-   * Operator gesture that opens the pairing window (~5 minutes, admits one
-   * attempt). Required before each static pairing code attempt.
+   * Operator gesture that opens the pairing window for about 5 minutes. Static
+   * pairing code attempts need an open window.
    */
   openPairingWindow(): void {
     this.pairing.openPairingWindow();
   }
 
-  /** Cancel an in-progress pairing attempt (sends pair/abort user_cancelled). */
+  /** Close the pairing window and cancel an in-progress attempt with pair/abort user_cancelled. */
   cancelPairing(): void {
     this.pairing.cancelPairing();
   }

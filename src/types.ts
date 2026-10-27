@@ -756,7 +756,7 @@ export interface SendspinCoreConfig {
    * This device's fixed 8-digit pairing code, for devices with no display or
    * speaker. Setting it turns on static code pairing.
    * Use a secure random code that is unique to each device.
-   * Call openPairingWindow() before each attempt.
+   * Attempts wait for openPairingWindow().
    * Avoid setting both this and onPairingCode.
    */
   staticPairingCode?: string;

@@ -370,9 +370,9 @@
               continue.</span
             >
             <small
-              >The server is waiting on the operator. Static pairing needs the
-              window every attempt, and dynamic pairing needs a release after
-              20 failed rounds.</small
+              >The server is waiting on the operator. Static pairing needs an
+              open window, and dynamic pairing needs a release after 20 rounds
+              without a correct code.</small
             >
           </div>
           <div class="form-group" id="pairing-pin-group" hidden>
@@ -399,8 +399,8 @@
             </button>
             <small
               >Optional fixed device code. It enables static pairing on the next
-              connect. Open the window (~5 min) before each gesture-gated
-              attempt.</small
+              connect. Open the window (~5 min) to admit static pairing
+              attempts.</small
             >
             <small id="static-pin-both" hidden
               >Dynamic pairing is also on. Real devices should offer only one

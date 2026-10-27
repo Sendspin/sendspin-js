@@ -211,12 +211,14 @@ The SDK supports all three pairing methods from the spec:
   SDK asks the server for another round and passes the same code again.
 - **Static pairing code** (enabled by `staticPairingCode`): the operator enters
   this device's fixed 8-digit code into the server, then makes a local gesture
-  that calls `player.openPairingWindow()` (window lasts ~5 minutes, one attempt).
+  that calls `player.openPairingWindow()`. The window lasts ~5 minutes and
+  closes early after a completed pairing, five wrong codes, a drop of the
+  connection that used it, or `cancelPairing()`.
 
 Some attempts are **held back**: the SDK withholds `client/pair-init`,
 signalling `client/pair-pending` meanwhile and firing `onPairing("pending")`.
-Every static pairing code attempt waits for `openPairingWindow()`. After 20
-failed dynamic pairing code rounds without a success, dynamic pairing code
+A static pairing code attempt waits for an open pairing window. After 20
+dynamic pairing code rounds without a correct code, dynamic pairing code
 attempts wait for `releasePairingHold()`, which also resets the count. Call it
 only on a deliberate action on the device.
 
@@ -229,8 +231,8 @@ const newPsk = player.rotatePairingPsk();
 
 player.openPairingWindow();                      // operator gesture for a static code attempt
 player.releasePairingHold();                     // operator action after the round limit
-player.cancelPairing();                          // abort an in-progress attempt
-player.isRoundLimitReached();                    // held back after 20 failed rounds
+player.cancelPairing();                          // close the window and abort any attempt
+player.isRoundLimitReached();                    // held back after 20 rounds without a correct code
 ```
 
 Pairing requires a server speaking the current specification. A non-compliant
