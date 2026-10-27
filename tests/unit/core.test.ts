@@ -409,6 +409,19 @@ describe("SendspinCore command + state forwarding", () => {
     core.disconnect();
   });
 
+  it("does not report a close when connect() replaces a live socket", async () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const internals = core as any;
+    internals.wsManager.connect = vi.fn().mockResolvedValue(undefined);
+    internals.wsManager.isConnected = () => true;
+    const onClose = vi.fn();
+    core.onConnectionClose = onClose;
+
+    await core.connect();
+    expect(onClose).not.toHaveBeenCalled();
+    core.disconnect();
+  });
+
   it("keeps player state and controller commands during a pairing activation", () => {
     core = new SendspinCore({
       baseUrl: "http://h",
