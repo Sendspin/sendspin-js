@@ -456,12 +456,45 @@ describe("ProtocolHandler extra", () => {
       expect((state.payload as Record<string, unknown>).player).toBeUndefined();
     });
 
-    it("reports top-level availability", () => {
+    it("reports available once the first time sync burst completes", () => {
+      timeFilter = new SendspinTimeFilter();
       const handler = makeHandler();
       activate(handler);
+      const available = () =>
+        (lastSent(send, "client/state")!.payload as Record<string, unknown>)
+          .available;
+      expect(available()).toBe(false);
+
+      for (let i = 0; i < 8; i++) {
+        const t1 = (
+          lastSent(send, "client/time")!.payload as Record<string, number>
+        ).client_transmitted;
+        handler.handleServerMessage(
+          {
+            type: "server/time",
+            payload: {
+              client_transmitted: t1,
+              server_received: t1 + 100,
+              server_transmitted: t1 + 200,
+            },
+          } as never,
+          t1 + 300,
+        );
+      }
+
+      expect(available()).toBe(true);
+    });
+
+    it("reports unavailable before time sync without the player role", () => {
+      timeFilter = new SendspinTimeFilter();
+      const handler = makeHandler();
+      dispatch(handler, {
+        type: "server/activate",
+        payload: { activities: [], active_roles: ["controller@v1"] },
+      });
 
       const state = lastSent(send, "client/state")!;
-      expect((state.payload as Record<string, unknown>).available).toBe(true);
+      expect((state.payload as Record<string, unknown>).available).toBe(false);
     });
 
     it("includes output_delay_ms clamped to 0-5000", () => {
