@@ -69,7 +69,7 @@ export class SendspinCore implements StreamHandler {
   constructor(config: SendspinCoreConfig) {
     if (!config.storage) {
       console.warn(
-        "Sendspin: no storage provided, so the identity, Pairing PSK, paired servers and pairing failure count are kept in memory only and reset on reload.",
+        "Sendspin: no storage provided, so the identity, Pairing PSK, paired servers and pairing round count are kept in memory only and reset on reload.",
       );
     }
     this.identity = Identity.loadOrCreate(config.storage ?? null);
@@ -522,8 +522,7 @@ export class SendspinCore implements StreamHandler {
 
   /**
    * Operator gesture that opens the pairing window (~5 minutes, admits one
-   * attempt). Required before each gesture-gated attempt: every static
-   * pairing code attempt, and dynamic pairing code ones when escalated.
+   * attempt). Required before each static pairing code attempt.
    */
   openPairingWindow(): void {
     this.pairing.openPairingWindow();
@@ -534,9 +533,14 @@ export class SendspinCore implements StreamHandler {
     this.pairing.cancelPairing();
   }
 
-  /** Whether dynamic pairing code has escalated to gesture-gating (10 failures). */
-  isDynamicPinEscalated(): boolean {
-    return this.pairing.isDynamicPinEscalated();
+  /** Operator action that releases dynamic pairing code attempts held back at the round limit. */
+  releasePairingHold(): void {
+    this.pairing.releasePairingHold();
+  }
+
+  /** Whether dynamic pairing code attempts are held back at the 20-round limit. */
+  isRoundLimitReached(): boolean {
+    return this.pairing.isRoundLimitReached();
   }
 
   get timeSyncInfo(): { synced: boolean; offset: number; error: number } {

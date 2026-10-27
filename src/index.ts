@@ -353,8 +353,7 @@ export class SendspinPlayer {
    * Allows one pairing attempt in the next 5 minutes.
    * Call it only when the user presses a pairing button on the device, never
    * because the server asked.
-   * Static code pairing always needs it. Dynamic code pairing needs it after
-   * 10 failed attempts.
+   * Static code pairing always needs it.
    * onPairing("pending") fires while an attempt waits for it.
    */
   openPairingWindow(): void {
@@ -366,9 +365,20 @@ export class SendspinPlayer {
     this.core.cancelPairing();
   }
 
-  /** Whether dynamic pairing code has escalated to gesture-gating (10 failures). */
-  isDynamicPinEscalated(): boolean {
-    return this.core.isDynamicPinEscalated();
+  /**
+   * Releases dynamic code pairing after 20 rounds without a correct code and
+   * resets the count.
+   * Call it only when the user acts on the device, never because the server
+   * asked. It has no effect while an attempt is running.
+   * onPairing("pending") fires while an attempt waits for it.
+   */
+  releasePairingHold(): void {
+    this.core.releasePairingHold();
+  }
+
+  /** Whether dynamic code pairing is held back after 20 rounds without a correct code. */
+  isRoundLimitReached(): boolean {
+    return this.core.isRoundLimitReached();
   }
 
   // Get current correction mode

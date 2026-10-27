@@ -7,6 +7,7 @@ import type { SuiteId } from "../../src/core/noise/suites";
 import {
   AiosendspinServer,
   reportDeferredViolations,
+  type CodeWaitResult,
   type PairingResult,
 } from "../helpers/aiosendspin-server";
 
@@ -164,12 +165,14 @@ function wrongPin(pin: string): string {
 }
 
 function expectPairingResult(
-  result: PairingResult,
+  result: CodeWaitResult,
   status: PairingResult["status"],
   reason?: string,
-): void {
+): asserts result is PairingResult {
   expect(result.status, JSON.stringify(result)).toBe(status);
-  if (reason !== undefined) expect(result.reason).toBe(reason);
+  if (reason !== undefined) {
+    expect((result as PairingResult).reason).toBe(reason);
+  }
 }
 
 describe("Sendspin encryption and pairing E2E (aiosendspin)", () => {
@@ -417,13 +420,11 @@ describe("Sendspin encryption and pairing E2E (aiosendspin)", () => {
       connection.core.setVolume(42);
       await new Promise((resolve) => setTimeout(resolve, 5_200));
       expect(connection.socket.readyState).toBe(WebSocket.OPEN);
+      // A wrong code starts another round of the same attempt, with the same code.
       const first = await server.submitCode(wrongPin(pins[0]));
-      expectPairingResult(first, "aborted", "pairing_code_mismatch");
-      expect(connection.socket.readyState).toBe(WebSocket.OPEN);
-
-      await server.beginCodePairing("dynamic_pairing_code");
-      expect((await server.waitForCodeRequest()).status).toBe("code_requested");
+      expect(first.status, JSON.stringify(first)).toBe("code_requested");
       await waitFor(() => pins.length === 2);
+      expect(pins[1]).toBe(pins[0]);
       const second = await server.submitCode(pins[1]);
       expectPairingResult(second, "success");
       expect(second.connected).toBe(true);
@@ -445,54 +446,31 @@ describe("Sendspin encryption and pairing E2E (aiosendspin)", () => {
   );
 
   it(
-    "escalates Dynamic PIN to gesture-gating after ten mismatches",
+    "holds Dynamic PIN back at the round limit until released",
     async () => {
       const storage = memoryStorage();
-      const pins: string[] = [];
-      const collectPin = (pin: string | null) => {
-        if (pin !== null) pins.push(pin);
-      };
-      const connection = await connect({
-        clientName: "Dynamic PIN escalation client",
-        storage,
-        onPairingCode: collectPin,
-      });
-
-      for (let attempt = 0; attempt < 10; attempt++) {
-        await server.beginCodePairing("dynamic_pairing_code");
-        expect((await server.waitForCodeRequest()).status).toBe(
-          "code_requested",
-        );
-        await waitFor(() => pins.length === attempt + 1);
-        const result = await server.submitCode(wrongPin(pins[attempt]));
-        expectPairingResult(result, "aborted", "pairing_code_mismatch");
-      }
-      expect(connection.core.isDynamicPinEscalated()).toBe(true);
-      expect(await server.hasPairingRecord(connection.core.clientId)).toBe(
-        false,
+      storage.setItem(
+        "sendspin-pair-failures",
+        JSON.stringify({ dynamic_pin: 20 }),
       );
-
-      connection.core.disconnect();
-      connection.socket.close();
-      await waitForClose(connection.socket);
-      const reconnected = await connect({
-        clientName: "Dynamic PIN escalation client",
+      const pins: string[] = [];
+      const connection = await connect({
+        clientName: "Dynamic PIN round limit client",
         storage,
-        onPairingCode: collectPin,
+        onPairingCode: (pin) => {
+          if (pin !== null) pins.push(pin);
+        },
       });
-      // The counter survived the reconnect, so the method stays escalated: the
-      // client withholds pair-init until the operator opens the window.
-      expect(reconnected.core.isDynamicPinEscalated()).toBe(true);
+      expect(connection.core.isRoundLimitReached()).toBe(true);
+
       await server.beginCodePairing("dynamic_pairing_code");
       expect((await server.waitForCodeRequest(200)).status).toBe("timeout");
-      expect(reconnected.socket.readyState).toBe(WebSocket.OPEN);
+      expect(connection.socket.readyState).toBe(WebSocket.OPEN);
 
-      reconnected.core.openPairingWindow();
+      connection.core.releasePairingHold();
       expect((await server.waitForCodeRequest()).status).toBe("code_requested");
-      await waitFor(() => pins.length === 11);
-      expectPairingResult(await server.submitCode(pins[10]), "success");
-      // A verified round de-escalates the method.
-      expect(reconnected.core.isDynamicPinEscalated()).toBe(false);
+      await waitFor(() => pins.length === 1);
+      expectPairingResult(await server.submitCode(pins[0]), "success");
     },
     TEST_TIMEOUT_MS,
   );

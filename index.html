@@ -364,14 +364,15 @@
             >
           </div>
           <div class="form-group" id="pairing-pending-group" hidden>
-            <label>Gesture required</label>
+            <label>Operator action required</label>
             <span id="pairing-pending" class="status-value"
-              >Open the pairing window to continue.</span
+              >Open the pairing window or release the pairing hold to
+              continue.</span
             >
             <small
-              >The server is waiting on the operator gesture. Static pairing
-              needs one every attempt, and dynamic pairing only when
-              escalated.</small
+              >The server is waiting on the operator. Static pairing needs the
+              window every attempt, and dynamic pairing needs a release after
+              20 failed rounds.</small
             >
           </div>
           <div class="form-group" id="pairing-pin-group" hidden>
@@ -456,11 +457,14 @@
             >
           </div>
           <div class="form-group">
-            <label>Dynamic pairing escalated</label>
-            <span id="pin-escalated" class="status-value">-</span>
+            <label>Dynamic pairing round limit reached</label>
+            <span id="round-limit" class="status-value">-</span>
+            <button id="release-pairing-hold" class="btn btn-secondary">
+              Release pairing hold
+            </button>
             <small
-              >After 10 failed attempts every dynamic pairing attempt needs a
-              gesture, until one succeeds.</small
+              >After 20 rounds without a correct code dynamic pairing waits
+              until the operator releases it, which also resets the count.</small
             >
           </div>
           <div class="form-group">

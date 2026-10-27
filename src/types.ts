@@ -25,6 +25,7 @@ export enum MessageType {
   SERVER_PAIR_AUTH = "server/pair-auth",
   CLIENT_PAIR_AUTH = "client/pair-auth",
   SERVER_PAIR_CONFIRM = "server/pair-confirm",
+  CLIENT_PAIR_RETRY = "client/pair-retry",
   CLIENT_PAIR_CONFIRM = "client/pair-confirm",
   CLIENT_PAIR_FINALIZE = "client/pair-finalize",
   SERVER_PAIR_FINALIZE = "server/pair-finalize",
@@ -329,7 +330,8 @@ export interface ClientPairInit {
 
 export interface ServerPairInit {
   type: MessageType.SERVER_PAIR_INIT;
-  payload: { nonce_A: string };
+  /** nonce_A is present in the first round only. */
+  payload: { nonce_A?: string };
 }
 
 export interface ServerPairAuth {
@@ -345,6 +347,11 @@ export interface ClientPairAuth {
 export interface ServerPairConfirm {
   type: MessageType.SERVER_PAIR_CONFIRM;
   payload: { server_kc: string };
+}
+
+export interface ClientPairRetry {
+  type: MessageType.CLIENT_PAIR_RETRY;
+  payload: Record<string, never>;
 }
 
 export interface ClientPairConfirm {
@@ -640,7 +647,7 @@ export interface SendspinCoreConfig {
 
   /**
    * Storage for persisting SDK state: the identity key, the Pairing PSK,
-   * paired server keys, the pairing failure count, cached output latency and
+   * paired server keys, the pairing round count, cached output latency and
    * the server-commanded output delay. Keys are stored as plain text.
    * SendspinCore persists only when this is provided. SendspinPlayer defaults
    * it to localStorage. Pass null to disable persistence.
@@ -719,7 +726,7 @@ export interface SendspinCoreConfig {
 
   /**
    * Callback for pairing lifecycle events. "pending" means the attempt is
-   * gesture-gated and waiting for openPairingWindow().
+   * held back, waiting for openPairingWindow() or releasePairingHold().
    */
   onPairing?: (
     event: "pending" | "started" | "finalized" | "aborted",
@@ -729,7 +736,9 @@ export interface SendspinCoreConfig {
   /**
    * Setting it turns on dynamic code pairing.
    * Called with a code to show or speak to the operator, who enters it on the
-   * server. Called with null when the attempt ends, so hide the code then.
+   * server. Called again with the same code in each new round after a wrong
+   * entry, so speak it again then.
+   * Called with null when the attempt ends, so hide the code then.
    * languages lists the operator's preferred languages for speaking it, most
    * preferred first, if the server sent any.
    * Avoid setting both this and staticPairingCode.

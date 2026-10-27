@@ -180,7 +180,7 @@ const player = new SendspinPlayer({
   ],
   onPairing: (event, detail) => {
     // event: "pending" | "started" | "finalized" | "aborted"
-    // "pending" means the attempt is waiting for openPairingWindow().
+    // "pending" means the attempt is waiting for openPairingWindow() or releasePairingHold().
     console.log('Pairing:', event, detail);
   },
   // Dynamic pairing: show the derived code to the operator (null = hide).
@@ -207,17 +207,18 @@ The SDK supports all three pairing methods from the spec:
 - **Pairing PSK** (always available): transfer the client-bound pairing token.
 - **Dynamic pairing code** (enabled by `onPairingCode`): the server starts
   pairing, the SDK derives a one-time code and passes it to `onPairingCode` for
-  display, and the operator enters it into the server.
+  display, and the operator enters it into the server. After a wrong entry the
+  SDK asks the server for another round and passes the same code again.
 - **Static pairing code** (enabled by `staticPairingCode`): the operator enters
   this device's fixed 8-digit code into the server, then makes a local gesture
   that calls `player.openPairingWindow()` (window lasts ~5 minutes, one attempt).
 
-Some attempts are **gesture-gated**: the SDK withholds `client/pair-init` until
-`openPairingWindow()` is called, signalling `client/pair-pending` meanwhile and
-firing `onPairing("pending")`. That applies to every static pairing code
-attempt, and to dynamic pairing code attempts when the method has escalated.
-Ten consecutive dynamic pairing code failures escalate the method, and any
-later success de-escalates it.
+Some attempts are **held back**: the SDK withholds `client/pair-init`,
+signalling `client/pair-pending` meanwhile and firing `onPairing("pending")`.
+Every static pairing code attempt waits for `openPairingWindow()`. After 20
+failed dynamic pairing code rounds without a success, dynamic pairing code
+attempts wait for `releasePairingHold()`, which also resets the count. Call it
+only on a deliberate action on the device.
 
 ```typescript
 console.log('Client ID:', player.clientId);              // 43-char base64url pubkey
@@ -226,9 +227,10 @@ console.log('Pairing token:', player.pairingToken);      // spec version 0
 // Rotate the Pairing PSK (e.g. if it may have leaked)
 const newPsk = player.rotatePairingPsk();
 
-player.openPairingWindow();                      // operator gesture for a gated attempt
+player.openPairingWindow();                      // operator gesture for a static code attempt
+player.releasePairingHold();                     // operator action after the round limit
 player.cancelPairing();                          // abort an in-progress attempt
-player.isDynamicPinEscalated();                  // gesture-gated after 10 failures
+player.isRoundLimitReached();                    // held back after 20 failed rounds
 ```
 
 Pairing requires a server speaking the current specification. A non-compliant
