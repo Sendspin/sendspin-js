@@ -320,6 +320,8 @@ export class SendspinCore implements StreamHandler {
   // ========================================
 
   async connect(): Promise<void> {
+    // Replacing a live socket detaches its close handler, so close the session here.
+    if (this.isConnected) this.onTransportClose();
     const onOpen = () => {
       this._onConnectionOpen?.();
       this.transport.start();

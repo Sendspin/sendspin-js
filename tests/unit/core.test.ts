@@ -381,6 +381,34 @@ describe("SendspinCore command + state forwarding", () => {
     core.disconnect();
   });
 
+  it("closes a bound pairing window when connect() replaces a live socket", async () => {
+    core = new SendspinCore({
+      baseUrl: "http://h",
+      staticPairingCode: "12345678",
+    });
+    const send = spySend(core);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const internals = core as any;
+    internals.wsManager.connect = vi.fn().mockResolvedValue(undefined);
+    internals.wsManager.isConnected = () => true;
+    const activatePairing = () =>
+      internals.routeControl({
+        type: "server/activate",
+        payload: {
+          activities: ["pairing"],
+          pairing: { method: "static_pairing_code" },
+        },
+      });
+    core.openPairingWindow();
+    activatePairing();
+    expect(send.mock.lastCall?.[0].type).toBe("client/pair-init");
+
+    await core.connect();
+    activatePairing();
+    expect(send.mock.lastCall?.[0].type).toBe("client/pair-pending");
+    core.disconnect();
+  });
+
   it("keeps player state and controller commands during a pairing activation", () => {
     core = new SendspinCore({
       baseUrl: "http://h",
