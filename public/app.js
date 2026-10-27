@@ -115,6 +115,8 @@ const progressDuration = document.getElementById("progress-duration");
 
 // Player instance
 let player = null;
+let idlePlayer = null;
+let idlePlayerConfigKey = null;
 let controllerState = null;
 let statusUpdateInterval = null;
 
@@ -799,7 +801,7 @@ async function connect() {
       250,
     );
 
-    player = new SendspinPlayer({
+    const config = {
       baseUrl: serverUrl,
       clientName: "Sendspin Sample Player",
       productName: "Sendspin JS Sample Player",
@@ -831,7 +833,19 @@ async function connect() {
       onPairing,
       onPairingCode,
       onStateChange,
-    });
+    };
+
+    // Reuse the disconnected player when its settings are unchanged, so it
+    // keeps its audio output.
+    const configKey = JSON.stringify(config);
+    if (idlePlayer && idlePlayerConfigKey === configKey) {
+      player = idlePlayer;
+    } else {
+      idlePlayer?.destroy();
+      player = new SendspinPlayer(config);
+    }
+    idlePlayer = null;
+    idlePlayerConfigKey = configKey;
 
     await player.unlock();
     await player.connect();
@@ -859,6 +873,10 @@ async function connect() {
     console.error("Connection failed:", error);
     showToast(`Connection failed: ${error.message}`, "error");
     updateConnectionUI(false);
+    if (player) {
+      player.disconnect("user_request");
+      idlePlayer = player;
+    }
     player = null;
   }
 }
@@ -874,6 +892,7 @@ function disconnect() {
 
   if (player) {
     player.disconnect("user_request");
+    idlePlayer = player;
     player = null;
   }
 
@@ -1152,9 +1171,7 @@ function init() {
 
   // Cleanup on page unload
   window.addEventListener("beforeunload", () => {
-    if (player) {
-      player.disconnect("shutdown");
-    }
+    (player ?? idlePlayer)?.destroy("shutdown");
   });
 
   // Show HTTPS warning when page is served over HTTPS
