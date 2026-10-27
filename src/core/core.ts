@@ -240,6 +240,8 @@ export class SendspinCore implements StreamHandler {
   // ========================================
 
   handleBinaryMessage(data: ArrayBuffer): void {
+    // Ignore binary IDs other than player audio chunks.
+    if (new Uint8Array(data)[0] !== 4) return;
     const format = this.stateManager.currentStreamFormat;
     if (!format) {
       console.warn("Sendspin: Received audio chunk but no stream format set");

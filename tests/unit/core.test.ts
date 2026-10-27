@@ -145,13 +145,27 @@ describe("SendspinCore (offline)", () => {
   });
 
   describe("handleBinaryMessage", () => {
+    afterEach(() => vi.restoreAllMocks());
+
     it("drops audio chunks that arrive before a stream format is set", () => {
       const onAudioData = vi.fn();
       core.onAudioData = onAudioData;
 
-      core.handleBinaryMessage(new ArrayBuffer(20));
+      const chunk = new Uint8Array(20);
+      chunk[0] = 4;
+      core.handleBinaryMessage(chunk.buffer);
 
       expect(onAudioData).not.toHaveBeenCalled();
+    });
+
+    it("ignores binary IDs other than audio chunks without an audio warning", () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const artwork = new Uint8Array(20);
+      artwork[0] = 8;
+
+      core.handleBinaryMessage(artwork.buffer);
+
+      expect(warn).not.toHaveBeenCalled();
     });
   });
 
