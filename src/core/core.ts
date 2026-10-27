@@ -218,6 +218,12 @@ export class SendspinCore implements StreamHandler {
   }
 
   private onTransportClose(): void {
+    this.resetSession();
+    console.log("Sendspin: Connection closed");
+    this._onConnectionClose?.();
+  }
+
+  private resetSession(): void {
     // Drop the transport's handshake timer and stale session so a reconnect
     // starts clean and a synchronous send from onConnectionOpen can't emit a
     // frame under the dead session's keys.
@@ -230,8 +236,6 @@ export class SendspinCore implements StreamHandler {
     // Stop periodic state-update sends so they don't spam
     // "WebSocket not connected" warnings after the transport is gone.
     this.stateManager.clearStateUpdateInterval();
-    console.log("Sendspin: Connection closed");
-    this._onConnectionClose?.();
   }
 
   // ========================================
