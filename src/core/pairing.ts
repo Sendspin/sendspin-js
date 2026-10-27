@@ -35,8 +35,6 @@ function concatBytes(...parts: Uint8Array[]): Uint8Array {
 
 /** CPace session-id label. sid = label || Noise handshake hash || counter || round. */
 const PAKE_SID_LABEL = "sendspin-pair-pake-v1";
-/** This client never asks for another round, so every attempt runs round 1 only. */
-const PAKE_ROUND = 1;
 /** Labels for the keys that wrap the PSK and nonce_B in code pairing (Wrapping). */
 const PSK_WRAP_LABEL = utf8("sendspin-pair-psk-wrap-v1");
 const NONCE_WRAP_LABEL = utf8("sendspin-pair-nonce-wrap-v1");
@@ -45,14 +43,16 @@ const CPACE_AD_A = utf8("server");
 const CPACE_AD_B = utf8("client");
 /** A PIN pairing attempt must complete within this bound (spec: 2 minutes). */
 const ATTEMPT_TIMEOUT_MS = 120_000;
-/** Lifetime of an open pairing window, from the gesture until client/pair-init. */
+/** Lifetime of a pairing window, from the gesture. */
 const WINDOW_LIFETIME_MS = 300_000;
-/** Dynamic PIN escalates to gesture-gating at this many consecutive failures. */
-const ESCALATION_THRESHOLD = 10;
-/** Persisted PIN failure counter (dynamic PIN only, not partitioned by server). */
-const FAILURES_STORAGE_KEY = "sendspin-pair-failures";
-/** Field of the stored failure counter, kept as earlier releases wrote it. */
-const FAILURES_FIELD = "dynamic_pin";
+/** A pairing window closes on this many failed server_kc verifications. */
+const WINDOW_FAILURE_LIMIT = 5;
+/** Rounds since the last verified server_kc that hold dynamic attempts back. */
+const ROUND_LIMIT = 20;
+/** Persisted round count (dynamic pairing code only, not partitioned by server). */
+const ROUNDS_STORAGE_KEY = "sendspin-pair-failures";
+/** Field of the stored round count, kept as earlier releases wrote it. */
+const ROUNDS_FIELD = "dynamic_pin";
 
 const CODE_METHODS: readonly PairMethod[] = [
   "dynamic_pairing_code",
@@ -76,9 +76,9 @@ function readLanguages(value: unknown): string[] | undefined {
 
 type Phase =
   | "idle"
-  /** Gesture-gated: client/pair-pending sent, waiting for the operator's gesture. */
-  | "await-window"
-  /** Dynamic PIN: client/pair-init sent, awaiting server/pair-init. */
+  /** Held back: client/pair-pending sent, waiting for the operator. */
+  | "held-back"
+  /** Dynamic pairing code: awaiting server/pair-init, which begins a round. */
   | "await-init"
   /** Awaiting server/pair-auth (the server's CPace share). */
   | "await-auth"
@@ -101,7 +101,7 @@ export interface PairingDeps {
    * empty AD). key is K_wrap. Returns the 48-byte wrapped value.
    */
   aeadSeal(key: Uint8Array, plaintext: Uint8Array): Uint8Array;
-  /** Persists the dynamic-PIN failure counter. Null = in-memory only. */
+  /** Persists the dynamic pairing code round count. Null = in-memory only. */
   storage: SendspinStorage | null;
   /** Enables dynamic_pairing_code: surfaces the code (null = attempt ended, hide it). */
   onPairingCode: ((code: string | null, languages?: string[]) => void) | null;
@@ -126,6 +126,9 @@ export class PairingManager {
   private windowTimer: ReturnType<typeof setTimeout> | null = null;
   /** Whether the operator's pairing-window gesture is currently live. */
   private windowOpen = false;
+  /** Whether the open window carried an attempt on the current connection. */
+  private windowBound = false;
+  private windowFailures = 0;
   /** The CPace sid for the current PIN attempt (for PSK wrapping). */
   private currentSid: Uint8Array | null = null;
   /** Pairing server/activate messages received since the last Noise handshake. */
@@ -134,7 +137,14 @@ export class PairingManager {
   private attemptIndex = 0;
   /** The activation's spoken-PIN language preferences, in descending order. */
   private languages: string[] | undefined;
-  private failures: number;
+  /** The dynamic pairing code of the current attempt, derived in its first round. */
+  private code: string | null = null;
+  /** The current round of the attempt, 0 before its first server/pair-init. */
+  private round = 0;
+  /** Dynamic pairing code rounds since the last verified server_kc, persisted. */
+  private rounds: number;
+  /** Set once the client sends pair/abort, until the next server/activate. */
+  private discardStray = false;
 
   constructor(private deps: PairingDeps) {
     if (
@@ -143,7 +153,7 @@ export class PairingManager {
     ) {
       throw new Error("staticPairingCode must be exactly 8 decimal digits");
     }
-    this.failures = this.loadFailures();
+    this.rounds = this.loadRounds();
   }
 
   /** The pairing methods to advertise in client/hello. */
@@ -166,48 +176,59 @@ export class PairingManager {
   }
 
   /**
-   * Whether dynamic PIN has escalated to gesture-gating (spec: 10 failures).
-   * Escalation is not an error state: the method stays offered, and every
-   * attempt needs openPairingWindow() until a successful round de-escalates it.
+   * Whether dynamic pairing code attempts are held back at the round limit.
+   * The method stays offered, and attempts wait for releasePairingHold().
    */
-  isDynamicPinEscalated(): boolean {
-    return this.failures >= ESCALATION_THRESHOLD;
+  isRoundLimitReached(): boolean {
+    return this.rounds >= ROUND_LIMIT;
   }
 
   /**
-   * Operator gesture that opens the pairing window. If an attempt is already
-   * waiting on it the attempt starts immediately, otherwise the window admits
-   * one attempt within its lifetime (~5 minutes).
+   * Operator action that releases dynamic pairing code attempts held back at
+   * the round limit and resets the round count. Has no effect while an
+   * attempt is running.
+   */
+  releasePairingHold(): void {
+    if (!this.isRoundLimitReached()) return;
+    if (this.phase !== "idle" && this.phase !== "held-back") return;
+    this.resetRounds();
+    if (this.phase === "held-back" && !this.isHeldBack()) this.startAttempt();
+  }
+
+  /**
+   * Operator gesture that opens the pairing window for about 5 minutes. If an
+   * attempt is already waiting on it the attempt starts immediately.
    */
   openPairingWindow(): void {
-    if (this.phase === "await-window") {
-      this.startAttempt();
-      return;
-    }
-    this.windowOpen = true;
+    // Keep the binding, since an attempt may be running on this connection.
     if (this.windowTimer) clearTimeout(this.windowTimer);
+    this.windowOpen = true;
+    this.windowFailures = 0;
     this.windowTimer = setTimeout(() => this.closeWindow(), WINDOW_LIFETIME_MS);
+    if (this.phase === "held-back" && !this.isHeldBack()) this.startAttempt();
   }
 
-  /**
-   * Close the pairing window. The window is device state, not connection
-   * state: it survives handshakes and drops until an attempt consumes it or
-   * its lifetime runs out.
-   */
   private closeWindow(): void {
     this.windowOpen = false;
+    this.windowBound = false;
+    this.windowFailures = 0;
     if (this.windowTimer) clearTimeout(this.windowTimer);
     this.windowTimer = null;
   }
 
-  /** Cancel an in-progress pairing attempt (sends pair/abort user_cancelled). */
+  /**
+   * Operator cancellation: close the pairing window and cancel any attempt
+   * with pair/abort user_cancelled.
+   */
   cancelPairing(): void {
+    this.closeWindow();
     if (this.phase === "idle") return;
     this.abort("user_cancelled");
   }
 
   /** Called for every server/activate. */
   onActivate(activities: string[], pairing?: ActivatePairing): void {
+    this.discardStray = false;
     const isPairing = activities.includes("pairing");
     if (!isPairing) {
       // Non-pairing activate in place of pair-finalize = leave-pairing.
@@ -265,8 +286,8 @@ export class PairingManager {
       }
       this.languages = readLanguages(pairing.languages);
     }
-    if (this.isGestureGated() && !this.windowOpen) {
-      this.phase = "await-window";
+    if (this.isHeldBack()) {
+      this.phase = "held-back";
       // pair-pending does not start the attempt, so no attempt timer runs. The
       // server bounds the wait and cancels with a non-pairing server/activate.
       this.deps.sendControl({
@@ -280,42 +301,47 @@ export class PairingManager {
   }
 
   /**
-   * Whether the selected method withholds client/pair-init until a window is
-   * open: static pairing code always, dynamic pairing code when escalated.
+   * Whether the selected method withholds client/pair-init: static pairing
+   * code until a window is open, dynamic pairing code at the round limit.
    */
-  private isGestureGated(): boolean {
-    if (this.method === "static_pairing_code") return true;
-    return (
-      this.method === "dynamic_pairing_code" && this.isDynamicPinEscalated()
-    );
+  private isHeldBack(): boolean {
+    if (this.method === "static_pairing_code") return !this.windowOpen;
+    return this.method === "dynamic_pairing_code" && this.isRoundLimitReached();
   }
 
-  /** server/pair-init: the server's nonce contribution (dynamic PIN). */
+  /** server/pair-init: begins a round, carrying the server's nonce in the first. */
   onPairInit(payload: { nonce_A?: string }): void {
-    // Leftover from an ended attempt (kept-open connection): discard silently.
-    if (this.phase === "idle") return;
+    if (this.phase === "idle") return this.strayMessage();
     if (this.phase !== "await-init" || this.method !== "dynamic_pairing_code") {
       return this.fail();
     }
-    const nonceA = this.decode(payload.nonce_A, NONCE_SIZE);
-    if (!nonceA) return this.fail();
     const h = this.deps.handshakeHash();
-    const pin = derivePairingCode(h, nonceA, this.nonceB!);
-    this.currentSid = this.sid(h, this.attemptIndex);
+    if (this.round === 0) {
+      const nonceA = this.decode(payload.nonce_A, NONCE_SIZE);
+      if (!nonceA) return this.fail();
+      this.code = derivePairingCode(h, nonceA, this.nonceB!);
+    } else if (payload.nonce_A !== undefined) {
+      return this.fail();
+    }
+    this.round += 1;
+    // Count the round before the code is shown, so an emitted code always counts.
+    this.rounds += 1;
+    this.saveRounds();
+    this.currentSid = this.sid(h, this.attemptIndex, this.round);
     this.cpace = CPace.start({
       role: "responder",
-      prs: new TextEncoder().encode(pin),
+      prs: new TextEncoder().encode(this.code!),
       sid: this.currentSid,
       ada: CPACE_AD_A,
       adb: CPACE_AD_B,
     });
     this.phase = "await-auth";
-    this.deps.onPairingCode?.(pin, this.languages);
+    this.deps.onPairingCode?.(this.code, this.languages);
   }
 
   /** server/pair-auth: the server's CPace public share (both PIN methods). */
   onPairAuth(payload: { pake_msg_1?: string }): void {
-    if (this.phase === "idle") return; // leftover from an ended attempt
+    if (this.phase === "idle") return this.strayMessage();
     if (this.phase !== "await-auth" || !this.cpace) return this.fail();
     const peerShare = this.decode(payload.pake_msg_1, SHARE_SIZE);
     if (!peerShare) return this.fail();
@@ -334,16 +360,25 @@ export class PairingManager {
 
   /** server/pair-confirm: verify the server's tag, then confirm and finalize. */
   onPairConfirm(payload: { server_kc?: string }): void {
-    if (this.phase === "idle") return; // leftover from an ended attempt
+    if (this.phase === "idle") return this.strayMessage();
     if (this.phase !== "await-confirm" || !this.cpace) return this.fail();
     const serverKc = this.decode(payload.server_kc, TAG_SIZE);
     if (!serverKc) return this.fail();
     if (!this.cpace.verify(serverKc)) {
-      if (this.method === "dynamic_pairing_code") this.recordFailure();
+      if (
+        this.method === "dynamic_pairing_code" &&
+        !this.isRoundLimitReached()
+      ) {
+        return this.retry();
+      }
+      if (this.method === "static_pairing_code") {
+        this.windowFailures += 1;
+        if (this.windowFailures >= WINDOW_FAILURE_LIMIT) this.closeWindow();
+      }
       return this.abort("pairing_code_mismatch");
     }
     // Reset on a verified server_kc, whether or not the attempt finalizes.
-    if (this.method === "dynamic_pairing_code") this.resetFailures();
+    if (this.method === "dynamic_pairing_code") this.resetRounds();
     const confirm: { client_kc: string; wrapped_nonce_B?: string } = {
       client_kc: base64urlEncode(this.cpace.tag()),
     };
@@ -359,9 +394,11 @@ export class PairingManager {
   }
 
   onPairFinalize(): void {
-    if (!this.pendingPsk) return;
+    if (this.phase === "idle") return this.strayMessage();
+    if (this.phase !== "await-finalize" || !this.pendingPsk) return this.fail();
     this.deps.pskStore.addLongTerm(this.pendingPsk, this.deps.serverId());
     this.clearAttempt();
+    this.closeWindow();
     this.deps.onEvent?.("finalized");
   }
 
@@ -376,17 +413,23 @@ export class PairingManager {
     this.deps.onEvent?.("aborted", reason);
   }
 
+  /** Close a pairing window bound to the dropped connection, then reset. */
+  onConnectionClosed(): void {
+    if (this.windowBound) this.closeWindow();
+    this.reset();
+  }
+
   /** Discard any in-flight pairing state and the activate counter (on handshake/close). */
   reset(): void {
     this.clearAttempt();
+    this.discardStray = false;
     this.pairingActivateCount = 0;
     this.attemptIndex = 0;
   }
 
-  /** Send client/pair-init. The window's lifetime ends here (spec: it runs
-   * from the gesture until client/pair-init is sent). */
+  /** Send client/pair-init. A static attempt binds the window to this connection. */
   private startAttempt(): void {
-    this.closeWindow();
+    if (this.method === "static_pairing_code") this.windowBound = true;
     this.armAttemptTimer();
     this.deps.onEvent?.("started");
     if (this.method === "dynamic_pairing_code") {
@@ -402,7 +445,7 @@ export class PairingManager {
       return;
     }
     const h = this.deps.handshakeHash();
-    this.currentSid = this.sid(h, this.attemptIndex);
+    this.currentSid = this.sid(h, this.attemptIndex, 1);
     this.cpace = CPace.start({
       role: "responder",
       prs: new TextEncoder().encode(this.deps.staticPairingCode!),
@@ -415,6 +458,14 @@ export class PairingManager {
       type: "client/pair-init",
       payload: { pairing_index: this.attemptIndex },
     });
+  }
+
+  /** Ask for another round, keeping the attempt, its code and its timer. */
+  private retry(): void {
+    this.cpace = null;
+    this.currentSid = null;
+    this.phase = "await-init";
+    this.deps.sendControl({ type: "client/pair-retry", payload: {} });
   }
 
   /** Mint the long-term PSK and send client/pair-finalize. */
@@ -445,7 +496,11 @@ export class PairingManager {
     return this.deps.aeadSeal(kWrap, value);
   }
 
-  private sid(handshakeHash: Uint8Array, index: number): Uint8Array {
+  private sid(
+    handshakeHash: Uint8Array,
+    index: number,
+    round: number,
+  ): Uint8Array {
     const label = utf8(PAKE_SID_LABEL);
     const offset = label.length + handshakeHash.length;
     const sid = new Uint8Array(offset + 8);
@@ -454,7 +509,7 @@ export class PairingManager {
     // counter and round: big-endian uint32 each.
     const view = new DataView(sid.buffer);
     view.setUint32(offset, index, false);
-    view.setUint32(offset + 4, PAKE_ROUND, false);
+    view.setUint32(offset + 4, round, false);
     return sid;
   }
 
@@ -471,6 +526,7 @@ export class PairingManager {
    */
   private abort(reason: PairAbortReason): void {
     this.clearAttempt();
+    this.discardStray = true;
     this.deps.sendControl({ type: "pair/abort", payload: { reason } });
     this.deps.onEvent?.("aborted", reason);
     if (reason === "concurrent_attempt") this.deps.close();
@@ -480,6 +536,14 @@ export class PairingManager {
   private fail(): void {
     this.clearAttempt();
     this.deps.close();
+  }
+
+  /**
+   * A pairing message with no attempt running. Messages still in flight after
+   * the client's own pair/abort are discarded, anything else is out of sequence.
+   */
+  private strayMessage(): void {
+    if (!this.discardStray) this.fail();
   }
 
   private clearAttempt(): void {
@@ -494,6 +558,8 @@ export class PairingManager {
     this.cpace = null;
     this.currentSid = null;
     this.nonceB = null;
+    this.code = null;
+    this.round = 0;
     this.languages = undefined;
   }
 
@@ -518,31 +584,26 @@ export class PairingManager {
     }
   }
 
-  private loadFailures(): number {
+  private loadRounds(): number {
     try {
-      const raw = this.deps.storage?.getItem(FAILURES_STORAGE_KEY);
+      const raw = this.deps.storage?.getItem(ROUNDS_STORAGE_KEY);
       if (!raw) return 0;
       const stored = JSON.parse(raw) as Record<string, number | undefined>;
-      return stored[FAILURES_FIELD] ?? 0;
+      return stored[ROUNDS_FIELD] ?? 0;
     } catch {
       return 0;
     }
   }
 
-  private saveFailures(): void {
+  private saveRounds(): void {
     this.deps.storage?.setItem(
-      FAILURES_STORAGE_KEY,
-      JSON.stringify({ [FAILURES_FIELD]: this.failures }),
+      ROUNDS_STORAGE_KEY,
+      JSON.stringify({ [ROUNDS_FIELD]: this.rounds }),
     );
   }
 
-  private recordFailure(): void {
-    this.failures += 1;
-    this.saveFailures();
-  }
-
-  private resetFailures(): void {
-    this.failures = 0;
-    this.saveFailures();
+  private resetRounds(): void {
+    this.rounds = 0;
+    this.saveRounds();
   }
 }

@@ -320,7 +320,8 @@ export class AiosendspinServer {
     );
   }
 
-  submitCode(code: string): Promise<PairingResult> {
+  /** Resolves with the attempt's result, code_requested when the server begins another round, or timeout. */
+  submitCode(code: string): Promise<CodeWaitResult> {
     return this.sendCommand("submit_code", { code }, 35_000);
   }
 

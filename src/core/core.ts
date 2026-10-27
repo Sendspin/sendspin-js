@@ -69,7 +69,7 @@ export class SendspinCore implements StreamHandler {
   constructor(config: SendspinCoreConfig) {
     if (!config.storage) {
       console.warn(
-        "Sendspin: no storage provided, so the identity, Pairing PSK, paired servers and pairing failure count are kept in memory only and reset on reload.",
+        "Sendspin: no storage provided, so the identity, Pairing PSK, paired servers and pairing round count are kept in memory only and reset on reload.",
       );
     }
     this.identity = Identity.loadOrCreate(config.storage ?? null);
@@ -218,6 +218,12 @@ export class SendspinCore implements StreamHandler {
   }
 
   private onTransportClose(): void {
+    this.resetSession();
+    console.log("Sendspin: Connection closed");
+    this._onConnectionClose?.();
+  }
+
+  private resetSession(): void {
     // Drop the transport's handshake timer and stale session so a reconnect
     // starts clean and a synchronous send from onConnectionOpen can't emit a
     // frame under the dead session's keys.
@@ -225,13 +231,11 @@ export class SendspinCore implements StreamHandler {
     this.handshakeInfo = null;
     this.protocolHandler.stopTimeSync();
     this.protocolHandler.resetActivation();
-    this.pairing.reset();
+    this.pairing.onConnectionClosed();
     this.stateManager.clearConnectionState();
     // Stop periodic state-update sends so they don't spam
     // "WebSocket not connected" warnings after the transport is gone.
     this.stateManager.clearStateUpdateInterval();
-    console.log("Sendspin: Connection closed");
-    this._onConnectionClose?.();
   }
 
   // ========================================
@@ -322,6 +326,8 @@ export class SendspinCore implements StreamHandler {
   // ========================================
 
   async connect(): Promise<void> {
+    // Replacing a live socket detaches its close handler, so reset its session here.
+    if (this.isConnected) this.resetSession();
     const onOpen = () => {
       this._onConnectionOpen?.();
       this.transport.start();
@@ -523,22 +529,26 @@ export class SendspinCore implements StreamHandler {
   }
 
   /**
-   * Operator gesture that opens the pairing window (~5 minutes, admits one
-   * attempt). Required before each gesture-gated attempt: every static
-   * pairing code attempt, and dynamic pairing code ones when escalated.
+   * Operator gesture that opens the pairing window for about 5 minutes. Static
+   * pairing code attempts need an open window.
    */
   openPairingWindow(): void {
     this.pairing.openPairingWindow();
   }
 
-  /** Cancel an in-progress pairing attempt (sends pair/abort user_cancelled). */
+  /** Close the pairing window and cancel an in-progress attempt with pair/abort user_cancelled. */
   cancelPairing(): void {
     this.pairing.cancelPairing();
   }
 
-  /** Whether dynamic pairing code has escalated to gesture-gating (10 failures). */
-  isDynamicPinEscalated(): boolean {
-    return this.pairing.isDynamicPinEscalated();
+  /** Operator action that releases dynamic pairing code attempts held back at the round limit. */
+  releasePairingHold(): void {
+    this.pairing.releasePairingHold();
+  }
+
+  /** Whether dynamic pairing code attempts are held back at the 20-round limit. */
+  isRoundLimitReached(): boolean {
+    return this.pairing.isRoundLimitReached();
   }
 
   get timeSyncInfo(): { synced: boolean; offset: number; error: number } {

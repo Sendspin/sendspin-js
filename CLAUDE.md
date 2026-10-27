@@ -76,7 +76,7 @@ Encryption and pairing options:
 - `suite`: Noise cipher suite, "chacha" (default) or "aesgcm"
 - `unpairedAccess`: Admit unpaired playback on the Sentinel PSK
 - `longTermPsks`: Preloaded long-term PSK records
-- `storage`: Backing store for identity, PSKs, and pairing failure counters
+- `storage`: Backing store for identity, PSKs, and the pairing round count
 - `onPairing`: Pairing lifecycle callback
 - `onPairingCode`: Enables the dynamic pairing code method, receives the derived code
 - `staticPairingCode`: Enables the static pairing code method with a fixed 8-digit code

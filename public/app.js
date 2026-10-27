@@ -81,7 +81,8 @@ const pairingPskLocationInputs = document.querySelectorAll(
 );
 const pinSpeakerInput = document.getElementById("pin-speaker");
 const openPairingWindowBtn = document.getElementById("open-pairing-window");
-const pinEscalatedEl = document.getElementById("pin-escalated");
+const roundLimitEl = document.getElementById("round-limit");
+const releasePairingHoldBtn = document.getElementById("release-pairing-hold");
 
 // Status elements
 const connectionStatus = document.getElementById("connection-status");
@@ -246,7 +247,7 @@ function resetStatusDisplay() {
   pairingPinGroup.hidden = true;
   pairingPendingGroup.hidden = true;
   pairingPinEl.textContent = "-";
-  pinEscalatedEl.textContent = "-";
+  roundLimitEl.textContent = "-";
 }
 
 /**
@@ -255,7 +256,7 @@ function resetStatusDisplay() {
 function updatePairingDisplay() {
   clientIdEl.textContent = player.clientId;
   pairingTokenEl.textContent = player.pairingToken;
-  updateEscalationDisplay();
+  updateRoundLimitDisplay();
 }
 
 function isValidStaticPin(pin) {
@@ -272,11 +273,11 @@ function selectedLocations(inputs) {
 }
 
 /**
- * Show whether dynamic PIN has escalated to gesture-gating.
+ * Show whether dynamic pairing is held back at the round limit.
  */
-function updateEscalationDisplay() {
+function updateRoundLimitDisplay() {
   if (!player) return;
-  pinEscalatedEl.textContent = player.isDynamicPinEscalated() ? "yes" : "no";
+  roundLimitEl.textContent = player.isRoundLimitReached() ? "yes" : "no";
 }
 
 /**
@@ -286,8 +287,8 @@ function onPairing(event, detail) {
   console.log("Pairing event:", event, detail ?? "");
   pairingPendingGroup.hidden = event !== "pending";
   if (event === "pending") {
-    trustLevelEl.textContent = "awaiting gesture...";
-    showToast("Pairing needs the window opened", "info");
+    trustLevelEl.textContent = "awaiting operator...";
+    showToast("Pairing needs an operator action", "info");
   } else if (event === "started") {
     trustLevelEl.textContent = "pairing...";
   } else if (event === "finalized") {
@@ -297,7 +298,7 @@ function onPairing(event, detail) {
     trustLevelEl.textContent = `aborted (${detail ?? "unknown"})`;
     showToast(`Pairing aborted: ${detail ?? "unknown"}`, "error");
   }
-  updateEscalationDisplay();
+  updateRoundLimitDisplay();
 }
 
 /**
@@ -306,7 +307,7 @@ function onPairing(event, detail) {
  */
 function onPairingCode(pin, languages) {
   pairingPinGroup.hidden = pin === null;
-  pairingPinEl.textContent = pin ?? "-";
+  pairingPinEl.textContent = pin === null ? "-" : codeGroups(pin).join("-");
   pairingPinHint.textContent = languages?.length
     ? `Enter this code into the server. Spoken preference: ${languages.join(", ")}.`
     : "Enter this code into the server to complete pairing.";
@@ -318,13 +319,22 @@ function onPairingCode(pin, languages) {
   if (pinSpeakerInput.checked) speakPin(pin, languages);
 }
 
+/** Split the 6-digit code into the 3-3 groups the spec presents it in. */
+function codeGroups(pin) {
+  return [pin.slice(0, 3), pin.slice(3)];
+}
+
 /**
- * Read the PIN aloud, picking the best voice for the server's language
- * preferences under RFC 4647 Lookup matching.
+ * Read the PIN aloud, digit by digit with a longer pause between groups,
+ * picking the best voice for the server's language preferences under
+ * RFC 4647 Lookup matching.
  */
 function speakPin(pin, languages) {
   if (typeof speechSynthesis === "undefined") return;
-  const utterance = new SpeechSynthesisUtterance(pin.split("").join(" "));
+  const text = codeGroups(pin)
+    .map((group) => group.split("").join(" "))
+    .join(". ");
+  const utterance = new SpeechSynthesisUtterance(text);
   const voice = bestVoice(languages ?? []);
   if (voice) {
     utterance.voice = voice;
@@ -1091,7 +1101,15 @@ function init() {
       return;
     }
     player.openPairingWindow();
-    showToast("Pairing window open (~5 minutes, one attempt)", "info");
+    showToast("Pairing window open (~5 minutes)", "info");
+  });
+  releasePairingHoldBtn.addEventListener("click", () => {
+    if (!player) {
+      showToast("Connect first", "error");
+      return;
+    }
+    player.releasePairingHold();
+    updateRoundLimitDisplay();
   });
   cancelPairingBtn.addEventListener("click", () => {
     if (!player) return;

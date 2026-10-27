@@ -37,15 +37,15 @@ function concatBytes(...parts: Uint8Array[]): Uint8Array {
   return out;
 }
 
-// CPace sid = label || h || big-endian uint32 attempt counter || uint32 round 1.
-function sidFor(index: number): Uint8Array {
+// CPace sid = label || h || big-endian uint32 attempt counter || uint32 round.
+function sidFor(index: number, round = 1): Uint8Array {
   const label = utf8("sendspin-pair-pake-v1");
   const sid = new Uint8Array(label.length + HANDSHAKE_HASH.length + 8);
   sid.set(label, 0);
   sid.set(HANDSHAKE_HASH, label.length);
   const view = new DataView(sid.buffer);
   view.setUint32(label.length + HANDSHAKE_HASH.length, index, false);
-  view.setUint32(label.length + HANDSHAKE_HASH.length + 4, 1, false);
+  view.setUint32(label.length + HANDSHAKE_HASH.length + 4, round, false);
   return sid;
 }
 
@@ -128,11 +128,11 @@ function dynamic(languages?: string[]): ActivatePairing {
 }
 
 /** Drive the server (initiator) side of a PIN PAKE against the manager. */
-function serverPake(pin: string, index = 1) {
+function serverPake(pin: string, index = 1, round = 1) {
   return CPace.start({
     role: "initiator",
     prs: utf8(pin),
-    sid: sidFor(index),
+    sid: sidFor(index, round),
     ada: CPACE_AD_A,
     adb: CPACE_AD_B,
   });
@@ -222,11 +222,13 @@ describe("PairingManager (pairing_psk)", () => {
   });
 
   it("discards the pending PSK on leave-pairing (non-pairing activate)", () => {
-    const { store, sent, mgr } = setup();
+    const { store, sent, close, mgr } = setup();
     mgr.onActivate(["pairing"], { method: "pairing_psk" });
     const fin = sent[0] as { payload: { long_term_psk: string } };
     mgr.onActivate(["playback"]); // leave pairing without finalize
-    mgr.onPairFinalize(); // must be a no-op now
+    // The server left pairing itself, so a later server/pair-finalize is out of sequence.
+    mgr.onPairFinalize();
+    expect(close).toHaveBeenCalled();
     expect(
       store.lookup(pskId(base64urlDecode(fin.payload.long_term_psk))),
     ).toBeNull();
@@ -300,8 +302,6 @@ describe("client/hello supported_pair_methods", () => {
 });
 
 describe("PairingManager (dynamic_pairing_code)", () => {
-  const ESCALATION_THRESHOLD = 10;
-
   /** The PIN most recently surfaced to the app. */
   function shownPin(ctx: ReturnType<typeof setup>): string {
     return (ctx.onPairingCode as ReturnType<typeof vi.fn>).mock.calls
@@ -310,22 +310,24 @@ describe("PairingManager (dynamic_pairing_code)", () => {
       .at(-1)!;
   }
 
-  /** Drive one dynamic-PIN attempt through to a mismatched server tag. */
-  function failAttempt(ctx: ReturnType<typeof setup>, index: number): void {
-    ctx.mgr.onActivate(["pairing"], dynamic());
-    // Once escalated, this attempt waits on a gesture instead of starting.
-    const pending = lastOfType(ctx.sent, "client/pair-pending");
-    if (pending?.payload!.pairing_index === index) ctx.mgr.openPairingWindow();
-    ctx.mgr.onPairInit({
-      nonce_A: base64urlEncode(new Uint8Array(32).fill(0xa1)),
-    });
-    const server = serverPake(shownPin(ctx), index);
-    ctx.mgr.onPairAuth({ pake_msg_1: base64urlEncode(server.publicShare) });
-    const auth = lastOfType(ctx.sent, "client/pair-auth")!;
-    server.derive(base64urlDecode(auth.payload!.pake_msg_2 as string));
+  /** Send a server_kc that fails to verify. */
+  function failConfirm(server: CPace, mgr: PairingManager): void {
     const badTag = server.tag().slice();
     badTag[0] ^= 1;
-    ctx.mgr.onPairConfirm({ server_kc: base64urlEncode(badTag) });
+    mgr.onPairConfirm({ server_kc: base64urlEncode(badTag) });
+  }
+
+  function storedRounds(storage: { data: Map<string, string> }): number {
+    return JSON.parse(storage.data.get("sendspin-pair-failures")!).dynamic_pin;
+  }
+
+  function storageWithRounds(rounds: number) {
+    const storage = memStorage();
+    storage.setItem(
+      "sendspin-pair-failures",
+      JSON.stringify({ dynamic_pin: rounds }),
+    );
+    return storage;
   }
 
   function runToConfirm(opts: SetupOpts = {}, pairing = dynamic()) {
@@ -468,52 +470,75 @@ describe("PairingManager (dynamic_pairing_code)", () => {
     expect(close).not.toHaveBeenCalled();
   });
 
-  it("aborts with pairing_code_mismatch and records a failure on a bad server tag", () => {
-    const storage = memStorage();
+  it("asks for another round with the same code on a bad server tag", () => {
+    const ctx = runToConfirm();
+    failConfirm(ctx.server, ctx.mgr);
+    expect(lastOfType(ctx.sent, "client/pair-retry")!.payload).toEqual({});
+    expect(lastOfType(ctx.sent, "pair/abort")).toBeUndefined();
+
+    // Later rounds carry no nonce_A and bind their own round number into the sid.
+    ctx.mgr.onPairInit({});
+    expect(shownPin(ctx)).toBe(ctx.shownPin);
+    const server = serverPake(ctx.shownPin, 1, 2);
+    ctx.mgr.onPairAuth({ pake_msg_1: base64urlEncode(server.publicShare) });
+    const auth = lastOfType(ctx.sent, "client/pair-auth")!;
+    server.derive(base64urlDecode(auth.payload!.pake_msg_2 as string));
+    ctx.mgr.onPairConfirm({ server_kc: base64urlEncode(server.tag()) });
+    const confirm = lastOfType(ctx.sent, "client/pair-confirm")!;
+    expect(
+      server.verify(base64urlDecode(confirm.payload!.client_kc as string)),
+    ).toBe(true);
+    expect(ctx.close).not.toHaveBeenCalled();
+  });
+
+  it("fails closed on a nonce_A in a later round", () => {
+    const ctx = runToConfirm();
+    failConfirm(ctx.server, ctx.mgr);
+    ctx.mgr.onPairInit({
+      nonce_A: base64urlEncode(new Uint8Array(32).fill(0xb2)),
+    });
+    expect(ctx.close).toHaveBeenCalled();
+  });
+
+  it("aborts instead of retrying at the round limit", () => {
+    const storage = storageWithRounds(19);
     const ctx = runToConfirm({ storage });
-    const badTag = ctx.server.tag().slice();
-    badTag[0] ^= 1;
-    ctx.mgr.onPairConfirm({ server_kc: base64urlEncode(badTag) });
+    failConfirm(ctx.server, ctx.mgr);
     expect(lastOfType(ctx.sent, "pair/abort")!.payload!.reason).toBe(
       "pairing_code_mismatch",
     );
-    expect(ctx.close).not.toHaveBeenCalled();
-    expect(
-      JSON.parse(storage.data.get("sendspin-pair-failures")!).dynamic_pin,
-    ).toBe(1);
+    expect(lastOfType(ctx.sent, "client/pair-retry")).toBeUndefined();
+    expect(ctx.mgr.isRoundLimitReached()).toBe(true);
   });
 
-  it("resets the failure counter when the server tag verifies", () => {
-    const storage = memStorage();
-    storage.setItem(
-      "sendspin-pair-failures",
-      JSON.stringify({ dynamic_pin: 9 }),
-    );
+  it("resets the round count when the server tag verifies", () => {
+    const storage = storageWithRounds(9);
     const ctx = runToConfirm({ storage });
     ctx.mgr.onPairConfirm({ server_kc: base64urlEncode(ctx.server.tag()) });
-    expect(
-      JSON.parse(storage.data.get("sendspin-pair-failures")!).dynamic_pin,
-    ).toBe(0);
+    expect(storedRounds(storage)).toBe(0);
   });
 
-  it("escalates on the tenth consecutive PIN mismatch", () => {
+  it("counts an abandoned attempt only once the code was shown", () => {
+    const storage = memStorage();
     const ctx = setup({
       category: "sentinel",
       onPairingCode: vi.fn(),
-      storage: memStorage(),
+      storage,
     });
-    for (let i = 1; i < ESCALATION_THRESHOLD; i++) failAttempt(ctx, i);
-    expect(ctx.mgr.isDynamicPinEscalated()).toBe(false);
-    failAttempt(ctx, ESCALATION_THRESHOLD);
-    expect(ctx.mgr.isDynamicPinEscalated()).toBe(true);
+    ctx.mgr.onActivate(["pairing"], dynamic());
+    ctx.mgr.onActivate(["playback"]);
+    expect(storage.data.get("sendspin-pair-failures")).toBeUndefined();
+
+    ctx.mgr.onActivate(["pairing"], dynamic());
+    ctx.mgr.onPairInit({
+      nonce_A: base64urlEncode(new Uint8Array(32).fill(0xa1)),
+    });
+    ctx.mgr.onActivate(["playback"]);
+    expect(storedRounds(storage)).toBe(1);
   });
 
-  it("gesture-gates every attempt once escalated, and still offers the method", () => {
-    const storage = memStorage();
-    storage.setItem(
-      "sendspin-pair-failures",
-      JSON.stringify({ dynamic_pin: 10 }),
-    );
+  it("holds attempts back at the round limit until released, and still offers the method", () => {
+    const storage = storageWithRounds(20);
     const { mgr, sent, events, close } = setup({
       category: "sentinel",
       onPairingCode: vi.fn(),
@@ -525,42 +550,23 @@ describe("PairingManager (dynamic_pairing_code)", () => {
     expect(lastOfType(sent, "client/pair-pending")!.payload).toEqual({
       pairing_index: 1,
     });
-    expect(lastOfType(sent, "client/pair-init")).toBeUndefined();
     expect(events).toContain("pending");
     expect(close).not.toHaveBeenCalled();
 
+    // The static pairing window does not release a dynamic hold.
     mgr.openPairingWindow();
+    expect(lastOfType(sent, "client/pair-init")).toBeUndefined();
+
+    mgr.releasePairingHold();
     expect(lastOfType(sent, "client/pair-init")).toBeDefined();
+    expect(storedRounds(storage)).toBe(0);
   });
 
-  it("de-escalates once a round verifies, so the next attempt needs no gesture", () => {
-    const storage = memStorage();
-    storage.setItem(
-      "sendspin-pair-failures",
-      JSON.stringify({ dynamic_pin: 10 }),
-    );
-    const ctx = setup({
-      category: "sentinel",
-      onPairingCode: vi.fn(),
-      storage,
-    });
-    ctx.mgr.onActivate(["pairing"], dynamic());
-    ctx.mgr.openPairingWindow();
-    ctx.mgr.onPairInit({
-      nonce_A: base64urlEncode(new Uint8Array(32).fill(0xa1)),
-    });
-    const server = serverPake(shownPin(ctx));
-    ctx.mgr.onPairAuth({ pake_msg_1: base64urlEncode(server.publicShare) });
-    const auth = lastOfType(ctx.sent, "client/pair-auth")!;
-    server.derive(base64urlDecode(auth.payload!.pake_msg_2 as string));
-    ctx.mgr.onPairConfirm({ server_kc: base64urlEncode(server.tag()) });
-    ctx.mgr.onPairFinalize();
-
-    expect(ctx.mgr.isDynamicPinEscalated()).toBe(false);
-    ctx.mgr.onActivate(["pairing"], dynamic());
-    expect(
-      lastOfType(ctx.sent, "client/pair-init")!.payload!.pairing_index,
-    ).toBe(2);
+  it("does not reset the round count on a release during an attempt", () => {
+    const storage = storageWithRounds(19);
+    const ctx = runToConfirm({ storage });
+    ctx.mgr.releasePairingHold();
+    expect(storedRounds(storage)).toBe(20);
   });
 
   it("fails closed on a low-order server share", () => {
@@ -620,13 +626,50 @@ describe("PairingManager (dynamic_pairing_code)", () => {
     ).toBe(2);
   });
 
-  it("silently discards a stray pairing message after the attempt ended", () => {
+  it("fails closed on server/pair-finalize before the client finalized", () => {
+    const ctx = runToConfirm();
+    ctx.mgr.onPairFinalize();
+    expect(ctx.close).toHaveBeenCalled();
+  });
+
+  it("fails closed on a pairing message when no attempt ran", () => {
+    const ctx = setup({ category: "sentinel", onPairingCode: vi.fn() });
+    ctx.mgr.onPairAuth({ pake_msg_1: base64urlEncode(new Uint8Array(32)) });
+    expect(ctx.close).toHaveBeenCalled();
+  });
+
+  it.each([
+    [
+      "server/pair-init",
+      (mgr: PairingManager) =>
+        mgr.onPairInit({ nonce_A: base64urlEncode(new Uint8Array(32)) }),
+    ],
+    [
+      "server/pair-auth",
+      (mgr: PairingManager) =>
+        mgr.onPairAuth({ pake_msg_1: base64urlEncode(new Uint8Array(32)) }),
+    ],
+    [
+      "server/pair-confirm",
+      (mgr: PairingManager) =>
+        mgr.onPairConfirm({ server_kc: base64urlEncode(new Uint8Array(64)) }),
+    ],
+    ["server/pair-finalize", (mgr: PairingManager) => mgr.onPairFinalize()],
+  ])("silently discards a stray %s after the client aborted", (_type, send) => {
     const ctx = setup({ category: "sentinel", onPairingCode: vi.fn() });
     ctx.mgr.onActivate(["pairing"], dynamic());
     ctx.mgr.cancelPairing(); // attempt ends, connection stays open
-    // A late server/pair-auth for the ended attempt is ignored, not fatal.
-    ctx.mgr.onPairAuth({ pake_msg_1: base64urlEncode(new Uint8Array(32)) });
+    send(ctx.mgr);
     expect(ctx.close).not.toHaveBeenCalled();
+  });
+
+  it("stops discarding stray pairing messages at the next server/activate", () => {
+    const ctx = setup({ category: "sentinel", onPairingCode: vi.fn() });
+    ctx.mgr.onActivate(["pairing"], dynamic());
+    ctx.mgr.cancelPairing();
+    ctx.mgr.onActivate(["playback"]);
+    ctx.mgr.onPairAuth({ pake_msg_1: base64urlEncode(new Uint8Array(32)) });
+    expect(ctx.close).toHaveBeenCalled();
   });
 });
 
@@ -716,7 +759,7 @@ describe("PairingManager (static_pairing_code)", () => {
     expect(lastOfType(ctx.sent, "client/pair-init")).toBeDefined();
   });
 
-  it("keeps no failure counter: repeated mismatches never escalate", () => {
+  it("keeps no round count: a mismatch aborts without counting", () => {
     const storage = memStorage();
     const ctx = setup({
       category: "sentinel",
@@ -740,7 +783,7 @@ describe("PairingManager (static_pairing_code)", () => {
     expect(storage.data.get("sendspin-pair-failures")).toBeUndefined();
   });
 
-  it("the window admits exactly one attempt", () => {
+  it("closes the window on a completed pairing", () => {
     const ctx = staticSetup();
     ctx.mgr.openPairingWindow();
     ctx.mgr.onActivate(["pairing"], { method: "static_pairing_code" });
@@ -752,15 +795,62 @@ describe("PairingManager (static_pairing_code)", () => {
     expect(inits).toHaveLength(1);
   });
 
-  it("reset preserves a pre-opened pairing window", () => {
+  it("closes the window on its fifth failed attempt", () => {
     const ctx = staticSetup();
     ctx.mgr.openPairingWindow();
-    // The window is device state: the spec closes it only on a drop of the
-    // connection carrying its attempt, and no attempt is in flight here.
-    ctx.mgr.reset();
+    for (let index = 1; index <= 5; index++) {
+      ctx.mgr.onActivate(["pairing"], { method: "static_pairing_code" });
+      expect(
+        lastOfType(ctx.sent, "client/pair-init")!.payload!.pairing_index,
+      ).toBe(index);
+      const server = serverPake(STATIC_PIN, index);
+      ctx.mgr.onPairAuth({ pake_msg_1: base64urlEncode(server.publicShare) });
+      const auth = lastOfType(ctx.sent, "client/pair-auth")!;
+      server.derive(base64urlDecode(auth.payload!.pake_msg_2 as string));
+      const badTag = server.tag().slice();
+      badTag[0] ^= 1;
+      ctx.mgr.onPairConfirm({ server_kc: base64urlEncode(badTag) });
+    }
+    ctx.mgr.onActivate(["pairing"], { method: "static_pairing_code" });
+    expect(lastOfType(ctx.sent, "client/pair-pending")!.payload).toEqual({
+      pairing_index: 6,
+    });
+  });
+
+  it("closes the window when the connection carrying its attempt drops", () => {
+    const ctx = staticSetup();
+    ctx.mgr.openPairingWindow();
+    ctx.mgr.onActivate(["pairing"], { method: "static_pairing_code" });
+    ctx.mgr.onConnectionClosed();
+    ctx.mgr.onActivate(["pairing"], { method: "static_pairing_code" });
+    expect(lastOfType(ctx.sent, "client/pair-pending")).toBeDefined();
+  });
+
+  it("keeps the window bound when reopened during an attempt", () => {
+    const ctx = staticSetup();
+    ctx.mgr.openPairingWindow();
+    ctx.mgr.onActivate(["pairing"], { method: "static_pairing_code" });
+    ctx.mgr.openPairingWindow();
+    ctx.mgr.onConnectionClosed();
+    ctx.mgr.onActivate(["pairing"], { method: "static_pairing_code" });
+    expect(lastOfType(ctx.sent, "client/pair-pending")).toBeDefined();
+  });
+
+  it("keeps a window with no attempt open across a drop", () => {
+    const ctx = staticSetup();
+    ctx.mgr.openPairingWindow();
+    ctx.mgr.onConnectionClosed();
     ctx.mgr.onActivate(["pairing"], { method: "static_pairing_code" });
     expect(lastOfType(ctx.sent, "client/pair-pending")).toBeUndefined();
     expect(lastOfType(ctx.sent, "client/pair-init")).toBeDefined();
+  });
+
+  it("closes an open window on cancelPairing with no attempt running", () => {
+    const ctx = staticSetup();
+    ctx.mgr.openPairingWindow();
+    ctx.mgr.cancelPairing();
+    ctx.mgr.onActivate(["pairing"], { method: "static_pairing_code" });
+    expect(lastOfType(ctx.sent, "client/pair-pending")).toBeDefined();
   });
 });
 
@@ -779,6 +869,29 @@ describe("PairingManager timers", () => {
       "attempt_timeout",
     );
     expect(close).not.toHaveBeenCalled();
+  });
+
+  it("keeps the attempt timeout running across a retry", () => {
+    const { mgr, sent, onPairingCode } = setup({
+      category: "sentinel",
+      onPairingCode: vi.fn(),
+    });
+    mgr.onActivate(["pairing"], dynamic());
+    vi.advanceTimersByTime(60_000);
+    mgr.onPairInit({ nonce_A: base64urlEncode(new Uint8Array(32).fill(0xa1)) });
+    const pin = (onPairingCode as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    const server = serverPake(pin);
+    mgr.onPairAuth({ pake_msg_1: base64urlEncode(server.publicShare) });
+    const auth = lastOfType(sent, "client/pair-auth")!;
+    server.derive(base64urlDecode(auth.payload!.pake_msg_2 as string));
+    const badTag = server.tag().slice();
+    badTag[0] ^= 1;
+    mgr.onPairConfirm({ server_kc: base64urlEncode(badTag) });
+    expect(lastOfType(sent, "client/pair-retry")).toBeDefined();
+    vi.advanceTimersByTime(60_000);
+    expect(lastOfType(sent, "pair/abort")!.payload!.reason).toBe(
+      "attempt_timeout",
+    );
   });
 
   it("expires an unused pairing window silently", () => {
@@ -808,6 +921,22 @@ describe("PairingManager timers", () => {
     // The gesture still starts the attempt after the wait.
     ctx.mgr.openPairingWindow();
     expect(lastOfType(ctx.sent, "client/pair-init")).toBeDefined();
+  });
+
+  it("keeps the window open after a timed-out attempt", () => {
+    const ctx = setup({
+      category: "sentinel",
+      onPairingCode: null,
+      staticPairingCode: "31415926",
+    });
+    ctx.mgr.openPairingWindow();
+    ctx.mgr.onActivate(["pairing"], { method: "static_pairing_code" });
+    vi.advanceTimersByTime(120_000);
+    ctx.mgr.onActivate(["pairing"], { method: "static_pairing_code" });
+    expect(lastOfType(ctx.sent, "client/pair-pending")).toBeUndefined();
+    expect(
+      lastOfType(ctx.sent, "client/pair-init")!.payload!.pairing_index,
+    ).toBe(2);
   });
 
   it("static attempts also honor the attempt timeout", () => {
