@@ -25,6 +25,7 @@ export class TimeSyncManager {
     private sender: MessageSender,
     private stateManager: StateManager,
     private timeFilter: SendspinTimeFilter,
+    private onSynchronized: () => void,
   ) {}
 
   // Start an initial burst and schedule recurring bursts.
@@ -103,6 +104,7 @@ export class TimeSyncManager {
   private finalizeTimeSyncBurst(): void {
     this.clearTimeSyncProbeTimeout();
 
+    const wasSynchronized = this.timeFilter.is_synchronized;
     const candidate = this.selectTimeSyncBurstCandidate();
     if (candidate) {
       // Floor at 1 ms so coarse timers never yield a zero max_error.
@@ -114,6 +116,10 @@ export class TimeSyncManager {
     this.timeSyncBurstSentCount = 0;
     this.timeSyncInFlightClientTransmitted = null;
     this.timeSyncBurstSamples = [];
+
+    if (!wasSynchronized && this.timeFilter.is_synchronized) {
+      this.onSynchronized();
+    }
   }
 
   private selectTimeSyncBurstCandidate(): TimeSyncSample | null {

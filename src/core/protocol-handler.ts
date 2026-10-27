@@ -113,6 +113,7 @@ export class ProtocolHandler {
       sender,
       stateManager,
       timeFilter,
+      () => this.sendStateUpdate(),
     );
   }
 
@@ -408,7 +409,7 @@ export class ProtocolHandler {
     }
 
     const payload: ClientState["payload"] = {
-      available: true,
+      available: this.timeFilter.is_synchronized,
     };
     if (this.activeRoles?.has("player@v1")) {
       payload.player = {

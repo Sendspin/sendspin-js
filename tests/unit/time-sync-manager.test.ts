@@ -60,7 +60,7 @@ describe("TimeSyncManager", () => {
     } as unknown as StateManager;
     const timeFilter = { update } as unknown as SendspinTimeFilter;
 
-    mgr = new TimeSyncManager(sender, stateManager, timeFilter);
+    mgr = new TimeSyncManager(sender, stateManager, timeFilter, vi.fn());
   });
 
   afterEach(() => {
@@ -185,7 +185,7 @@ describe("TimeSyncManager extra", () => {
     } as unknown as StateManager;
     const timeFilter = { update } as unknown as SendspinTimeFilter;
 
-    mgr = new TimeSyncManager(sender, stateManager, timeFilter);
+    mgr = new TimeSyncManager(sender, stateManager, timeFilter, vi.fn());
   });
 
   afterEach(() => {
