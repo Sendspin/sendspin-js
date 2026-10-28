@@ -800,6 +800,21 @@ describe("ProtocolHandler extra", () => {
     });
   });
 
+  describe("sendLeave", () => {
+    it("sends client/leave with an empty payload only after server/activate", () => {
+      const handler = makeHandler();
+      handler.sendLeave();
+      expect(lastSent(send, "client/leave")).toBeUndefined();
+
+      activate(handler);
+      handler.sendLeave();
+      expect(lastSent(send, "client/leave")).toEqual({
+        type: "client/leave",
+        payload: {},
+      });
+    });
+  });
+
   describe("sendCommand", () => {
     it("suppresses commands until the controller role is active", () => {
       const handler = makeHandler();

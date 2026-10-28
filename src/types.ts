@@ -9,6 +9,7 @@ export enum MessageType {
   SERVER_STATE = "server/state",
   CLIENT_COMMAND = "client/command",
   CLIENT_GOODBYE = "client/goodbye",
+  CLIENT_LEAVE = "client/leave",
   SERVER_COMMAND = "server/command",
   STREAM_START = "stream/start",
   STREAM_CLEAR = "stream/clear",
@@ -129,6 +130,11 @@ export interface ClientGoodbye {
   payload: {
     reason: GoodbyeReason;
   };
+}
+
+export interface ClientLeave {
+  type: MessageType.CLIENT_LEAVE;
+  payload: Record<string, never>;
 }
 
 export interface ClientCommand {
@@ -400,7 +406,12 @@ export type ServerMessage =
   | GroupUpdate;
 
 export type ClientMessage =
-  ClientHello | ClientTime | ClientState | ClientCommand | ClientGoodbye;
+  | ClientHello
+  | ClientTime
+  | ClientState
+  | ClientCommand
+  | ClientGoodbye
+  | ClientLeave;
 
 export type StreamFormat = {
   codec: string;

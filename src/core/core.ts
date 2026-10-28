@@ -407,6 +407,11 @@ export class SendspinCore implements StreamHandler {
     this.stateManager.reset();
   }
 
+  /** Leave the current group. Does nothing until the server has activated the connection. */
+  leaveGroup(): void {
+    this.protocolHandler.sendLeave();
+  }
+
   // ========================================
   // Volume / Mute
   // ========================================

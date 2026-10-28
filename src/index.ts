@@ -254,6 +254,11 @@ export class SendspinPlayer {
     this.scheduler.close();
   }
 
+  /** Leave the current group. Does nothing until the server has activated the connection. */
+  leaveGroup(): void {
+    this.core.leaveGroup();
+  }
+
   // Set volume (0-100). Throws RangeError if NaN.
   setVolume(volume: number): void {
     this.core.setVolume(volume);

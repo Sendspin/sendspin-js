@@ -3,6 +3,7 @@ import type {
   ClientCommand,
   ClientGoodbye,
   ClientHello,
+  ClientLeave,
   ClientState,
   Codec,
   ControllerCommand,
@@ -447,6 +448,14 @@ export class ProtocolHandler {
         reason,
       },
     } satisfies ClientGoodbye);
+  }
+
+  sendLeave(): void {
+    if (!this.activated) return;
+    this.sender.sendControl({
+      type: "client/leave" as MessageType.CLIENT_LEAVE,
+      payload: {},
+    } satisfies ClientLeave);
   }
 
   // Send controller command to server
