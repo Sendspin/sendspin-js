@@ -394,7 +394,7 @@ export class SendspinCore implements StreamHandler {
     this.stateManager.currentStreamFormat = null;
   }
 
-  disconnect(reason: GoodbyeReason = "restart"): void {
+  disconnect(reason: GoodbyeReason = "user_request"): void {
     if (this.transport.ready) {
       this.protocolHandler.sendGoodbye(reason);
     }

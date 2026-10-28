@@ -659,7 +659,7 @@ describe("SendspinCore.disconnect ordering and idempotency", () => {
     expect(send).not.toHaveBeenCalled();
   });
 
-  it("defaults the goodbye reason to restart, but forwards an explicit reason", () => {
+  it("defaults the goodbye reason to user_request, but forwards an explicit reason", () => {
     const core = new SendspinCore({ baseUrl: "http://h" });
     const send = spySend(core);
     markTransportReady(core);
@@ -668,7 +668,7 @@ describe("SendspinCore.disconnect ordering and idempotency", () => {
     expect(send).toHaveBeenLastCalledWith(
       expect.objectContaining({
         type: "client/goodbye",
-        payload: { reason: "restart" },
+        payload: { reason: "user_request" },
       }),
     );
 

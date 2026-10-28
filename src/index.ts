@@ -228,9 +228,9 @@ export class SendspinPlayer {
   /**
    * Disconnect from Sendspin server. The player keeps its audio output for the
    * next connect(). Call destroy() instead when dropping the player.
-   * @param reason - Optional reason for disconnecting (default: 'restart')
+   * @param reason - Optional reason for disconnecting (default: 'user_request')
    */
-  disconnect(reason: GoodbyeReason = "restart"): void {
+  disconnect(reason: GoodbyeReason = "user_request"): void {
     this.cancelPendingDisconnectPlaybackReset();
     this.suppressDisconnectPlaybackReset = true;
 
@@ -247,7 +247,7 @@ export class SendspinPlayer {
 
   /**
    * Disconnect and release the audio output. Call this when dropping the player.
-   * @param reason - Optional reason for disconnecting (default: 'restart')
+   * @param reason - Optional reason for disconnecting (default: 'user_request')
    */
   destroy(reason?: GoodbyeReason): void {
     this.disconnect(reason);
