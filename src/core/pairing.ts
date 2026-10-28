@@ -459,7 +459,6 @@ export class PairingManager {
   private startAttempt(): void {
     if (this.method === "static_pairing_code") this.windowBound = true;
     this.armAttemptTimer();
-    this.deps.onEvent?.("started");
     if (this.method === "pairing_psk") {
       this.deps.sendControl({
         type: "client/pair-init",
@@ -468,8 +467,10 @@ export class PairingManager {
       // client/pair-finalize follows immediately, without waiting (spec).
       this.phase = "await-finalize";
       this.sendFinalize();
+      this.deps.onEvent?.("started");
       return;
     }
+    this.deps.onEvent?.("started");
     if (this.method === "dynamic_pairing_code") {
       this.nonceB = generateNonce();
       this.phase = "await-init";

@@ -111,6 +111,7 @@ interface SetupOpts {
   staticPairingCode?: string;
   staticPairingCodeLocations?: PairSecretLocation[];
   pairingPskLocations?: PairSecretLocation[];
+  onEvent?: (e: string) => void;
 }
 
 function setup(opts: SetupOpts = {}) {
@@ -139,6 +140,7 @@ function setup(opts: SetupOpts = {}) {
     onEvent: (e, d) => {
       events.push(e);
       details.push(d);
+      opts.onEvent?.(e);
     },
   });
   return { store, sent, events, details, close, mgr, onPairingCode };
@@ -185,6 +187,16 @@ describe("PairingManager (pairing_psk)", () => {
     const ltPsk = base64urlDecode(fin.payload.long_term_psk);
     expect(store.lookup(pskId(ltPsk))?.serverId).toBe("SERVER_ID");
     expect(store.lookup(pskId(oldPsk))).toBeNull();
+  });
+
+  it("cancels the attempt from the started callback", () => {
+    const { sent, mgr } = setup({
+      onEvent: (e) => e === "started" && mgr.cancelPairing(),
+    });
+    mgr.onActivate(["pairing"], { method: "pairing_psk" });
+    expect(lastOfType(sent, "pair/abort")!.payload!.reason).toBe(
+      "user_cancelled",
+    );
   });
 
   it("aborts an unsupported method and keeps the connection open", () => {
