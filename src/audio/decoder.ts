@@ -114,7 +114,7 @@ export class SendspinDecoder {
     audioData: ArrayBuffer,
     format: StreamFormat,
   ): { samples: Float32Array[]; sampleRate: number } | null {
-    const bitDepth = format.bit_depth ?? 16;
+    const bitDepth = format.bit_depth;
     if (bitDepth !== 16 && bitDepth !== 24 && bitDepth !== 32) {
       console.warn(`Sendspin: unsupported PCM bit_depth ${bitDepth}`);
       return null;

@@ -41,6 +41,7 @@ const serverUrlInput = document.getElementById("server-url");
 const connectBtn = document.getElementById("connect-btn");
 const disconnectBtn = document.getElementById("disconnect-btn");
 const copyUrlBtn = document.getElementById("copy-url-btn");
+const leaveGroupBtn = document.getElementById("leave-group-btn");
 const connectedServerUrl = document.getElementById("connected-server-url");
 const volumeSlider = document.getElementById("volume-slider");
 const volumeValue = document.getElementById("volume-value");
@@ -1047,6 +1048,10 @@ function init() {
   connectBtn.addEventListener("click", connect);
   disconnectBtn.addEventListener("click", disconnect);
   copyUrlBtn.addEventListener("click", copyShareUrl);
+  leaveGroupBtn.addEventListener("click", () => {
+    player.leaveGroup();
+    showToast("Left the group", "info");
+  });
   volumeSlider.addEventListener("input", updateVolume);
   muteBtn.addEventListener("click", toggleMute);
   applySyncDelayBtn.addEventListener("click", applySyncDelay);

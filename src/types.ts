@@ -9,6 +9,7 @@ export enum MessageType {
   SERVER_STATE = "server/state",
   CLIENT_COMMAND = "client/command",
   CLIENT_GOODBYE = "client/goodbye",
+  CLIENT_LEAVE = "client/leave",
   SERVER_COMMAND = "server/command",
   STREAM_START = "stream/start",
   STREAM_CLEAR = "stream/clear",
@@ -131,6 +132,11 @@ export interface ClientGoodbye {
   };
 }
 
+export interface ClientLeave {
+  type: MessageType.CLIENT_LEAVE;
+  payload: Record<string, never>;
+}
+
 export interface ClientCommand {
   type: MessageType.CLIENT_COMMAND;
   payload: {
@@ -213,19 +219,15 @@ export interface ServerState {
 export interface StreamStart {
   type: MessageType.STREAM_START;
   payload: {
-    player: {
-      codec: string;
-      sample_rate: number;
-      channels: number;
-      bit_depth?: number;
-      codec_header?: string;
-    };
+    server_transmitted: number;
+    player?: StreamFormat;
   };
 }
 
 export interface StreamClear {
   type: MessageType.STREAM_CLEAR;
   payload: {
+    server_transmitted: number;
     roles?: string[];
   };
 }
@@ -404,13 +406,18 @@ export type ServerMessage =
   | GroupUpdate;
 
 export type ClientMessage =
-  ClientHello | ClientTime | ClientState | ClientCommand | ClientGoodbye;
+  | ClientHello
+  | ClientTime
+  | ClientState
+  | ClientCommand
+  | ClientGoodbye
+  | ClientLeave;
 
 export type StreamFormat = {
   codec: string;
   sample_rate: number;
   channels: number;
-  bit_depth?: number;
+  bit_depth: number;
   codec_header?: string;
 };
 
@@ -578,6 +585,12 @@ export interface SendspinCoreConfig {
 
   /** Product name advertised in client/hello. Omitted when not set. */
   productName?: string;
+
+  /** Manufacturer advertised in client/hello. Omitted when not set. */
+  manufacturer?: string;
+
+  /** App version advertised in client/hello, not the Sendspin version. Omitted when not set. */
+  softwareVersion?: string;
 
   /**
    * Codecs to use for audio streaming, in priority order.

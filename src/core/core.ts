@@ -169,6 +169,8 @@ export class SendspinCore implements StreamHandler {
       {
         clientName,
         productName: config.productName,
+        manufacturer: config.manufacturer,
+        softwareVersion: config.softwareVersion,
         codecs: config.codecs,
         bufferCapacity: config.bufferCapacity,
         requiredLeadTimeMs: config.requiredLeadTimeMs,
@@ -396,7 +398,7 @@ export class SendspinCore implements StreamHandler {
     this.stateManager.currentStreamFormat = null;
   }
 
-  disconnect(reason: GoodbyeReason = "restart"): void {
+  disconnect(reason: GoodbyeReason = "user_request"): void {
     if (this.transport.ready) {
       this.protocolHandler.sendGoodbye(reason);
     }
@@ -407,6 +409,11 @@ export class SendspinCore implements StreamHandler {
     this.decoder.close();
     this.timeFilter.reset();
     this.stateManager.reset();
+  }
+
+  /** Leave the current group. Does nothing until the server has activated the connection. */
+  leaveGroup(): void {
+    this.protocolHandler.sendLeave();
   }
 
   // ========================================

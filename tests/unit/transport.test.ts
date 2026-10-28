@@ -158,6 +158,23 @@ describe("SendspinTransport", () => {
     expect(h.ws.disconnected).toBe(true);
   });
 
+  it("logs the server/error reason and closes", () => {
+    const h = harness();
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    h.transport.start();
+    h.transport.handleRaw({
+      data: JSON.stringify({
+        type: "server/error",
+        payload: { reason: "unsupported_suite" },
+      }),
+    } as MessageEvent);
+    expect(error).toHaveBeenCalledWith(
+      expect.stringContaining("unsupported_suite"),
+    );
+    expect(h.ws.disconnected).toBe(true);
+    error.mockRestore();
+  });
+
   it("closes when the next handshake message times out", () => {
     vi.useFakeTimers();
     try {

@@ -387,6 +387,24 @@ describe("SendspinCore E2E (aiosendspin)", () => {
     });
   });
 
+  // ===== Leave =====
+
+  describe("leave group", () => {
+    it("stops playback when the client leaves its group", async () => {
+      await connectCore();
+      const events: string[] = [];
+      core!.onStreamStart = () => events.push("stream-start");
+      core!.onStreamEnd = () => events.push("stream-end");
+
+      await server.streamStart();
+      await waitFor(() => events.includes("stream-start"), 3000);
+
+      core!.leaveGroup();
+      await waitFor(() => events.includes("stream-end"), 3000);
+      expect(core!.isPlaying).toBe(false);
+    });
+  });
+
   // ===== Disconnect =====
 
   describe("disconnect", () => {

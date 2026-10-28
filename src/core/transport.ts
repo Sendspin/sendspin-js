@@ -203,6 +203,12 @@ export class SendspinTransport {
       type: string;
       payload: Record<string, unknown>;
     };
+    if (this.state === "await_server_init" && msg.type === "server/error") {
+      console.error(
+        `Sendspin: Server refused the connection (reason: ${String(msg.payload?.reason)})`,
+      );
+      return this.fail();
+    }
     if (this.state === "await_server_init" && msg.type === "server/init") {
       if (msg.payload.version !== 1) return this.fail();
       this.serverId = String(msg.payload.server_id);

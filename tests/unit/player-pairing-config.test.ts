@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { SendspinPlayer } from "../../src/index";
 import type { SendspinStorage, SupportedPairMethods } from "../../src/types";
 
@@ -43,5 +43,35 @@ describe("SendspinPlayer pairing config", () => {
       "leaflet",
     ]);
     expect(methods.pairing_psk.locations).toEqual(["leaflet"]);
+  });
+});
+
+describe("SendspinPlayer device info config", () => {
+  it("reaches the device_info of client/hello", () => {
+    const player = new SendspinPlayer({
+      webSocket: {} as never,
+      storage: memStorage(),
+      manufacturer: "My Company",
+      softwareVersion: "1.2.0",
+    });
+    const core = (
+      player as unknown as {
+        core: {
+          transport: { sendControl(msg: object): void };
+          protocolHandler: { sendClientHello(): void };
+        };
+      }
+    ).core;
+    const send = vi
+      .spyOn(core.transport, "sendControl")
+      .mockImplementation(() => {});
+
+    core.protocolHandler.sendClientHello();
+
+    expect(send.mock.calls[0][0]).toMatchObject({
+      payload: {
+        device_info: { manufacturer: "My Company", software_version: "1.2.0" },
+      },
+    });
   });
 });

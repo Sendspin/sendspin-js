@@ -62,6 +62,8 @@ The `SendspinPlayerConfig` interface in `src/types.ts` defines all available opt
 - `baseUrl`: Server URL
 - `clientName`: Human-readable player name
 - `productName`: Product name advertised in client/hello
+- `manufacturer`: Manufacturer advertised in client/hello
+- `softwareVersion`: App version advertised in client/hello
 - `audioOutputMode`: "direct" or "media-element" (for mobile)
 - `audioElement`: Required for media-element mode
 - `codecs`: Preferred codec order (opus, flac, pcm)

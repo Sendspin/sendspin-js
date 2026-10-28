@@ -3,6 +3,7 @@ import type {
   ClientCommand,
   ClientGoodbye,
   ClientHello,
+  ClientLeave,
   ClientState,
   Codec,
   ControllerCommand,
@@ -53,6 +54,8 @@ export interface HelloContext {
 export interface ProtocolHandlerConfig {
   clientName?: string;
   productName?: string;
+  manufacturer?: string;
+  softwareVersion?: string;
   codecs?: Codec[];
   bufferCapacity?: number;
   requiredLeadTimeMs?: number;
@@ -66,6 +69,8 @@ export interface ProtocolHandlerConfig {
 export class ProtocolHandler {
   private clientName: string;
   private productName?: string;
+  private manufacturer?: string;
+  private softwareVersion?: string;
   private codecs: Codec[];
   private bufferCapacity: number | undefined;
   private requiredLeadTimeMs: number;
@@ -89,6 +94,8 @@ export class ProtocolHandler {
   ) {
     this.clientName = config.clientName ?? "Sendspin Player";
     this.productName = config.productName;
+    this.manufacturer = config.manufacturer;
+    this.softwareVersion = config.softwareVersion;
     this.codecs = config.codecs ?? ["opus", "flac", "pcm"];
     // Left undefined so the capacity is derived from the formats actually
     // advertised in client/hello (see sendClientHello).
@@ -254,26 +261,25 @@ export class ProtocolHandler {
   }
 
   private handleStreamStart(message: StreamStart): void {
+    const format = message.payload.player;
+    if (!format) return;
     const isFormatUpdate = this.stateManager.currentStreamFormat !== null;
 
-    this.stateManager.currentStreamFormat = message.payload.player;
+    this.stateManager.currentStreamFormat = format;
     console.log(
       isFormatUpdate
         ? "Sendspin: Stream format updated"
         : "Sendspin: Stream started",
-      this.stateManager.currentStreamFormat,
+      format,
     );
     console.log(
-      `Sendspin: Codec=${this.stateManager.currentStreamFormat.codec.toUpperCase()}, ` +
-        `SampleRate=${this.stateManager.currentStreamFormat.sample_rate}Hz, ` +
-        `Channels=${this.stateManager.currentStreamFormat.channels}, ` +
-        `BitDepth=${this.stateManager.currentStreamFormat.bit_depth}bit`,
+      `Sendspin: Codec=${format.codec.toUpperCase()}, ` +
+        `SampleRate=${format.sample_rate}Hz, ` +
+        `Channels=${format.channels}, ` +
+        `BitDepth=${format.bit_depth}bit`,
     );
 
-    this.streamHandler.handleStreamStart(
-      this.stateManager.currentStreamFormat,
-      isFormatUpdate,
-    );
+    this.streamHandler.handleStreamStart(format, isFormatUpdate);
 
     this.stateManager.isPlaying = true;
 
@@ -372,11 +378,8 @@ export class ProtocolHandler {
         unpaired_access: { enabled: this.helloContext.unpairedAccess },
         device_info: {
           product_name: this.productName,
-          manufacturer:
-            (typeof navigator !== "undefined" && navigator.vendor) || "Unknown",
-          software_version:
-            (typeof navigator !== "undefined" && navigator.userAgent) ||
-            "Unknown",
+          manufacturer: this.manufacturer,
+          software_version: this.softwareVersion,
         },
         "player@v1_support": {
           supported_formats: supportedFormats,
@@ -445,6 +448,14 @@ export class ProtocolHandler {
         reason,
       },
     } satisfies ClientGoodbye);
+  }
+
+  sendLeave(): void {
+    if (!this.activated) return;
+    this.sender.sendControl({
+      type: "client/leave" as MessageType.CLIENT_LEAVE,
+      payload: {},
+    } satisfies ClientLeave);
   }
 
   // Send controller command to server
