@@ -38,6 +38,13 @@ function makeStreamHandler(): StreamHandler &
   } as StreamHandler & Record<string, ReturnType<typeof vi.fn>>;
 }
 
+const PCM_STREAM = {
+  codec: "pcm",
+  sample_rate: 48000,
+  channels: 2,
+  bit_depth: 16,
+};
+
 // Dispatch a parsed server message through the real entry point.
 const dispatch = (handler: ProtocolHandler, msg: unknown): void =>
   handler.handleServerMessage(msg as never, 0);
@@ -389,6 +396,42 @@ describe("ProtocolHandler extra", () => {
       expect(streamHandler.handleStreamEnd).toHaveBeenCalledTimes(1);
       expect(stateManager.currentStreamFormat).toBeNull();
       expect(stateManager.isPlaying).toBe(false);
+    });
+
+    it("starts a new stream on a new connection instead of updating the old one", () => {
+      const handler = makeHandler();
+      const streamStart = {
+        type: "stream/start",
+        payload: { player: PCM_STREAM },
+      };
+      activate(handler);
+      dispatch(handler, streamStart);
+
+      handler.resetActivation();
+      activate(handler);
+
+      expect(streamHandler.handleStreamEnd).toHaveBeenCalledTimes(1);
+      expect(stateManager.isPlaying).toBe(false);
+      dispatch(handler, streamStart);
+      expect(streamHandler.handleStreamStart).toHaveBeenLastCalledWith(
+        PCM_STREAM,
+        false,
+      );
+    });
+
+    it("keeps the player stream across a re-handshake", () => {
+      const handler = makeHandler();
+      activate(handler);
+      dispatch(handler, {
+        type: "stream/start",
+        payload: { player: PCM_STREAM },
+      });
+
+      handler.resetActivation(true);
+      activate(handler);
+
+      expect(streamHandler.handleStreamEnd).not.toHaveBeenCalled();
+      expect(stateManager.isPlaying).toBe(true);
     });
 
     it("discards the state of removed roles, including a scheduled metadata update", () => {
