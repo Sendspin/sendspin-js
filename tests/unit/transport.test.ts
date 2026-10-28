@@ -34,7 +34,6 @@ describe("SendspinTransport", () => {
     const { serverSession, serverId } = completeHandshake(h);
     expect(h.cb.onHandshakeComplete).toHaveBeenCalledWith(
       expect.objectContaining({
-        trustLevel: "none",
         category: "sentinel",
         serverId,
       }),

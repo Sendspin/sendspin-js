@@ -151,7 +151,6 @@ export class SendspinCore implements StreamHandler {
     });
 
     const helloContext = {
-      trustLevel: () => this.handshakeInfo?.trustLevel ?? "none",
       pairMethods: () => this.pairing.supportedPairMethods(),
       unpairedAccess: config.unpairedAccess ?? true,
     };

@@ -57,8 +57,8 @@ export class SendspinDecoder {
       const timestampView = new DataView(data, 1, 8);
       const serverTimeUs = Number(timestampView.getBigInt64(0, false));
 
-      // Rest is audio data
-      const audioData = data.slice(9);
+      // Bytes 9-12 carry send_ahead, which has no bearing on playback.
+      const audioData = data.slice(13);
 
       // For Opus: use native decoder (non-blocking async path)
       if (format.codec === "opus" && this.useNativeOpus) {

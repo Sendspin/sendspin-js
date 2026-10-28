@@ -18,11 +18,11 @@ function buildBinaryMessage(
   audioPayload: ArrayBuffer,
   type = 4,
 ): ArrayBuffer {
-  const combined = new Uint8Array(9 + audioPayload.byteLength);
+  const combined = new Uint8Array(13 + audioPayload.byteLength);
   const view = new DataView(combined.buffer);
   view.setUint8(0, type);
   view.setBigInt64(1, BigInt(serverTimeUs), false);
-  combined.set(new Uint8Array(audioPayload), 9);
+  combined.set(new Uint8Array(audioPayload), 13);
   return combined.buffer;
 }
 

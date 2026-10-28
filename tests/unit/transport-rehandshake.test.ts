@@ -175,7 +175,7 @@ describe("transport re-handshake", () => {
 
   it("retains a queued command when playback restores the controller role", () => {
     const { h, newServerSession } = setupRehandshake();
-    expect(h.transport.handshakeInfo?.trustLevel).toBe("user");
+    expect(h.transport.handshakeInfo?.category).toBe("long_term");
 
     const before = fakeWsSend(h).binary.length;
     h.transport.sendControl({
