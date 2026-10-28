@@ -165,6 +165,8 @@ export class SendspinCore implements StreamHandler {
       {
         clientName,
         productName: config.productName,
+        manufacturer: config.manufacturer,
+        softwareVersion: config.softwareVersion,
         codecs: config.codecs,
         bufferCapacity: config.bufferCapacity,
         requiredLeadTimeMs: config.requiredLeadTimeMs,

@@ -78,6 +78,8 @@ export class SendspinPlayer {
       baseUrl: config.baseUrl,
       clientName: config.clientName,
       productName: config.productName,
+      manufacturer: config.manufacturer,
+      softwareVersion: config.softwareVersion,
       webSocket: config.webSocket,
       codecs: config.codecs,
       bufferCapacity: config.bufferCapacity,

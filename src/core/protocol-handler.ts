@@ -53,6 +53,8 @@ export interface HelloContext {
 export interface ProtocolHandlerConfig {
   clientName?: string;
   productName?: string;
+  manufacturer?: string;
+  softwareVersion?: string;
   codecs?: Codec[];
   bufferCapacity?: number;
   requiredLeadTimeMs?: number;
@@ -66,6 +68,8 @@ export interface ProtocolHandlerConfig {
 export class ProtocolHandler {
   private clientName: string;
   private productName?: string;
+  private manufacturer?: string;
+  private softwareVersion?: string;
   private codecs: Codec[];
   private bufferCapacity: number | undefined;
   private requiredLeadTimeMs: number;
@@ -89,6 +93,8 @@ export class ProtocolHandler {
   ) {
     this.clientName = config.clientName ?? "Sendspin Player";
     this.productName = config.productName;
+    this.manufacturer = config.manufacturer;
+    this.softwareVersion = config.softwareVersion;
     this.codecs = config.codecs ?? ["opus", "flac", "pcm"];
     // Left undefined so the capacity is derived from the formats actually
     // advertised in client/hello (see sendClientHello).
@@ -371,11 +377,8 @@ export class ProtocolHandler {
         unpaired_access: { enabled: this.helloContext.unpairedAccess },
         device_info: {
           product_name: this.productName,
-          manufacturer:
-            (typeof navigator !== "undefined" && navigator.vendor) || "Unknown",
-          software_version:
-            (typeof navigator !== "undefined" && navigator.userAgent) ||
-            "Unknown",
+          manufacturer: this.manufacturer,
+          software_version: this.softwareVersion,
         },
         "player@v1_support": {
           supported_formats: supportedFormats,

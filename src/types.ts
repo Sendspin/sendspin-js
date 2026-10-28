@@ -575,6 +575,12 @@ export interface SendspinCoreConfig {
   /** Product name advertised in client/hello. Omitted when not set. */
   productName?: string;
 
+  /** Manufacturer advertised in client/hello. Omitted when not set. */
+  manufacturer?: string;
+
+  /** App version advertised in client/hello, not the Sendspin version. Omitted when not set. */
+  softwareVersion?: string;
+
   /**
    * Codecs to use for audio streaming, in priority order.
    * Unsupported codecs for the current browser are automatically filtered out:

@@ -323,20 +323,28 @@ describe("ProtocolHandler extra", () => {
       expect(payload.unpaired_access).toEqual({ enabled: true });
     });
 
-    it("advertises the configured product name, omitting it when unset", () => {
+    it("advertises the configured device info, omitting fields that are unset", () => {
       const dflt = makeHandler();
       dispatch(dflt, { type: "server/hello", payload: {} });
       let info = (lastSent(send, "client/hello")!.payload as never)[
         "device_info"
-      ] as { product_name?: string };
-      expect(info.product_name).toBeUndefined();
+      ] as Record<string, unknown>;
+      expect(info).toEqual({});
 
-      const named = makeHandler({ productName: "My App" });
+      const named = makeHandler({
+        productName: "My App",
+        manufacturer: "My Company",
+        softwareVersion: "1.2.0",
+      });
       dispatch(named, { type: "server/hello", payload: {} });
       info = (lastSent(send, "client/hello")!.payload as never)[
         "device_info"
-      ] as { product_name?: string };
-      expect(info.product_name).toBe("My App");
+      ] as Record<string, unknown>;
+      expect(info).toEqual({
+        product_name: "My App",
+        manufacturer: "My Company",
+        software_version: "1.2.0",
+      });
     });
 
     it("does not send the initial client/state (deferred to server/activate)", () => {

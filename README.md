@@ -17,6 +17,8 @@ const player = new SendspinPlayer({
   baseUrl: 'http://your-server:8095',
   clientName: 'My Web Player',
   productName: 'My App',
+  manufacturer: 'My Company',
+  softwareVersion: '1.2.0',
   // Optional: "sync" (default), "quality" (no pitch shifts; not recommended for bad networks),
   // or "quality-local" (best for unsynced playback, makes the player non-compliant with the Sendspin spec)
   correctionMode: 'sync',
