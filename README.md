@@ -17,6 +17,8 @@ const player = new SendspinPlayer({
   baseUrl: 'http://your-server:8095',
   clientName: 'My Web Player',
   productName: 'My App',
+  manufacturer: 'My Company',
+  softwareVersion: '1.2.0',
   // Optional: "sync" (default), "quality" (no pitch shifts; not recommended for bad networks),
   // or "quality-local" (best for unsynced playback, makes the player non-compliant with the Sendspin spec)
   correctionMode: 'sync',
@@ -74,7 +76,10 @@ player.sendCommand('switch');  // Switch group
 player.sendCommand('seek', { position_ms: 90_000 });  // Clamped to 0 through seek_max_ms
 player.sendCommand('seek_relative', { offset_ms: -10_000 });
 
-// Disconnect with reason (optional)
+// Leave the current group, for example while the device plays other audio
+player.leaveGroup();
+
+// Disconnect with reason (optional, defaults to 'user_request')
 player.disconnect('user_request');
 
 // Release the audio output when you no longer need the player

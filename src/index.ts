@@ -78,6 +78,8 @@ export class SendspinPlayer {
       baseUrl: config.baseUrl,
       clientName: config.clientName,
       productName: config.productName,
+      manufacturer: config.manufacturer,
+      softwareVersion: config.softwareVersion,
       webSocket: config.webSocket,
       codecs: config.codecs,
       bufferCapacity: config.bufferCapacity,
@@ -226,9 +228,9 @@ export class SendspinPlayer {
   /**
    * Disconnect from Sendspin server. The player keeps its audio output for the
    * next connect(). Call destroy() instead when dropping the player.
-   * @param reason - Optional reason for disconnecting (default: 'restart')
+   * @param reason - Optional reason for disconnecting (default: 'user_request')
    */
-  disconnect(reason: GoodbyeReason = "restart"): void {
+  disconnect(reason: GoodbyeReason = "user_request"): void {
     this.cancelPendingDisconnectPlaybackReset();
     this.suppressDisconnectPlaybackReset = true;
 
@@ -245,11 +247,16 @@ export class SendspinPlayer {
 
   /**
    * Disconnect and release the audio output. Call this when dropping the player.
-   * @param reason - Optional reason for disconnecting (default: 'restart')
+   * @param reason - Optional reason for disconnecting (default: 'user_request')
    */
   destroy(reason?: GoodbyeReason): void {
     this.disconnect(reason);
     this.scheduler.close();
+  }
+
+  /** Leave the current group. Does nothing until the server has activated the connection. */
+  leaveGroup(): void {
+    this.core.leaveGroup();
   }
 
   // Set volume (0-100). Throws RangeError if NaN.
