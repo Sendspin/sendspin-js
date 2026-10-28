@@ -666,6 +666,21 @@ describe("AudioScheduler quality mode thresholds", () => {
     expect(h.scheduler.syncInfo.playbackRate).toBe(1.0);
     expect(h.scheduler.syncInfo.correctionMethod).not.toBe("rate");
   });
+
+  it("reschedules buffered audio at a changed output delay in quality mode", () => {
+    const h = setup({ correctionMode: "quality" });
+    h.scheduler.handleDecodedChunk(makeChunk(nowUs() + 1_000_000, 0));
+    h.scheduler.processAudioQueue();
+    const first = h.ctx.startedSources[0];
+
+    h.scheduler.setSyncDelay(100);
+
+    expect(first.stopped).not.toBeNull();
+    expect(h.ctx.startedSources.at(-1)!.started!).toBeCloseTo(
+      first.started! - 0.1,
+      6,
+    );
+  });
 });
 
 describe("AudioScheduler horizon / buffering", () => {

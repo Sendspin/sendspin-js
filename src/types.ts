@@ -449,8 +449,6 @@ export interface CorrectionThresholds {
   deadbandBelowMs: number;
   /** Whether the recorrection monitor runs in this mode */
   enableRecorrectionMonitor: boolean;
-  /** Whether runtime sync delay changes trigger immediate cutover */
-  immediateDelayCutover: boolean;
 }
 
 export interface SupportedFormat {

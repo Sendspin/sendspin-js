@@ -92,7 +92,6 @@ const DEFAULT_CORRECTION_THRESHOLDS: Record<
     samplesBelowMs: 8,
     deadbandBelowMs: 1,
     enableRecorrectionMonitor: true,
-    immediateDelayCutover: true,
   },
   quality: {
     resyncAboveMs: 35,
@@ -101,7 +100,6 @@ const DEFAULT_CORRECTION_THRESHOLDS: Record<
     samplesBelowMs: 35,
     deadbandBelowMs: 1,
     enableRecorrectionMonitor: false,
-    immediateDelayCutover: false,
   },
   "quality-local": {
     resyncAboveMs: 600,
@@ -110,7 +108,6 @@ const DEFAULT_CORRECTION_THRESHOLDS: Record<
     samplesBelowMs: 0,
     deadbandBelowMs: 5,
     enableRecorrectionMonitor: false,
-    immediateDelayCutover: false,
   },
 };
 
@@ -236,11 +233,6 @@ export class AudioScheduler {
   private get usesRecorrectionMonitor(): boolean {
     return this.correctionThresholds[this._correctionMode]
       .enableRecorrectionMonitor;
-  }
-
-  private get usesImmediateDelayCutover(): boolean {
-    return this.correctionThresholds[this._correctionMode]
-      .immediateDelayCutover;
   }
 
   /**
@@ -393,7 +385,7 @@ export class AudioScheduler {
     const sanitized = clampSyncDelayMs(delayMs);
     const delta = sanitized - this.syncDelayMs;
     this.syncDelayMs = sanitized;
-    if (delta === 0 || !this.usesImmediateDelayCutover) return;
+    if (delta === 0) return;
     if (!this.audioContext || this.audioContext.state !== "running") return;
     if (!this.stateManager.isPlaying) return;
     if (
