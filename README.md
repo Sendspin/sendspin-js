@@ -54,7 +54,8 @@ connectButton.addEventListener('click', async () => {
   await player.connect();
 });
 
-// Local volume control (affects this player only)
+// Local volume control (affects this player only). The SDK saves volume and
+// mute through `storage` (localStorage by default) and restores them on load.
 player.setVolume(80);
 player.setMuted(false);
 
@@ -133,6 +134,28 @@ const player = new SendspinPlayer({
 
 Reconnection only applies to connections opened via `baseUrl`; adopted
 sockets (`webSocket`) never auto-reconnect.
+
+### Hardware volume
+
+Set `useHardwareVolume` when the device applies volume itself (a TV, a Cast
+device). The SDK then passes server volume and mute commands to
+`onVolumeCommand` and reports the device volume from `getExternalVolume`. When
+the device volume changes through its own controls, call `setVolume` and
+`setMuted` so the server learns of it right away.
+
+```typescript
+const player = new SendspinPlayer({
+  baseUrl: 'http://your-server:8095',
+  useHardwareVolume: true,
+  onVolumeCommand: (volume, muted) => device.setVolume(volume, muted),
+  getExternalVolume: () => ({ volume: device.volume, muted: device.muted }),
+});
+
+device.onVolumeChange = () => {
+  player.setVolume(device.volume);
+  player.setMuted(device.muted);
+};
+```
 
 ### Tuning correction thresholds
 

@@ -4,6 +4,7 @@ import type {
   ServerStatePayload,
   GroupUpdatePayload,
 } from "../types";
+import type { VolumeStore } from "./volume-store";
 
 export function clampVolume(volume: number): number {
   return Math.max(0, Math.min(100, Math.round(volume)));
@@ -83,8 +84,12 @@ export class StateManager {
       serverState: ServerStatePayload;
       groupState: GroupUpdatePayload;
     }) => void,
+    private volumeStore?: VolumeStore,
   ) {
     this.onStateChangeCallback = onStateChange;
+    const stored = volumeStore?.load();
+    if (stored?.volume != null) this._volume = clampVolume(stored.volume);
+    if (stored?.muted != null) this._muted = stored.muted;
   }
 
   // Volume & Mute
@@ -94,6 +99,7 @@ export class StateManager {
 
   set volume(value: number) {
     this._volume = clampVolume(value);
+    this.volumeStore?.saveVolume(this._volume);
     this.notifyStateChange();
   }
 
@@ -103,6 +109,7 @@ export class StateManager {
 
   set muted(value: boolean) {
     this._muted = value;
+    this.volumeStore?.saveMuted(value);
     this.notifyStateChange();
   }
 
@@ -194,10 +201,8 @@ export class StateManager {
     this.clearStateUpdateInterval();
   }
 
-  // Reset all state (called on disconnect)
+  // Reset all state except volume and mute (called on disconnect)
   reset(): void {
-    this._volume = 100;
-    this._muted = false;
     this._playerState = "synchronized";
     this._isPlaying = false;
     this._currentStreamFormat = null;

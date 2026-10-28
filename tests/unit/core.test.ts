@@ -200,14 +200,15 @@ describe("SendspinCore (offline)", () => {
       expect(core.currentFormat).toBeNull();
     });
 
-    it("disconnect resets state even when never connected", () => {
+    it("disconnect resets state but keeps volume and mute", () => {
       core._stateManager.volume = 50;
       core._stateManager.muted = true;
+      core._stateManager.isPlaying = true;
 
       core.disconnect();
 
-      expect(core.volume).toBe(100);
-      expect(core.muted).toBe(false);
+      expect(core.volume).toBe(50);
+      expect(core.muted).toBe(true);
       expect(core.isPlaying).toBe(false);
       expect(core.isConnected).toBe(false);
     });
@@ -515,6 +516,32 @@ describe("SendspinCore command + state forwarding", () => {
     expect(send).not.toHaveBeenCalled();
   });
 
+  it("reports a hardware volume change from setVolume without echoing it to the hardware", () => {
+    const onVolumeCommand = vi.fn();
+    const device = { volume: 60, muted: false };
+    const hardwareCore = new SendspinCore({
+      baseUrl: "http://h",
+      storage: null,
+      useHardwareVolume: true,
+      onVolumeCommand,
+      getExternalVolume: () => ({ ...device }),
+    });
+    const send = spySend(hardwareCore);
+    activatePlayer(hardwareCore, send);
+
+    device.volume = 25;
+    device.muted = true;
+    hardwareCore.setVolume(25);
+
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send.mock.calls[0][0].payload.player).toMatchObject({
+      volume: 25,
+      muted: true,
+    });
+    expect(onVolumeCommand).not.toHaveBeenCalled();
+    hardwareCore.disconnect();
+  });
+
   it("setVolume invokes the onVolumeUpdate callback", () => {
     const cb = vi.fn();
     core.onVolumeUpdate = cb;
@@ -637,6 +664,31 @@ describe("SendspinCore output delay persistence", () => {
 
     expect(() => core.handleSyncDelayChange(123)).not.toThrow();
     expect(core.getSyncDelayMs()).toBe(123);
+  });
+});
+
+describe("SendspinCore volume persistence", () => {
+  it("restores server-commanded volume and mute on a fresh core with the same storage", () => {
+    const storage = makeStorage();
+    const core = new SendspinCore({ baseUrl: "http://h", storage });
+    const send = spySend(core);
+    activatePlayer(core, send);
+    for (const player of [
+      { command: "volume", volume: 35 },
+      { command: "mute", mute: true },
+    ]) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (core as any).routeControl({
+        type: "server/command",
+        payload: { player },
+      });
+    }
+    core._stateManager.clearAllIntervals();
+
+    const restored = new SendspinCore({ baseUrl: "http://h", storage });
+
+    expect(restored.volume).toBe(35);
+    expect(restored.muted).toBe(true);
   });
 });
 

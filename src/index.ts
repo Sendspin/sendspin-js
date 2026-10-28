@@ -259,12 +259,12 @@ export class SendspinPlayer {
     this.core.leaveGroup();
   }
 
-  // Set volume (0-100). Throws RangeError if NaN.
+  // Set volume (0-100). Throws RangeError if NaN. With useHardwareVolume, report a device volume change.
   setVolume(volume: number): void {
     this.core.setVolume(volume);
   }
 
-  // Set muted state
+  // Set muted state. With useHardwareVolume, report a device mute change.
   setMuted(muted: boolean): void {
     this.core.setMuted(muted);
   }
