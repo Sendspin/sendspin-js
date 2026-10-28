@@ -22,6 +22,8 @@ import type { SendspinStorage } from "../types";
  */
 export const UNREPORTED_OUTPUT_LATENCY_SEC = 0.04;
 
+const MAX_PLAUSIBLE_LATENCY_SEC = 5;
+
 const OUTPUT_LATENCY_ALPHA = 0.01;
 const OUTPUT_LATENCY_STORAGE_KEY = "sendspin-output-latency-us";
 const OUTPUT_LATENCY_PERSIST_INTERVAL_MS = 10_000;
@@ -40,7 +42,8 @@ function resolveLatencySec(
   const usable =
     typeof reportedSec === "number" &&
     Number.isFinite(reportedSec) &&
-    reportedSec >= 0;
+    reportedSec >= 0 &&
+    reportedSec <= MAX_PLAUSIBLE_LATENCY_SEC;
   return usable ? reportedSec : fallbackSec;
 }
 
