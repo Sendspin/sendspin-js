@@ -113,6 +113,26 @@ describe("ProtocolHandler", () => {
     });
   });
 
+  describe("stream/start without a player object", () => {
+    it("starts no player stream, so the next player stream/start is not a format update", () => {
+      dispatch(handler, {
+        type: "stream/start",
+        payload: { server_transmitted: 0 },
+      });
+      expect(streamHandler.handleStreamStart).not.toHaveBeenCalled();
+      expect(stateManager.isPlaying).toBe(false);
+
+      dispatch(handler, {
+        type: "stream/start",
+        payload: { server_transmitted: 0, player: PCM_STREAM },
+      });
+      expect(streamHandler.handleStreamStart).toHaveBeenCalledWith(
+        PCM_STREAM,
+        false,
+      );
+    });
+  });
+
   describe("stream/clear roles filter", () => {
     it("forwards a clear with no roles to the stream handler", () => {
       dispatch(handler, { type: "stream/clear", payload: {} });

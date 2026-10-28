@@ -213,19 +213,15 @@ export interface ServerState {
 export interface StreamStart {
   type: MessageType.STREAM_START;
   payload: {
-    player: {
-      codec: string;
-      sample_rate: number;
-      channels: number;
-      bit_depth?: number;
-      codec_header?: string;
-    };
+    server_transmitted: number;
+    player?: StreamFormat;
   };
 }
 
 export interface StreamClear {
   type: MessageType.STREAM_CLEAR;
   payload: {
+    server_transmitted: number;
     roles?: string[];
   };
 }
@@ -410,7 +406,7 @@ export type StreamFormat = {
   codec: string;
   sample_rate: number;
   channels: number;
-  bit_depth?: number;
+  bit_depth: number;
   codec_header?: string;
 };
 

@@ -254,26 +254,25 @@ export class ProtocolHandler {
   }
 
   private handleStreamStart(message: StreamStart): void {
+    const format = message.payload.player;
+    if (!format) return;
     const isFormatUpdate = this.stateManager.currentStreamFormat !== null;
 
-    this.stateManager.currentStreamFormat = message.payload.player;
+    this.stateManager.currentStreamFormat = format;
     console.log(
       isFormatUpdate
         ? "Sendspin: Stream format updated"
         : "Sendspin: Stream started",
-      this.stateManager.currentStreamFormat,
+      format,
     );
     console.log(
-      `Sendspin: Codec=${this.stateManager.currentStreamFormat.codec.toUpperCase()}, ` +
-        `SampleRate=${this.stateManager.currentStreamFormat.sample_rate}Hz, ` +
-        `Channels=${this.stateManager.currentStreamFormat.channels}, ` +
-        `BitDepth=${this.stateManager.currentStreamFormat.bit_depth}bit`,
+      `Sendspin: Codec=${format.codec.toUpperCase()}, ` +
+        `SampleRate=${format.sample_rate}Hz, ` +
+        `Channels=${format.channels}, ` +
+        `BitDepth=${format.bit_depth}bit`,
     );
 
-    this.streamHandler.handleStreamStart(
-      this.stateManager.currentStreamFormat,
-      isFormatUpdate,
-    );
+    this.streamHandler.handleStreamStart(format, isFormatUpdate);
 
     this.stateManager.isPlaying = true;
 
