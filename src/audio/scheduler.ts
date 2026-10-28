@@ -150,7 +150,7 @@ export class AudioScheduler {
   private useOutputLatencyCompensation: boolean;
   // Accounts for output delay omitted by iOS WebKit latency APIs.
   private unreportedOutputLatencySec: number;
-  // Apple WebKit reports getOutputTimestamp().contextTime at the render position, not the playout position.
+  // On Apple WebKit and Firefox, getOutputTimestamp() aged to now lands on the render position, not the playout position.
   private contextTimeAtRenderPosition = reportsContextTimeAtRenderPosition();
   private scheduleTimeout: ReturnType<typeof setTimeout> | null = null;
   private refillTimeout: ReturnType<typeof setTimeout> | null = null;
