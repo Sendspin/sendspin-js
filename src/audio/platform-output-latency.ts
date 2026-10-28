@@ -18,18 +18,19 @@ function isIOS(navigatorInfo: NavigatorInfo): boolean {
 }
 
 // All iOS browsers use WebKit, while on macOS only Safari does.
-export function isAppleWebKitAudio(
+export function reportsContextTimeAtRenderPosition(
   navigatorInfo: NavigatorInfo | undefined = getNavigatorInfo(),
 ): boolean {
   if (!navigatorInfo) return false;
   if (isIOS(navigatorInfo)) return true;
 
   const { userAgent } = navigatorInfo;
+  if (/Firefox/i.test(userAgent)) return true;
   return (
     /Macintosh/i.test(userAgent) &&
     /AppleWebKit/i.test(userAgent) &&
     /Safari/i.test(userAgent) &&
-    !/Chrome|Chromium|Edg|OPR|Firefox/i.test(userAgent)
+    !/Chrome|Chromium|Edg|OPR/i.test(userAgent)
   );
 }
 

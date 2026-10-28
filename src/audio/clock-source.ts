@@ -14,8 +14,8 @@
  * baseLatency + outputLatency, so callers pass that latency in and it is added
  * back. Without it the two sources would disagree by one output latency and
  * playback would audibly step whenever the source is promoted or demoted.
- * Apple WebKit reports contextTime at the render position instead, so callers
- * pass 0 there.
+ * On Apple WebKit and Firefox the aged timestamp lands on the render position
+ * instead, so callers pass 0 there.
  */
 
 type AudioClockSource = "estimated" | "timestamp" | "raw";

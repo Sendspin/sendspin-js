@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   getUnreportedOutputLatencyMs,
-  isAppleWebKitAudio,
+  reportsContextTimeAtRenderPosition,
 } from "../../src/audio/platform-output-latency";
 
 const MAC_SAFARI =
@@ -25,11 +25,11 @@ describe("getUnreportedOutputLatencyMs", () => {
   it.each([
     ["macOS Safari", MAC_SAFARI, {}, 0, true],
     ["macOS Chrome", MAC_CHROME, {}, 0, false],
-    ["macOS Firefox", MAC_FIREFOX, {}, 0, false],
+    ["macOS Firefox", MAC_FIREFOX, {}, 0, true],
     ["iPhone Safari", IPHONE_SAFARI, {}, 55, true],
     ["iPhone Chrome", IPHONE_CHROME, {}, 55, true],
     ["Android Chrome", ANDROID_CHROME, {}, 17, false],
-    ["Android Firefox", ANDROID_FIREFOX, {}, 17, false],
+    ["Android Firefox", ANDROID_FIREFOX, {}, 17, true],
     ["Google TV Cast receiver", GOOGLE_TV_CAST, {}, 0, false],
     [
       "iPad desktop mode",
@@ -40,10 +40,12 @@ describe("getUnreportedOutputLatencyMs", () => {
     ],
   ])(
     "%s uses the expected compensation",
-    (_name, userAgent, extra, expectedMs, expectedWebKit) => {
+    (_name, userAgent, extra, expectedMs, expectedRenderPosition) => {
       const navigatorInfo = { userAgent, ...extra };
       expect(getUnreportedOutputLatencyMs(navigatorInfo)).toBe(expectedMs);
-      expect(isAppleWebKitAudio(navigatorInfo)).toBe(expectedWebKit);
+      expect(reportsContextTimeAtRenderPosition(navigatorInfo)).toBe(
+        expectedRenderPosition,
+      );
     },
   );
 
