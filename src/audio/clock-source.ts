@@ -14,6 +14,8 @@
  * baseLatency + outputLatency, so callers pass that latency in and it is added
  * back. Without it the two sources would disagree by one output latency and
  * playback would audibly step whenever the source is promoted or demoted.
+ * Apple WebKit reports contextTime at the render position instead, so callers
+ * pass 0 there.
  */
 
 type AudioClockSource = "estimated" | "timestamp" | "raw";
@@ -344,7 +346,8 @@ export class ClockSource {
   /**
    * Get a timing snapshot with both derived and raw AudioContext times.
    *
-   * @param playoutLatencySec Measured baseLatency + outputLatency, used to
+   * @param playoutLatencySec Measured baseLatency + outputLatency, or 0 where
+   *   contextTime is already at the render position. Used to
    *   normalize the getOutputTimestamp-derived clock into the render-clock
    *   domain. Pass the measured value regardless of whether latency
    *   compensation is enabled: this only keeps the two clock sources in one
