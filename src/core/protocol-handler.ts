@@ -46,7 +46,6 @@ export interface MessageSender {
 }
 
 export interface HelloContext {
-  trustLevel(): "user" | "none";
   pairMethods(): SupportedPairMethods;
   unpairedAccess: boolean;
 }
@@ -369,7 +368,6 @@ export class ProtocolHandler {
       payload: {
         name: this.clientName,
         supported_roles: ["player@v1", "controller@v1", "metadata@v1"],
-        trust_level: this.helloContext.trustLevel(),
         supported_pair_methods: this.helloContext.pairMethods(),
         unpaired_access: { enabled: this.helloContext.unpairedAccess },
         device_info: {
@@ -384,7 +382,6 @@ export class ProtocolHandler {
           supported_formats: supportedFormats,
           buffer_capacity:
             this.bufferCapacity ?? getDefaultBufferCapacity(supportedFormats),
-          supported_commands: ["volume", "mute"],
         },
       },
     };

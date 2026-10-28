@@ -18,7 +18,6 @@ import type { StreamHandler } from "../../src/internal-types";
 
 function makeHelloContext(overrides: Partial<HelloContext> = {}): HelloContext {
   return {
-    trustLevel: () => "none",
     pairMethods: () => ({ pairing_psk: {} }),
     unpairedAccess: true,
     ...overrides,
@@ -254,7 +253,7 @@ describe("ProtocolHandler extra", () => {
       expect(payload.supported_pair_methods).toEqual({ pairing_psk: {} });
 
       const support = payload["player@v1_support"] as Record<string, unknown>;
-      expect(support.supported_commands).toEqual(["volume", "mute"]);
+      expect(support).not.toHaveProperty("supported_commands");
       expect(support.buffer_capacity).toBeTypeOf("number");
       const fmt = (
         support.supported_formats as Array<Record<string, unknown>>
@@ -295,12 +294,12 @@ describe("ProtocolHandler extra", () => {
   });
 
   describe("handleServerHello", () => {
-    it("sends client/hello with trust_level and unpaired_access", () => {
+    it("sends client/hello with unpaired_access and no trust_level", () => {
       const handler = makeHandler();
       dispatch(handler, { type: "server/hello", payload: {} });
       const hello = lastSent(send, "client/hello")!;
       const payload = hello.payload as Record<string, unknown>;
-      expect(payload.trust_level).toBe("none");
+      expect(payload).not.toHaveProperty("trust_level");
       expect(payload.unpaired_access).toEqual({ enabled: true });
     });
 

@@ -152,7 +152,6 @@ export class SendspinCore implements StreamHandler {
     });
 
     const helloContext = {
-      trustLevel: () => this.handshakeInfo?.trustLevel ?? "none",
       pairMethods: () => this.pairing.supportedPairMethods(),
       unpairedAccess: config.unpairedAccess ?? true,
     };
@@ -179,11 +178,16 @@ export class SendspinCore implements StreamHandler {
   }
 
   // Route decrypted control messages from the transport. Pairing handles its
-  // own pair messages and also sees every server/activate.
+  // own pair messages and also sees every server/hello and server/activate.
   private routeControl(
     msg: { type: string; payload?: unknown },
     receivedAtUs: number,
   ): void {
+    if (msg.type === "server/hello") {
+      this.pairing.onServerHello(
+        ((msg.payload ?? {}) as { languages?: unknown }).languages,
+      );
+    }
     if (msg.type === "server/activate") {
       const p = (msg.payload ?? {}) as {
         activities?: string[];

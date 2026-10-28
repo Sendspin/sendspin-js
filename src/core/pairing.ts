@@ -146,7 +146,7 @@ export class PairingManager {
   private pairingActivateCount = 0;
   /** The counter for the current attempt (pairing_index and CPace sid counter). */
   private attemptIndex = 0;
-  /** The activation's spoken-PIN language preferences, in descending order. */
+  /** The server/hello operator language preferences, in descending order. */
   private languages: string[] | undefined;
   /** The emission format of the current dynamic pairing code attempt. */
   private format: PairCodeFormat | null = null;
@@ -253,6 +253,10 @@ export class PairingManager {
     this.abort("user_cancelled");
   }
 
+  onServerHello(languages: unknown): void {
+    this.languages = readLanguages(languages);
+  }
+
   /** Called for every server/activate. */
   onActivate(activities: string[], pairing?: ActivatePairing): void {
     this.discardStray = false;
@@ -303,7 +307,6 @@ export class PairingManager {
         return;
       }
       this.format = format;
-      this.languages = readLanguages(pairing.languages);
     }
     if (this.isHeldBack()) {
       this.phase = "held-back";
@@ -597,7 +600,6 @@ export class PairingManager {
     this.code = null;
     this.prs = null;
     this.round = 0;
-    this.languages = undefined;
   }
 
   /**

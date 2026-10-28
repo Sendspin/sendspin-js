@@ -83,7 +83,6 @@ export interface ClientHello {
   payload: {
     name: string;
     supported_roles: string[];
-    trust_level: "user" | "none";
     supported_pair_methods: SupportedPairMethods;
     unpaired_access: { enabled: boolean };
     device_info?: {
@@ -99,7 +98,6 @@ export interface ClientHello {
         bit_depth: number;
       }>;
       buffer_capacity: number;
-      supported_commands: string[];
     };
   };
 }
@@ -304,8 +302,6 @@ export interface ActivatePairing {
   method: PairMethod;
   /** Dynamic pairing code only: the emission format for this attempt. */
   format?: PairCodeFormat;
-  /** Dynamic pairing code only: BCP 47 tags in descending operator preference. */
-  languages?: string[];
 }
 
 export interface ServerActivate {

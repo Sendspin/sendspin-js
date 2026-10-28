@@ -6,14 +6,4 @@ export interface KnownViolation {
 }
 
 /** Non-compliance the client still shows, removed as each gap is fixed. */
-export const KNOWN_VIOLATIONS: readonly KnownViolation[] = [
-  {
-    gap: "G25",
-    message:
-      "client/hello declared player supported_commands, superseded by client/state",
-  },
-  {
-    gap: "G29",
-    message: "client/hello sent the removed trust_level key",
-  },
-];
+export const KNOWN_VIOLATIONS: readonly KnownViolation[] = [];

@@ -11,20 +11,21 @@ import type { DecodedAudioChunk, StreamFormat } from "../../src/types";
 
 /**
  * Build a binary audio message in Sendspin protocol format:
- *   [1 byte type=4] [8 bytes BE int64 timestamp] [audio payload]
+ *   [1 byte type=4] [8 bytes BE int64 timestamp] [4 bytes BE uint32 send_ahead] [audio payload]
  */
 function buildBinaryMessage(
   serverTimeUs: number,
   audioPayload: ArrayBuffer,
 ): ArrayBuffer {
-  const header = new ArrayBuffer(9);
+  const header = new ArrayBuffer(13);
   const view = new DataView(header);
   view.setUint8(0, 4); // audio chunk type
   view.setBigInt64(1, BigInt(serverTimeUs), false); // big-endian
+  view.setUint32(9, 250_000, false);
 
-  const combined = new Uint8Array(9 + audioPayload.byteLength);
+  const combined = new Uint8Array(13 + audioPayload.byteLength);
   combined.set(new Uint8Array(header), 0);
-  combined.set(new Uint8Array(audioPayload), 9);
+  combined.set(new Uint8Array(audioPayload), 13);
   return combined.buffer;
 }
 
