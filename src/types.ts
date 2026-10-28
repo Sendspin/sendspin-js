@@ -668,7 +668,9 @@ export interface SendspinCoreConfig {
   /**
    * Use hardware/external volume control instead of software gain.
    * When true, the internal gain node stays at 1.0 and volume commands
-   * are delegated to the onVolumeCommand callback.
+   * are delegated to the onVolumeCommand callback. When the device volume
+   * changes through its own controls, call setVolume and setMuted with the
+   * new values so the server learns of it right away.
    *
    * Default: false
    */
@@ -690,7 +692,7 @@ export interface SendspinCoreConfig {
 
   /**
    * Getter for external volume state.
-   * Called periodically when reporting state to server if useHardwareVolume is true.
+   * Called when reporting state to server if useHardwareVolume is true.
    * Should return current hardware volume (0-100) and muted state.
    * Not called immediately after volume commands to wait for hardware to apply the change.
    */

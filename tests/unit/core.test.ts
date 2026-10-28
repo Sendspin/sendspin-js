@@ -516,6 +516,32 @@ describe("SendspinCore command + state forwarding", () => {
     expect(send).not.toHaveBeenCalled();
   });
 
+  it("reports a hardware volume change from setVolume without echoing it to the hardware", () => {
+    const onVolumeCommand = vi.fn();
+    const device = { volume: 60, muted: false };
+    const hardwareCore = new SendspinCore({
+      baseUrl: "http://h",
+      storage: null,
+      useHardwareVolume: true,
+      onVolumeCommand,
+      getExternalVolume: () => ({ ...device }),
+    });
+    const send = spySend(hardwareCore);
+    activatePlayer(hardwareCore, send);
+
+    device.volume = 25;
+    device.muted = true;
+    hardwareCore.setVolume(25);
+
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send.mock.calls[0][0].payload.player).toMatchObject({
+      volume: 25,
+      muted: true,
+    });
+    expect(onVolumeCommand).not.toHaveBeenCalled();
+    hardwareCore.disconnect();
+  });
+
   it("setVolume invokes the onVolumeUpdate callback", () => {
     const cb = vi.fn();
     core.onVolumeUpdate = cb;
