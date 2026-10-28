@@ -264,15 +264,6 @@ export class PairingManager {
       return;
     }
     this.method = method;
-    if (method === "pairing_psk") {
-      this.sendFinalize();
-      // Arm the attempt timer and leave a non-idle phase so the attempt can be
-      // cancelled and times out if the server never sends server/pair-finalize.
-      this.phase = "await-finalize";
-      this.armAttemptTimer();
-      this.deps.onEvent?.("started");
-      return;
-    }
     if (method === "dynamic_pairing_code") {
       const format = pairing.format;
       // A missing format is a protocol error, like a missing method.
@@ -432,6 +423,16 @@ export class PairingManager {
     if (this.method === "static_pairing_code") this.windowBound = true;
     this.armAttemptTimer();
     this.deps.onEvent?.("started");
+    if (this.method === "pairing_psk") {
+      this.deps.sendControl({
+        type: "client/pair-init",
+        payload: { pairing_index: this.attemptIndex },
+      });
+      // client/pair-finalize follows immediately, without waiting (spec).
+      this.phase = "await-finalize";
+      this.sendFinalize();
+      return;
+    }
     if (this.method === "dynamic_pairing_code") {
       this.nonceB = generateNonce();
       this.phase = "await-init";

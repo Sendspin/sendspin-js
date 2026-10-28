@@ -142,8 +142,12 @@ describe("PairingManager (pairing_psk)", () => {
   it("finalizes a pairing_psk flow and persists a bound record", () => {
     const { store, sent, mgr } = setup();
     mgr.onActivate(["pairing"], { method: "pairing_psk" });
-    const fin = sent[0] as { type: string; payload: { long_term_psk: string } };
-    expect(fin.type).toBe("client/pair-finalize");
+    expect(sent.map((m) => m.type)).toEqual([
+      "client/pair-init",
+      "client/pair-finalize",
+    ]);
+    expect(sent[0]!.payload).toEqual({ pairing_index: 1 });
+    const fin = sent[1] as { type: string; payload: { long_term_psk: string } };
     expect(fin.payload.long_term_psk).toHaveLength(43);
 
     mgr.onPairFinalize();
@@ -224,7 +228,9 @@ describe("PairingManager (pairing_psk)", () => {
   it("discards the pending PSK on leave-pairing (non-pairing activate)", () => {
     const { store, sent, close, mgr } = setup();
     mgr.onActivate(["pairing"], { method: "pairing_psk" });
-    const fin = sent[0] as { payload: { long_term_psk: string } };
+    const fin = lastOfType(sent, "client/pair-finalize") as {
+      payload: { long_term_psk: string };
+    };
     mgr.onActivate(["playback"]); // leave pairing without finalize
     // The server left pairing itself, so a later server/pair-finalize is out of sequence.
     mgr.onPairFinalize();
