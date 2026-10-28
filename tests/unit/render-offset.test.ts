@@ -30,6 +30,8 @@ import { SendspinTimeFilter } from "../../src/core/time-filter";
 import type { DecodedAudioChunk, StreamFormat } from "../../src/types";
 
 const SAMPLE_RATE = 48000;
+const IPHONE_SAFARI =
+  "Mozilla/5.0 (iPhone; CPU iPhone OS 18_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Mobile/15E148 Safari/604.1";
 
 // Chrome/macOS measured values (see file header).
 const BASE_LATENCY_SEC = 0.005333333333333333;
@@ -115,6 +117,8 @@ class ChromeLikeAudioContext {
   startedSources: FakeBufferSource[] = [];
   /** getOutputTimestamp() is only exposed once enabled, mirroring browser support. */
   outputTimestampEnabled = false;
+  /** WebKit reports contextTime at the render position instead of the playout position. */
+  contextTimeAtRenderPosition = false;
 
   constructor(opts?: { sampleRate?: number }) {
     this.sampleRate = opts?.sampleRate ?? SAMPLE_RATE;
@@ -127,7 +131,9 @@ class ChromeLikeAudioContext {
     if (!this.outputTimestampEnabled) return undefined;
     // Playout clock: what is leaving the port right now.
     return {
-      contextTime: rawCurrentTime() - PLAYOUT_LATENCY_SEC,
+      contextTime:
+        rawCurrentTime() -
+        (this.contextTimeAtRenderPosition ? 0 : PLAYOUT_LATENCY_SEC),
       performanceTime: nowMs,
     };
   }
@@ -174,8 +180,10 @@ function setup(
     syncDelayMs?: number;
     useOutputLatencyCompensation?: boolean;
     outputTimestamp?: boolean;
+    webKit?: boolean;
   } = {},
 ): Harness {
+  if (opts.webKit) vi.stubGlobal("navigator", { userAgent: IPHONE_SAFARI });
   const stateManager = new StateManager();
   const timeFilter = new SendspinTimeFilter();
   // A single measurement is enough to synchronize the filter; with one sample it
@@ -195,6 +203,7 @@ function setup(
   scheduler.initAudioContext();
   const ctx = lastCtx!;
   ctx.outputTimestampEnabled = opts.outputTimestamp ?? false;
+  ctx.contextTimeAtRenderPosition = opts.webKit ?? false;
   stateManager.isPlaying = true;
   return { scheduler, ctx, timeFilter };
 }
@@ -293,6 +302,17 @@ describe("AudioScheduler rendering offset", () => {
 
     // A step here would be audible as a jump when the clock source promotes
     // mid-playback.
+    expect(promotedOffsetMs - estimatedOffsetMs).toBeCloseTo(0, 3);
+  });
+
+  it("keeps the render offset identical across a clock-source promotion on WebKit", () => {
+    const estimated = setup({ webKit: true });
+    const estimatedOffsetMs = measureRenderOffsetMs(estimated);
+
+    const promoted = setup({ webKit: true, outputTimestamp: true });
+    promoteToTimestampClock(promoted.scheduler);
+    const promotedOffsetMs = measureRenderOffsetMs(promoted);
+
     expect(promotedOffsetMs - estimatedOffsetMs).toBeCloseTo(0, 3);
   });
 

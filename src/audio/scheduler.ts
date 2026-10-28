@@ -22,7 +22,10 @@ import {
   RECORRECTION_CUTOVER_GUARD_SEC,
 } from "./recorrection-monitor";
 import { OutputLatencyTracker } from "./output-latency-tracker";
-import { getUnreportedOutputLatencyMs } from "./platform-output-latency";
+import {
+  getUnreportedOutputLatencyMs,
+  isAppleWebKitAudio,
+} from "./platform-output-latency";
 import { clampSyncDelayMs } from "../sync-delay";
 
 // Sync correction constants
@@ -147,6 +150,8 @@ export class AudioScheduler {
   private useOutputLatencyCompensation: boolean;
   // Accounts for output delay omitted by Safari and iOS WebKit latency APIs.
   private unreportedOutputLatencySec: number;
+  // Apple WebKit reports getOutputTimestamp().contextTime at the render position, not the playout position.
+  private contextTimeAtRenderPosition = isAppleWebKitAudio();
   private scheduleTimeout: ReturnType<typeof setTimeout> | null = null;
   private refillTimeout: ReturnType<typeof setTimeout> | null = null;
   private queueProcessScheduled = false;
@@ -343,7 +348,10 @@ export class AudioScheduler {
 
     const playoutLatencySec = this.measurePlayoutLatencySec();
     const { audioContextTimeSec, audioContextRawTimeSec, nowMs, nowUs } =
-      this.clockSource.getTimingSnapshot(this.audioContext, playoutLatencySec);
+      this.clockSource.getTimingSnapshot(
+        this.audioContext,
+        this.contextTimeAtRenderPosition ? 0 : playoutLatencySec,
+      );
     this.pruneExpiredScheduledSources(audioContextRawTimeSec);
     if (this.getScheduledAheadSec(audioContextRawTimeSec) <= 0) {
       this.recorrectionMonitor.resetCheckState();
@@ -822,7 +830,7 @@ export class AudioScheduler {
       nowUs,
     } = this.clockSource.getTimingSnapshot(
       this.audioContext,
-      playoutLatencySec,
+      this.contextTimeAtRenderPosition ? 0 : playoutLatencySec,
     );
     this.pruneExpiredScheduledSources(audioContextRawTimeSec);
 
