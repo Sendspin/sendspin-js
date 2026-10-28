@@ -24,7 +24,7 @@ import {
 import { OutputLatencyTracker } from "./output-latency-tracker";
 import {
   getUnreportedOutputLatencyMs,
-  isAppleWebKitAudio,
+  reportsContextTimeAtRenderPosition,
 } from "./platform-output-latency";
 import { clampSyncDelayMs } from "../sync-delay";
 
@@ -151,7 +151,7 @@ export class AudioScheduler {
   // Accounts for output delay omitted by iOS WebKit latency APIs.
   private unreportedOutputLatencySec: number;
   // Apple WebKit reports getOutputTimestamp().contextTime at the render position, not the playout position.
-  private contextTimeAtRenderPosition = isAppleWebKitAudio();
+  private contextTimeAtRenderPosition = reportsContextTimeAtRenderPosition();
   private scheduleTimeout: ReturnType<typeof setTimeout> | null = null;
   private refillTimeout: ReturnType<typeof setTimeout> | null = null;
   private queueProcessScheduled = false;

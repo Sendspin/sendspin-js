@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   getUnreportedOutputLatencyMs,
-  isAppleWebKitAudio,
+  reportsContextTimeAtRenderPosition,
 } from "../../src/audio/platform-output-latency";
 
 const MAC_SAFARI =
@@ -34,10 +34,12 @@ describe("getUnreportedOutputLatencyMs", () => {
     ],
   ])(
     "%s uses the expected compensation",
-    (_name, userAgent, extra, expectedMs, expectedWebKit) => {
+    (_name, userAgent, extra, expectedMs, expectedRenderPosition) => {
       const navigatorInfo = { userAgent, ...extra };
       expect(getUnreportedOutputLatencyMs(navigatorInfo)).toBe(expectedMs);
-      expect(isAppleWebKitAudio(navigatorInfo)).toBe(expectedWebKit);
+      expect(reportsContextTimeAtRenderPosition(navigatorInfo)).toBe(
+        expectedRenderPosition,
+      );
     },
   );
 
