@@ -1081,8 +1081,7 @@ function init() {
   });
   rotatePskBtn.addEventListener("click", () => {
     if (!player) return;
-    player.rotatePairingPsk();
-    pairingTokenEl.textContent = player.pairingToken;
+    pairingTokenEl.textContent = player.rotatePairingPsk();
     showToast("Pairing token rotated", "success");
   });
   staticPinInput.addEventListener("change", () => {

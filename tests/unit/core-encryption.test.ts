@@ -293,7 +293,7 @@ describe("SendspinCore encryption wiring", () => {
       completeHandshake(ws);
 
     // The client's own Pairing PSK, provisioned out of band, is the re-handshake target.
-    const pairingPsk = base64urlDecode(core.pairingPsk!);
+    const pairingPsk = core["pskStore"].getOrCreatePairingPsk();
 
     // Server re-handshakes to the Pairing PSK, prologue = prior handshake hash.
     const ini = new HandshakeState({
@@ -362,7 +362,7 @@ describe("SendspinCore encryption wiring", () => {
 
     const { serverSession, server, clientId, priorHash } =
       completeHandshake(ws);
-    const pairingPsk = base64urlDecode(core.pairingPsk!);
+    const pairingPsk = core["pskStore"].getOrCreatePairingPsk();
 
     // Re-handshake #1: promote to the Pairing PSK so activations count as pairing.
     const s1 = rehandshakeTo(
@@ -512,16 +512,14 @@ describe("SendspinCore encryption wiring", () => {
       webSocket: new MockWS() as unknown as WebSocket,
       storage: memStorage(),
     });
-    const psk = core.pairingPsk;
     const token = core.pairingToken;
-    expect(psk).toHaveLength(43);
     expect(token).toHaveLength(107);
     expect(token).toMatch(/^SP:0/);
     expect("getPairingToken" in core).toBe(false);
+    expect("pairingPsk" in core).toBe(false);
     const rotated = core.rotatePairingPsk();
-    expect(rotated).toHaveLength(43);
-    expect(rotated).not.toBe(psk);
-    expect(core.pairingToken).not.toBe(token);
+    expect(rotated).toBe(core.pairingToken);
+    expect(rotated).not.toBe(token);
   });
 
   it("offers pairing_psk without storage", async () => {

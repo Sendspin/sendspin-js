@@ -232,8 +232,8 @@ only on a deliberate action on the device.
 console.log('Client ID:', player.clientId);              // 43-char base64url pubkey
 console.log('Pairing token:', player.pairingToken);      // spec version 0
 
-// Rotate the Pairing PSK (e.g. if it may have leaked)
-const newPsk = player.rotatePairingPsk();
+// Rotate the Pairing PSK (e.g. if the token may have leaked)
+const newToken = player.rotatePairingPsk();
 
 player.openPairingWindow();                      // operator gesture for a static code attempt
 player.releasePairingHold();                     // operator action after the round limit
@@ -257,7 +257,7 @@ exists. A player built afterwards on the same storage adopts this identity.
 ```typescript
 import { loadSendspinClientIdentity } from '@sendspin/sendspin-js';
 
-const { clientId, pairingPsk, pairingToken } = loadSendspinClientIdentity();
+const { clientId, pairingToken } = loadSendspinClientIdentity();
 ```
 
 ### Core + scheduler as separate layers

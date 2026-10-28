@@ -101,7 +101,7 @@ export class SendspinCore implements StreamHandler {
       if (!r.serverId) throw new Error("longTermPsks entries need a serverId");
       this.pskStore.addLongTerm(base64urlDecode(r.psk), r.serverId);
     }
-    // Standing candidate: a server may re-handshake to it before the app reads pairingPsk.
+    // Standing candidate: a server may re-handshake to it before the app reads pairingToken.
     this.pskStore.getOrCreatePairingPsk();
 
     this.transport = new SendspinTransport(
@@ -518,21 +518,16 @@ export class SendspinCore implements StreamHandler {
     return this.identity.clientId;
   }
 
-  /**
-   * The client's Pairing PSK (base64url). Keep it secret, and show the
-   * operator pairingToken, not this.
-   */
-  get pairingPsk(): string {
-    return base64urlEncode(this.pskStore.getOrCreatePairingPsk());
-  }
-
   get pairingToken(): string {
-    return encodePairingToken(this.clientId, this.pairingPsk);
+    return encodePairingToken(
+      this.clientId,
+      base64urlEncode(this.pskStore.getOrCreatePairingPsk()),
+    );
   }
 
   rotatePairingPsk(): string {
     this.pskStore.rotatePairingPsk();
-    return this.pairingPsk;
+    return this.pairingToken;
   }
 
   /**

@@ -7,8 +7,6 @@ import { encodePairingToken } from "./core/noise/pairing-token";
 export interface SendspinClientIdentity {
   /** The client's stable identity id (base64url X25519 public key). */
   clientId: string;
-  /** The client's Pairing PSK (base64url), or null without storage. */
-  pairingPsk: string | null;
   /** The version 0 pairing token, or null without storage. */
   pairingToken: string | null;
 }
@@ -30,14 +28,13 @@ export function loadSendspinClientIdentity(
     resolved = localStorage;
   }
   const identity = Identity.loadOrCreate(resolved);
-  const pairingPsk = resolved
-    ? base64urlEncode(new PskStore(resolved).getOrCreatePairingPsk())
-    : null;
   return {
     clientId: identity.clientId,
-    pairingPsk,
-    pairingToken: pairingPsk
-      ? encodePairingToken(identity.clientId, pairingPsk)
+    pairingToken: resolved
+      ? encodePairingToken(
+          identity.clientId,
+          base64urlEncode(new PskStore(resolved).getOrCreatePairingPsk()),
+        )
       : null,
   };
 }
