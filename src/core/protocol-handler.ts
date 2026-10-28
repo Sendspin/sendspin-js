@@ -171,6 +171,13 @@ export class ProtocolHandler {
   // Handle server/activate: start the initial client/state, time-sync, and
   // periodic state updates. A repeat activate only applies role changes.
   private handleServerActivate(message: ServerActivate): void {
+    // Roles are unset only on a new connection, which starts without streams.
+    if (
+      this.activeRoles === null &&
+      this.stateManager.currentStreamFormat !== null
+    ) {
+      this.endPlayerStream();
+    }
     let rolesChanged = false;
     if (message.payload.active_roles !== undefined) {
       const nextRoles = new Set(message.payload.active_roles);

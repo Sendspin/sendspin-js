@@ -18,7 +18,7 @@ const player = new SendspinPlayer({
   clientName: 'My Web Player',
   productName: 'My App',
   // Optional: "sync" (default), "quality" (no pitch shifts; not recommended for bad networks),
-  // or "quality-local" (best for unsynced playback)
+  // or "quality-local" (best for unsynced playback, makes the player non-compliant with the Sendspin spec)
   correctionMode: 'sync',
   onStateChange: (state) => {
     // Local player state
