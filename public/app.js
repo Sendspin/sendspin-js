@@ -840,6 +840,10 @@ async function connect() {
     const configKey = JSON.stringify(config);
     if (idlePlayer && idlePlayerConfigKey === configKey) {
       player = idlePlayer;
+      // Reapply settings the player may have changed at runtime since it was built.
+      player.setRequiredLeadTimeMs(requiredLeadTimeMs);
+      player.setMinBufferMs(minBufferMs);
+      player.setCorrectionMode(savedCorrectionMode);
     } else {
       idlePlayer?.destroy();
       player = new SendspinPlayer(config);
