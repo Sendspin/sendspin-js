@@ -428,7 +428,7 @@ export type Codec = "pcm" | "opus" | "flac";
  * Audio sync correction mode:
  * - "sync": Multi-device sync, may use small playback-rate adjustments (capped at ±0.5%, inaudible) for faster convergence.
  * - "quality": No rate changes; uses sample fixes and tighter resyncs, so you get fewer adjustments but occasional jumps. Starts out of sync until the clock converges. Not recommended for bad networks.
- * - "quality-local": Avoids playback-rate changes; may drift vs. group sync and only resyncs as a last resort.
+ * - "quality-local": Avoids playback-rate changes; may drift vs. group sync and only resyncs as a last resort. Using this mode makes the player non-compliant with the Sendspin specification.
  */
 export type CorrectionMode = "sync" | "quality" | "quality-local";
 
@@ -473,7 +473,7 @@ export interface SendspinPlayerConfig extends SendspinCoreConfig {
    * - "quality": No playback-rate changes; uses sample fixes and tighter resyncs, so expect fewer adjustments but occasional jumps. Starts out of sync until the clock converges. Not recommended for bad networks.
    * - "quality-local": Avoids playback-rate changes; may drift vs. other players and only resyncs
    *   as a last resort.
-   *   Best for single-device playback where audio quality is priority.
+   *   Best for single-device playback where audio quality is priority. Using this mode makes the player non-compliant with the Sendspin specification.
    */
   correctionMode?: CorrectionMode;
 
