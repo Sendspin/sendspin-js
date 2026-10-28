@@ -342,7 +342,7 @@ async function renderQrCode(token) {
   const qr = qrcode(0, "M");
   qr.addData(token, "Alphanumeric");
   qr.make();
-  pairingQrEl.innerHTML = qr.createSvgTag(4, 2);
+  pairingQrEl.innerHTML = qr.createSvgTag(4);
 }
 
 /** Split the 6-digit code into the 3-3 groups the spec presents it in. */
