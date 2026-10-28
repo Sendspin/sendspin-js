@@ -388,6 +388,7 @@ export class SendspinCore implements StreamHandler {
     this.protocolHandler.stopTimeSync();
     this.stateManager.clearAllIntervals();
     this.wsManager.disconnect();
+    this.resetSession();
     this.decoder.close();
     this.timeFilter.reset();
     this.stateManager.reset();
