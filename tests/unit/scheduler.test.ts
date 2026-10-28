@@ -369,10 +369,10 @@ describe("AudioScheduler scheduling math", () => {
     );
   });
 
-  it("compensates Apple WebKit without changing the user sync delay", () => {
+  it("compensates iOS WebKit without changing the user sync delay", () => {
     vi.stubGlobal("navigator", {
       userAgent:
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.5.2 Safari/605.1.15",
+        "Mozilla/5.0 (iPhone; CPU iPhone OS 18_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Mobile/15E148 Safari/604.1",
     });
     const { scheduler, ctx } = setup({
       useOutputLatencyCompensation: true,
@@ -381,9 +381,9 @@ describe("AudioScheduler scheduling math", () => {
     scheduler.processAudioQueue();
 
     expect(scheduler.getSyncDelayMs()).toBe(0);
-    expect(scheduler.syncInfo.outputLatencyMs).toBe(100);
+    expect(scheduler.syncInfo.outputLatencyMs).toBe(55);
     expect(ctx.startedSources[0].started!).toBeCloseTo(
-      ctx.currentTime + 0.9,
+      ctx.currentTime + 0.945,
       6,
     );
   });

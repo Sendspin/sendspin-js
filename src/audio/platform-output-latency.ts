@@ -1,7 +1,7 @@
 type NavigatorInfo = Pick<Navigator, "userAgent"> &
   Partial<Pick<Navigator, "platform" | "maxTouchPoints">>;
 
-const APPLE_WEBKIT_UNREPORTED_OUTPUT_LATENCY_MS = 100;
+const IOS_UNREPORTED_OUTPUT_LATENCY_MS = 55;
 
 function getNavigatorInfo(): NavigatorInfo | undefined {
   return typeof navigator === "undefined" ? undefined : navigator;
@@ -35,7 +35,7 @@ export function isAppleWebKitAudio(
 export function getUnreportedOutputLatencyMs(
   navigatorInfo: NavigatorInfo | undefined = getNavigatorInfo(),
 ): number {
-  return isAppleWebKitAudio(navigatorInfo)
-    ? APPLE_WEBKIT_UNREPORTED_OUTPUT_LATENCY_MS
+  return navigatorInfo && isIOS(navigatorInfo)
+    ? IOS_UNREPORTED_OUTPUT_LATENCY_MS
     : 0;
 }
