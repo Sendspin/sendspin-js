@@ -139,8 +139,10 @@ function serverPake(pin: string, index = 1, round = 1) {
 }
 
 describe("PairingManager (pairing_psk)", () => {
-  it("finalizes a pairing_psk flow and persists a bound record", () => {
+  it("finalizes a pairing_psk flow and replaces the server's record", () => {
     const { store, sent, mgr } = setup();
+    const oldPsk = new Uint8Array(32).fill(9);
+    store.addLongTerm(oldPsk, "SERVER_ID");
     mgr.onActivate(["pairing"], { method: "pairing_psk" });
     expect(sent.map((m) => m.type)).toEqual([
       "client/pair-init",
@@ -153,6 +155,7 @@ describe("PairingManager (pairing_psk)", () => {
     mgr.onPairFinalize();
     const ltPsk = base64urlDecode(fin.payload.long_term_psk);
     expect(store.lookup(pskId(ltPsk))?.serverId).toBe("SERVER_ID");
+    expect(store.lookup(pskId(oldPsk))).toBeNull();
   });
 
   it("aborts an unsupported method and keeps the connection open", () => {

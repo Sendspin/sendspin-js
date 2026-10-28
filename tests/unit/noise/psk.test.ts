@@ -40,6 +40,22 @@ describe("PskStore", () => {
     );
   });
 
+  it("replaces the record it already holds for a server", () => {
+    const s = memStorage();
+    const store = new PskStore(s);
+    const old = new Uint8Array(32).fill(5);
+    const other = new Uint8Array(32).fill(6);
+    const renewed = new Uint8Array(32).fill(7);
+    store.addLongTerm(old, "S1");
+    store.addLongTerm(other, "S2");
+    store.replaceLongTerm(renewed, "S1");
+
+    const reloaded = new PskStore(s);
+    expect(reloaded.lookup(pskId(old))).toBeNull();
+    expect(reloaded.lookup(pskId(other))?.serverId).toBe("S2");
+    expect(reloaded.lookup(pskId(renewed))?.serverId).toBe("S1");
+  });
+
   it("rotates the pairing PSK", () => {
     const store = new PskStore(memStorage());
     const a = store.getOrCreatePairingPsk();

@@ -387,7 +387,7 @@ export class PairingManager {
   onPairFinalize(): void {
     if (this.phase === "idle") return this.strayMessage();
     if (this.phase !== "await-finalize" || !this.pendingPsk) return this.fail();
-    this.deps.pskStore.addLongTerm(this.pendingPsk, this.deps.serverId());
+    this.deps.pskStore.replaceLongTerm(this.pendingPsk, this.deps.serverId());
     this.clearAttempt();
     this.closeWindow();
     this.deps.onEvent?.("finalized");

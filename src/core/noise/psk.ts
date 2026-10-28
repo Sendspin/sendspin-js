@@ -102,6 +102,15 @@ export class PskStore {
     return e;
   }
 
+  replaceLongTerm(psk: Uint8Array, serverId: string): PskEntry {
+    for (const [id, e] of this.entries) {
+      if (e.category === "long_term" && e.serverId === serverId) {
+        this.entries.delete(id);
+      }
+    }
+    return this.addLongTerm(psk, serverId);
+  }
+
   removeByPskId(id: string): void {
     const e = this.entries.get(id);
     if (!e || e.category !== "long_term") return;
