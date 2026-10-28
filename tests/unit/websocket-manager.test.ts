@@ -76,6 +76,36 @@ describe("WebSocketManager", () => {
       expect(FakeWebSocket.instances).toHaveLength(2);
     });
 
+    it("ignores a late close from a socket replaced after disconnect", async () => {
+      const onClose = vi.fn();
+      const first = mgr.connect(
+        "ws://host/sendspin",
+        undefined,
+        undefined,
+        undefined,
+        onClose,
+      );
+      FakeWebSocket.instances[0].fireOpen();
+      await first;
+
+      mgr.disconnect();
+      const second = mgr.connect(
+        "ws://host/sendspin",
+        undefined,
+        undefined,
+        undefined,
+        onClose,
+      );
+      FakeWebSocket.instances[1].fireOpen();
+      await second;
+
+      FakeWebSocket.instances[0].fireClose();
+      vi.advanceTimersByTime(60_000);
+
+      expect(onClose).not.toHaveBeenCalled();
+      expect(FakeWebSocket.instances).toHaveLength(2);
+    });
+
     it("does not reconnect after an explicit disconnect", async () => {
       const p = mgr.connect("ws://host/sendspin");
       FakeWebSocket.instances[0].fireOpen();

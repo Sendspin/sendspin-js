@@ -76,10 +76,16 @@ player.sendCommand('seek_relative', { offset_ms: -10_000 });
 
 // Disconnect with reason (optional)
 player.disconnect('user_request');
+
+// Release the audio output when you no longer need the player
+player.destroy();
 ```
 
 Call `unlock()` directly from a click or tap handler, before any other awaited
 work, so the browser can initialize or resume audio during the user gesture.
+
+Keep one player for repeated stops and starts, and call `destroy()` only when
+you drop it. A player dropped after `disconnect()` keeps its audio output open.
 
 ## Advanced configuration
 

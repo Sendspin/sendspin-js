@@ -262,6 +262,25 @@ describe("SendspinCore encryption wiring", () => {
     core.disconnect(); // clear the periodic state/time-sync intervals
   });
 
+  it("resets the session on disconnect before the socket's close event arrives", async () => {
+    const ws = new MockWS();
+    ws.close = () => {
+      ws.readyState = 3;
+    };
+    const core = new SendspinCore({
+      webSocket: ws as unknown as WebSocket,
+      storage: memStorage(),
+    });
+    await core.connect();
+    completeHandshake(ws);
+
+    core.disconnect();
+
+    expect(
+      (core as unknown as { handshakeInfo: unknown }).handshakeInfo,
+    ).toBeNull();
+  });
+
   it("refreshes core's trust snapshot after an in-band re-handshake, so a Pairing-PSK activation is accepted instead of aborted", async () => {
     const ws = new MockWS();
     const core = new SendspinCore({

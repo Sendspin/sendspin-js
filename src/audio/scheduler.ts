@@ -1103,6 +1103,13 @@ export class AudioScheduler {
     this.clockSource.reset();
   }
 
+  // Leaves the AudioContext running, since a resumed one can play late or silent on Chromium for Android.
+  stop(): void {
+    this.clearBuffers();
+    this.stopAudioElement();
+    this.updateVolume();
+  }
+
   close(): void {
     this.clearBuffers();
     if (this.audioContext) {

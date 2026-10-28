@@ -212,6 +212,7 @@ export class SendspinPlayer {
    */
   async unlock(): Promise<void> {
     this.scheduler.initAudioContext();
+    this.scheduler.startAudioElement();
     await this.scheduler.resumeAudioContext();
   }
 
@@ -222,7 +223,8 @@ export class SendspinPlayer {
   }
 
   /**
-   * Disconnect from Sendspin server
+   * Disconnect from Sendspin server. The player keeps its audio output for the
+   * next connect(). Call destroy() instead when dropping the player.
    * @param reason - Optional reason for disconnecting (default: 'restart')
    */
   disconnect(reason: GoodbyeReason = "restart"): void {
@@ -231,14 +233,22 @@ export class SendspinPlayer {
 
     this.core.disconnect(reason);
 
-    // Close scheduler
-    this.scheduler.close();
+    this.scheduler.stop();
 
     // Reset MediaSession playbackState (if available)
     if (typeof navigator !== "undefined" && navigator.mediaSession) {
       navigator.mediaSession.playbackState = "none";
       navigator.mediaSession.metadata = null;
     }
+  }
+
+  /**
+   * Disconnect and release the audio output. Call this when dropping the player.
+   * @param reason - Optional reason for disconnecting (default: 'restart')
+   */
+  destroy(reason?: GoodbyeReason): void {
+    this.disconnect(reason);
+    this.scheduler.close();
   }
 
   // Set volume (0-100). Throws RangeError if NaN.

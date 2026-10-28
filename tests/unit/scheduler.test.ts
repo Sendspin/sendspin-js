@@ -747,6 +747,18 @@ describe("AudioScheduler volume", () => {
     expect(gain.gain.value).toBe(0);
   });
 
+  it("resets the gain to the reset volume on stop", () => {
+    const h = setup();
+    h.state.volume = 30;
+    h.scheduler.updateVolume();
+
+    h.state.reset();
+    h.scheduler.stop();
+
+    const gain = (h.scheduler as any).gainNode;
+    expect(gain.gain.value).toBeCloseTo(1.0, 6);
+  });
+
   it("keeps gain at 1.0 when hardware volume is used", () => {
     const h = setup({ useHardwareVolume: true });
     h.state.volume = 30;

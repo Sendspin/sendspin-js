@@ -165,7 +165,8 @@ export class WebSocketManager {
       try {
         console.log("Sendspin: Connecting to", url);
 
-        this.ws = new WebSocket(url);
+        const ws = new WebSocket(url);
+        this.ws = ws;
         this.ws.binaryType = "arraybuffer";
         this.shouldReconnect = true;
         // Browsers fire close even for attempts that never opened.
@@ -201,6 +202,8 @@ export class WebSocketManager {
         };
 
         this.ws.onclose = () => {
+          // Skip a late close from a socket that a later connect() replaced.
+          if (this.ws !== null && this.ws !== ws) return;
           console.log("Sendspin: WebSocket disconnected");
           if (opened && this.onCloseHandler) {
             this.onCloseHandler();

@@ -652,6 +652,7 @@ describe("SendspinCore.disconnect ordering and idempotency", () => {
       }),
     );
 
+    markTransportReady(core);
     core.disconnect("shutdown");
     expect(send).toHaveBeenLastCalledWith(
       expect.objectContaining({
