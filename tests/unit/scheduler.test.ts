@@ -419,8 +419,20 @@ describe("AudioScheduler late-chunk dropping", () => {
     scheduler.handleDecodedChunk(makeChunk(serverTime, 0));
     scheduler.processAudioQueue();
 
-    // playbackTime < raw ctx time => skipped, no source started
+    // scheduleTime < raw ctx time => skipped, no source started
     expect(ctx.startedSources.length).toBe(0);
+  });
+
+  it("drops a chunk whose start is past once the output delay is subtracted", () => {
+    const { scheduler, ctx } = setup({ syncDelayMs: 200 });
+    const base = nowUs() + 100_000;
+    scheduler.handleDecodedChunk(makeChunk(base, 0));
+    scheduler.handleDecodedChunk(makeChunk(base + 100_000, 0));
+    scheduler.processAudioQueue();
+
+    // The second chunk is due in 200ms, so it starts now.
+    expect(ctx.startedSources.length).toBe(1);
+    expect(ctx.startedSources[0].started!).toBeCloseTo(ctx.currentTime, 6);
   });
 });
 

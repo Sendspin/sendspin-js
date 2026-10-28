@@ -993,35 +993,29 @@ export class AudioScheduler {
       }
 
       this.currentPlaybackRate = playbackRate;
-      if (playbackTime < audioContextRawTimeSec) {
+      if (scheduleTime < audioContextRawTimeSec) {
         this.nextPlaybackTime = 0;
         this.nextScheduleTime = 0;
         this.lastScheduledServerTime = 0;
         continue;
       }
 
-      const effectiveScheduleTime = Math.max(
-        scheduleTime,
-        audioContextRawTimeSec,
-      );
-      const effectivePlaybackTime =
-        effectiveScheduleTime + (playbackTime - scheduleTime);
       const source = this.audioContext.createBufferSource();
       source.buffer = chunk.buffer;
       source.playbackRate.value = playbackRate;
       source.connect(this.gainNode);
-      source.start(effectiveScheduleTime);
+      source.start(scheduleTime);
 
       const actualDuration = chunk.buffer.duration / playbackRate;
-      this.nextPlaybackTime = effectivePlaybackTime + actualDuration;
-      this.nextScheduleTime = effectiveScheduleTime + actualDuration;
+      this.nextPlaybackTime = playbackTime + actualDuration;
+      this.nextScheduleTime = scheduleTime + actualDuration;
       this.lastScheduledServerTime =
         chunk.serverTime + chunk.buffer.duration * 1_000_000;
 
       const scheduledEntry = {
         source,
-        startTime: effectiveScheduleTime,
-        endTime: effectiveScheduleTime + actualDuration,
+        startTime: scheduleTime,
+        endTime: scheduleTime + actualDuration,
         buffer: chunk.buffer,
         serverTime: chunk.serverTime,
         generation: chunk.generation,
@@ -1046,9 +1040,10 @@ export class AudioScheduler {
    *
    * `audioContextTime` is the render clock, the same domain `source.start()`
    * takes; audio handed to the renderer becomes audible one output latency
-   * later, so that latency is subtracted. Chunks whose target has already passed
-   * are dropped by the caller rather than shifted forward, which would render
-   * them late.
+   * later, so that latency is subtracted. Chunks whose start, after subtracting
+   * the output delay and unreported output latency, has already passed are
+   * dropped by the caller rather than shifted forward, which would render them
+   * late.
    */
   private computeTargetPlaybackTime(
     serverTimeUs: number,
