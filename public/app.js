@@ -963,8 +963,9 @@ function toggleMute() {
 function applySyncDelay() {
   const delay = sanitizeSyncDelay(parseInt(syncDelayInput.value, 10));
   syncDelayInput.value = delay;
-  if (player) {
-    player.setSyncDelay(delay);
+  const activePlayer = player ?? idlePlayer;
+  if (activePlayer) {
+    activePlayer.setSyncDelay(delay);
   } else {
     // No player yet, so seed the SDK's key for the next connect.
     saveSyncDelay(delay);
