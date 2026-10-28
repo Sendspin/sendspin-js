@@ -2,6 +2,7 @@ type NavigatorInfo = Pick<Navigator, "userAgent"> &
   Partial<Pick<Navigator, "platform" | "maxTouchPoints">>;
 
 const IOS_UNREPORTED_OUTPUT_LATENCY_MS = 55;
+const ANDROID_UNREPORTED_OUTPUT_LATENCY_MS = 17;
 
 function getNavigatorInfo(): NavigatorInfo | undefined {
   return typeof navigator === "undefined" ? undefined : navigator;
@@ -35,7 +36,11 @@ export function isAppleWebKitAudio(
 export function getUnreportedOutputLatencyMs(
   navigatorInfo: NavigatorInfo | undefined = getNavigatorInfo(),
 ): number {
-  return navigatorInfo && isIOS(navigatorInfo)
-    ? IOS_UNREPORTED_OUTPUT_LATENCY_MS
+  if (!navigatorInfo) return 0;
+  if (isIOS(navigatorInfo)) return IOS_UNREPORTED_OUTPUT_LATENCY_MS;
+  const { userAgent } = navigatorInfo;
+  // Cast receivers on Google TV also send Android in the user agent.
+  return /Android/i.test(userAgent) && !/CrKey/i.test(userAgent)
+    ? ANDROID_UNREPORTED_OUTPUT_LATENCY_MS
     : 0;
 }

@@ -16,6 +16,10 @@ const IPHONE_CHROME =
   "Mozilla/5.0 (iPhone; CPU iPhone OS 18_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/140.0.0.0 Mobile/15E148 Safari/604.1";
 const ANDROID_CHROME =
   "Mozilla/5.0 (Linux; Android 16) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Mobile Safari/537.36";
+const ANDROID_FIREFOX =
+  "Mozilla/5.0 (Android 16; Mobile; rv:141.0) Gecko/141.0 Firefox/141.0";
+const GOOGLE_TV_CAST =
+  "Mozilla/5.0 (Linux; Android 12.0; Build/STTL.240206.002) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36 CrKey/1.56.500000 DeviceType/AndroidTV";
 
 describe("getUnreportedOutputLatencyMs", () => {
   it.each([
@@ -24,7 +28,9 @@ describe("getUnreportedOutputLatencyMs", () => {
     ["macOS Firefox", MAC_FIREFOX, {}, 0, false],
     ["iPhone Safari", IPHONE_SAFARI, {}, 55, true],
     ["iPhone Chrome", IPHONE_CHROME, {}, 55, true],
-    ["Android Chrome", ANDROID_CHROME, {}, 0, false],
+    ["Android Chrome", ANDROID_CHROME, {}, 17, false],
+    ["Android Firefox", ANDROID_FIREFOX, {}, 17, false],
+    ["Google TV Cast receiver", GOOGLE_TV_CAST, {}, 0, false],
     [
       "iPad desktop mode",
       MAC_SAFARI,
