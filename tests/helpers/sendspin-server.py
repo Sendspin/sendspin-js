@@ -81,6 +81,7 @@ class HarnessServer:
             loop=asyncio.get_running_loop(),
             identity=identity,
             server_name="Sendspin JS E2E",
+            languages=["ca", "en"],
             pairing_store=self.pairing_store,
             allow_unencrypted=False,
         )

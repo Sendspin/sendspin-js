@@ -302,8 +302,6 @@ export interface ActivatePairing {
   method: PairMethod;
   /** Dynamic pairing code only: the emission format for this attempt. */
   format?: PairCodeFormat;
-  /** Dynamic pairing code only: BCP 47 tags in descending operator preference. */
-  languages?: string[];
 }
 
 export interface ServerActivate {
