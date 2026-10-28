@@ -1,7 +1,6 @@
 import type { SendspinStorage } from "./types";
 import { Identity } from "./core/noise/identity";
 import { PskStore } from "./core/noise/psk";
-import { base64urlEncode } from "./core/noise/base64url";
 import { encodePairingToken } from "./core/noise/pairing-token";
 
 export interface SendspinClientIdentity {
@@ -33,7 +32,7 @@ export function loadSendspinClientIdentity(
     pairingToken: resolved
       ? encodePairingToken(
           identity.clientId,
-          base64urlEncode(new PskStore(resolved).getOrCreatePairingPsk()),
+          new PskStore(resolved).getOrCreatePairingPsk(),
         )
       : null,
   };

@@ -20,7 +20,7 @@ import { SendspinTransport } from "./transport";
 import type { HandshakeInfo } from "./transport";
 import { SUITES } from "./noise/suites";
 import { PairingManager } from "./pairing";
-import { base64urlEncode, base64urlDecode } from "./noise/base64url";
+import { base64urlDecode } from "./noise/base64url";
 import { encodePairingToken } from "./noise/pairing-token";
 import type {
   ActivatePairing,
@@ -521,7 +521,7 @@ export class SendspinCore implements StreamHandler {
   get pairingToken(): string {
     return encodePairingToken(
       this.clientId,
-      base64urlEncode(this.pskStore.getOrCreatePairingPsk()),
+      this.pskStore.getOrCreatePairingPsk(),
     );
   }
 
