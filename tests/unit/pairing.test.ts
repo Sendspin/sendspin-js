@@ -123,8 +123,8 @@ function lastOfType(
 }
 
 /** A dynamic pairing code activation in the digits format. */
-function dynamic(languages?: string[]): ActivatePairing {
-  return { method: "dynamic_pairing_code", format: "digits", languages };
+function dynamic(): ActivatePairing {
+  return { method: "dynamic_pairing_code", format: "digits" };
 }
 
 /** Drive the server (initiator) side of a PIN PAKE against the manager. */
@@ -330,13 +330,14 @@ describe("PairingManager (dynamic_pairing_code)", () => {
     return storage;
   }
 
-  function runToConfirm(opts: SetupOpts = {}, pairing = dynamic()) {
+  function runToConfirm(opts: SetupOpts = {}, languages?: unknown) {
     const ctx = setup({
       category: "sentinel",
       onPairingCode: vi.fn(),
       ...opts,
     });
-    ctx.mgr.onActivate(["pairing"], pairing);
+    ctx.mgr.onServerHello(languages);
+    ctx.mgr.onActivate(["pairing"], dynamic());
 
     // client/pair-init carries commit_B = SHA-256(nonce_B).
     const init = lastOfType(ctx.sent, "client/pair-init")!;
@@ -408,8 +409,8 @@ describe("PairingManager (dynamic_pairing_code)", () => {
     ).toBe(null);
   });
 
-  it("forwards the activation's spoken-PIN languages alongside the PIN", () => {
-    const ctx = runToConfirm({}, dynamic(["ca", "es", "en"]));
+  it("forwards the server/hello languages alongside the PIN", () => {
+    const ctx = runToConfirm({}, ["ca", "es", "en"]);
     const call = (
       ctx.onPairingCode as ReturnType<typeof vi.fn>
     ).mock.calls.find((c) => typeof c[0] === "string")!;
@@ -422,11 +423,7 @@ describe("PairingManager (dynamic_pairing_code)", () => {
     ["non-string members", ["en", 7]],
     ["a blank tag", ["en", ""]],
   ])("drops a languages hint that is %s", (_label, languages) => {
-    const ctx = runToConfirm({}, {
-      method: "dynamic_pairing_code",
-      format: "digits",
-      languages,
-    } as ActivatePairing);
+    const ctx = runToConfirm({}, languages);
     const call = (
       ctx.onPairingCode as ReturnType<typeof vi.fn>
     ).mock.calls.find((c) => typeof c[0] === "string")!;
@@ -436,12 +433,24 @@ describe("PairingManager (dynamic_pairing_code)", () => {
     expect(ctx.close).not.toHaveBeenCalled();
   });
 
-  it("omits languages when the activation carries none", () => {
+  it("omits languages when server/hello carries none", () => {
     const ctx = runToConfirm();
     const call = (
       ctx.onPairingCode as ReturnType<typeof vi.fn>
     ).mock.calls.find((c) => typeof c[0] === "string")!;
     expect(call[1]).toBeUndefined();
+  });
+
+  it("keeps the server/hello languages across a re-handshake", () => {
+    const ctx = runToConfirm({}, ["ca", "en"]);
+    ctx.mgr.reset();
+    ctx.mgr.onActivate(["pairing"], dynamic());
+    ctx.mgr.onPairInit({ nonce_A: base64urlEncode(new Uint8Array(32)) });
+    const call = (ctx.onPairingCode as ReturnType<typeof vi.fn>).mock.calls.at(
+      -1,
+    )!;
+    expect(call[0]).toMatch(/^[0-9]{6}$/);
+    expect(call[1]).toEqual(["ca", "en"]);
   });
 
   it("fails closed when a dynamic_pairing_code activation omits format", () => {

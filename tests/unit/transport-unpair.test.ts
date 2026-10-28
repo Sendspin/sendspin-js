@@ -42,7 +42,7 @@ describe("transport server/unpair", () => {
     h.transport.handleRaw({
       data: serverSession.encrypt(frame).buffer,
     } as MessageEvent);
-    // trust_level none: ignored, no goodbye sent, socket stays open, sentinel intact.
+    // Not a long-term PSK: ignored, no goodbye sent, socket stays open, sentinel intact.
     expect(h.ws.disconnected).toBe(false);
     expect(fakeWsSend(h).binary.length).toBe(before);
     expect(h.store.lookup(SENTINEL_PSK_ID)).not.toBeNull();

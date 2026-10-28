@@ -26,7 +26,6 @@ const FRAGMENT_FLAGS_RESERVED = 0xfc;
 type State = "idle" | "await_server_init" | "await_noise1" | "transport";
 
 export interface HandshakeInfo {
-  trustLevel: "user" | "none";
   category: PskEntry["category"];
   serverId: string;
   entry: PskEntry;
@@ -111,7 +110,6 @@ export class SendspinTransport {
   get handshakeInfo(): HandshakeInfo | null {
     if (!this.matched) return null;
     return {
-      trustLevel: this.matched.category === "long_term" ? "user" : "none",
       category: this.matched.category,
       serverId: this.serverId,
       entry: this.matched,
@@ -421,7 +419,7 @@ export class SendspinTransport {
   }
 
   private handleUnpair(): void {
-    // trust_level none (Sentinel or in-flight pairing): ignore.
+    // Not a long-term PSK (Sentinel or in-flight pairing): ignore.
     if (this.matched?.category !== "long_term") return;
     this.deps.pskStore.removeByPskId(this.matched.pskId);
     this.sendGoodbyeAndClose("unpaired");

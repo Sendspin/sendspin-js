@@ -405,18 +405,21 @@ describe("Sendspin encryption and pairing E2E (aiosendspin)", () => {
     async () => {
       const storage = memoryStorage();
       const pins: string[] = [];
+      let pinLanguages: string[] | undefined;
       const connection = await connect({
         clientName: "Dynamic PIN client",
         suite: "aesgcm",
         storage,
-        onPairingCode: (pin) => {
+        onPairingCode: (pin, languages) => {
           if (pin !== null) pins.push(pin);
+          pinLanguages = languages;
         },
       });
 
       await server.beginCodePairing("dynamic_pairing_code");
       expect((await server.waitForCodeRequest()).status).toBe("code_requested");
       await waitFor(() => pins.length === 1);
+      expect(pinLanguages).toEqual(["ca", "en"]);
       connection.core.setVolume(42);
       await new Promise((resolve) => setTimeout(resolve, 5_200));
       expect(connection.socket.readyState).toBe(WebSocket.OPEN);
