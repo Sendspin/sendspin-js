@@ -144,6 +144,7 @@ export class SendspinCore implements StreamHandler {
       storage: config.storage ?? null,
       onPairingCode: config.onPairingCode ?? null,
       pairingCodeOutChannels: config.pairingCodeOutChannels,
+      pairingCodeFormats: config.pairingCodeFormats,
       staticPairingCode: config.staticPairingCode,
       staticPairingCodeLocations: config.staticPairingCodeLocations,
       pairingPskLocations: config.pairingPskLocations,

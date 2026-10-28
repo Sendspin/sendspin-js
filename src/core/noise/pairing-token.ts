@@ -46,3 +46,7 @@ export function encodePairingToken(
   return encodeToken("0", payload);
 }
 
+/** The version 1 token carrying a dynamic pairing code in the qr_code format. */
+export function encodeQrCodeToken(code: Uint8Array): string {
+  return encodeToken("1", code);
+}

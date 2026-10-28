@@ -95,6 +95,7 @@ export class SendspinPlayer {
       onPairing: config.onPairing,
       onPairingCode: config.onPairingCode,
       pairingCodeOutChannels: config.pairingCodeOutChannels,
+      pairingCodeFormats: config.pairingCodeFormats,
       staticPairingCode: config.staticPairingCode,
       staticPairingCodeLocations: config.staticPairingCodeLocations,
       pairingPskLocations: config.pairingPskLocations,

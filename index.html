@@ -379,6 +379,7 @@
           <div class="form-group" id="pairing-pin-group" hidden>
             <label>Pairing code</label>
             <code id="pairing-pin" class="pairing-value">-</code>
+            <div id="pairing-qr" hidden></div>
             <button id="cancel-pairing" class="btn btn-secondary">
               Cancel pairing
             </button>
@@ -455,6 +456,16 @@
             <small
               >Advertises the "speaker" out-channel and reads the code aloud in
               the server's preferred language.</small
+            >
+          </div>
+          <div class="form-group">
+            <label>
+              <input type="checkbox" id="pin-qr" />
+              Offer the dynamic pairing code as a QR code
+            </label>
+            <small
+              >Advertises the "qr_code" format. The server picks digits or a QR
+              code for each attempt.</small
             >
           </div>
           <div class="form-group">

@@ -8,6 +8,7 @@ const PAIRING_CODE_DERIVE_LABEL = new TextEncoder().encode(
 const PAIR_COMMIT_LABEL = new TextEncoder().encode("sendspin-pair-commit-v1");
 export const NONCE_SIZE = 32;
 const DYNAMIC_CODE_DIGITS = 6;
+const QR_CODE_SIZE = 24;
 export const STATIC_PIN_DIGITS = 8;
 
 const STATIC_PIN_RE = new RegExp(`^[0-9]{${STATIC_PIN_DIGITS}}$`);
@@ -64,3 +65,14 @@ export function derivePairingCode(
   return code.toString().padStart(DYNAMIC_CODE_DIGITS, "0");
 }
 
+/** Derive the 24-byte dynamic pairing code of the qr_code format. */
+export function deriveQrPairingCode(
+  handshakeHash: Uint8Array,
+  nonceA: Uint8Array,
+  nonceB: Uint8Array,
+): Uint8Array {
+  return pairingCodeDigest(handshakeHash, nonceA, nonceB).slice(
+    0,
+    QR_CODE_SIZE,
+  );
+}
