@@ -3,6 +3,7 @@ import { base64urlEncode, base64urlDecode } from "./noise/base64url";
 import type {
   ActivatePairing,
   PairAbortReason,
+  PairCodeFormat,
   PairMethod,
   PairOutChannel,
   PairSecretLocation,
@@ -14,10 +15,12 @@ import {
   NONCE_SIZE,
   commitNonce,
   derivePairingCode,
+  deriveQrPairingCode,
   generateNonce,
   isValidStaticPairingCode,
 } from "./pake/pin";
 import { sha256 } from "@noble/hashes/sha2";
+import { encodeQrCodeToken } from "./noise/pairing-token";
 
 export type PairingEvent = "pending" | "started" | "finalized" | "aborted";
 
@@ -104,9 +107,17 @@ export interface PairingDeps {
   /** Persists the dynamic pairing code round count. Null = in-memory only. */
   storage: SendspinStorage | null;
   /** Enables dynamic_pairing_code: surfaces the code (null = attempt ended, hide it). */
-  onPairingCode: ((code: string | null, languages?: string[]) => void) | null;
+  onPairingCode:
+    | ((
+        code: string | null,
+        languages?: string[],
+        format?: PairCodeFormat,
+      ) => void)
+    | null;
   /** Channels advertised for dynamic pairing code emission. Default ["display"]. */
   pairingCodeOutChannels?: PairOutChannel[];
+  /** Emission formats advertised for the dynamic pairing code. Default ["digits"]. */
+  pairingCodeFormats?: PairCodeFormat[];
   /** Enables static_pairing_code: this device's fixed 8-digit pairing code. */
   staticPairingCode?: string;
   /** Where the operator finds the static pairing code. Omitted when unset. */
@@ -137,8 +148,12 @@ export class PairingManager {
   private attemptIndex = 0;
   /** The server/hello operator language preferences, in descending order. */
   private languages: string[] | undefined;
-  /** The dynamic pairing code of the current attempt, derived in its first round. */
+  /** The emission format of the current dynamic pairing code attempt. */
+  private format: PairCodeFormat | null = null;
+  /** The dynamic pairing code of the current attempt as shown to the app. */
   private code: string | null = null;
+  /** The CPace PRS of the current dynamic pairing code attempt. */
+  private prs: Uint8Array | null = null;
   /** The current round of the attempt, 0 before its first server/pair-init. */
   private round = 0;
   /** Dynamic pairing code rounds since the last verified server_kc, persisted. */
@@ -152,6 +167,18 @@ export class PairingManager {
       !isValidStaticPairingCode(deps.staticPairingCode)
     ) {
       throw new Error("staticPairingCode must be exactly 8 decimal digits");
+    }
+    const formats = deps.pairingCodeFormats;
+    if (formats?.length === 0) {
+      throw new Error("pairingCodeFormats must not be empty");
+    }
+    if (
+      formats?.includes("qr_code") &&
+      !(deps.pairingCodeOutChannels ?? ["display"]).includes("display")
+    ) {
+      throw new Error(
+        "qr_code in pairingCodeFormats needs display in pairingCodeOutChannels",
+      );
     }
     this.rounds = this.loadRounds();
   }
@@ -169,7 +196,7 @@ export class PairingManager {
     if (this.deps.onPairingCode) {
       methods.dynamic_pairing_code = {
         out_channels: this.deps.pairingCodeOutChannels ?? ["display"],
-        formats: ["digits"],
+        formats: this.deps.pairingCodeFormats ?? ["digits"],
       };
     }
     return methods;
@@ -268,15 +295,6 @@ export class PairingManager {
       return;
     }
     this.method = method;
-    if (method === "pairing_psk") {
-      this.sendFinalize();
-      // Arm the attempt timer and leave a non-idle phase so the attempt can be
-      // cancelled and times out if the server never sends server/pair-finalize.
-      this.phase = "await-finalize";
-      this.armAttemptTimer();
-      this.deps.onEvent?.("started");
-      return;
-    }
     if (method === "dynamic_pairing_code") {
       const format = pairing.format;
       // A missing format is a protocol error, like a missing method.
@@ -288,6 +306,7 @@ export class PairingManager {
         this.abort("method_not_supported");
         return;
       }
+      this.format = format;
     }
     if (this.isHeldBack()) {
       this.phase = "held-back";
@@ -322,7 +341,13 @@ export class PairingManager {
     if (this.round === 0) {
       const nonceA = this.decode(payload.nonce_A, NONCE_SIZE);
       if (!nonceA) return this.fail();
-      this.code = derivePairingCode(h, nonceA, this.nonceB!);
+      if (this.format === "qr_code") {
+        this.prs = deriveQrPairingCode(h, nonceA, this.nonceB!);
+        this.code = encodeQrCodeToken(this.prs);
+      } else {
+        this.code = derivePairingCode(h, nonceA, this.nonceB!);
+        this.prs = utf8(this.code);
+      }
     } else if (payload.nonce_A !== undefined) {
       return this.fail();
     }
@@ -333,13 +358,13 @@ export class PairingManager {
     this.currentSid = this.sid(h, this.attemptIndex, this.round);
     this.cpace = CPace.start({
       role: "responder",
-      prs: new TextEncoder().encode(this.code!),
+      prs: this.prs!,
       sid: this.currentSid,
       ada: CPACE_AD_A,
       adb: CPACE_AD_B,
     });
     this.phase = "await-auth";
-    this.deps.onPairingCode?.(this.code, this.languages);
+    this.deps.onPairingCode?.(this.code, this.languages, this.format!);
   }
 
   /** server/pair-auth: the server's CPace public share (both PIN methods). */
@@ -399,7 +424,7 @@ export class PairingManager {
   onPairFinalize(): void {
     if (this.phase === "idle") return this.strayMessage();
     if (this.phase !== "await-finalize" || !this.pendingPsk) return this.fail();
-    this.deps.pskStore.addLongTerm(this.pendingPsk, this.deps.serverId());
+    this.deps.pskStore.replaceLongTerm(this.pendingPsk, this.deps.serverId());
     this.clearAttempt();
     this.closeWindow();
     this.deps.onEvent?.("finalized");
@@ -434,6 +459,17 @@ export class PairingManager {
   private startAttempt(): void {
     if (this.method === "static_pairing_code") this.windowBound = true;
     this.armAttemptTimer();
+    if (this.method === "pairing_psk") {
+      this.deps.sendControl({
+        type: "client/pair-init",
+        payload: { pairing_index: this.attemptIndex },
+      });
+      // client/pair-finalize follows immediately, without waiting (spec).
+      this.phase = "await-finalize";
+      this.sendFinalize();
+      this.deps.onEvent?.("started");
+      return;
+    }
     this.deps.onEvent?.("started");
     if (this.method === "dynamic_pairing_code") {
       this.nonceB = generateNonce();
@@ -561,7 +597,9 @@ export class PairingManager {
     this.cpace = null;
     this.currentSid = null;
     this.nonceB = null;
+    this.format = null;
     this.code = null;
+    this.prs = null;
     this.round = 0;
   }
 

@@ -17,14 +17,12 @@ describe("loadSendspinClientIdentity", () => {
     const preread = loadSendspinClientIdentity(storage);
     const core = new SendspinCore({ baseUrl: "http://server", storage });
     expect(core.clientId).toBe(preread.clientId);
-    expect(core.pairingPsk).toBe(preread.pairingPsk);
     expect(core.pairingToken).toBe(preread.pairingToken);
     expect("getPairingToken" in preread).toBe(false);
   });
 
   it("reports no pairing credentials without storage", () => {
     const identity = loadSendspinClientIdentity(null);
-    expect(identity.pairingPsk).toBeNull();
     expect(identity.pairingToken).toBeNull();
     expect("getPairingToken" in identity).toBe(false);
   });

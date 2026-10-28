@@ -191,9 +191,12 @@ const player = new SendspinPlayer({
   },
   // Dynamic pairing: show the derived code to the operator (null = hide).
   // languages carries the operator's spoken-code preference, when the server sends one.
-  onPairingCode: (code, languages) => showCodeDialog(code, languages),
+  // format is "digits" for a 6-digit code or "qr_code" for a pairing token to render as a QR code.
+  onPairingCode: (code, languages, format) => showCodeDialog(code, languages, format),
   // Advertise "speaker" if the app can speak the code. `languages` says which language to use.
   pairingCodeOutChannels: ['display'],
+  // Add "qr_code" if the app can render a QR code on its display.
+  pairingCodeFormats: ['digits', 'qr_code'],
   // Or, for devices with no display or speaker: a fixed 8-digit code,
   // random and unique per device. Avoid setting both code methods.
   // staticPairingCode: deviceStaticCode,
@@ -214,7 +217,10 @@ The SDK supports all three pairing methods from the spec:
 - **Dynamic pairing code** (enabled by `onPairingCode`): the server starts
   pairing, the SDK derives a one-time code and passes it to `onPairingCode` for
   display, and the operator enters it into the server. After a wrong entry the
-  SDK asks the server for another round and passes the same code again.
+  SDK asks the server for another round and passes the same code again. With
+  `qr_code` in `pairingCodeFormats` the server may instead ask for a QR code:
+  the SDK then passes a version 1 pairing token, which the app renders as a QR
+  code with a library of its choice.
 - **Static pairing code** (enabled by `staticPairingCode`): the operator enters
   this device's fixed 8-digit code into the server, then makes a local gesture
   that calls `player.openPairingWindow()`. The window lasts ~5 minutes and
@@ -232,8 +238,8 @@ only on a deliberate action on the device.
 console.log('Client ID:', player.clientId);              // 43-char base64url pubkey
 console.log('Pairing token:', player.pairingToken);      // spec version 0
 
-// Rotate the Pairing PSK (e.g. if it may have leaked)
-const newPsk = player.rotatePairingPsk();
+// Rotate the Pairing PSK (e.g. if the token may have leaked)
+const newToken = player.rotatePairingPsk();
 
 player.openPairingWindow();                      // operator gesture for a static code attempt
 player.releasePairingHold();                     // operator action after the round limit
@@ -257,7 +263,7 @@ exists. A player built afterwards on the same storage adopts this identity.
 ```typescript
 import { loadSendspinClientIdentity } from '@sendspin/sendspin-js';
 
-const { clientId, pairingPsk, pairingToken } = loadSendspinClientIdentity();
+const { clientId, pairingToken } = loadSendspinClientIdentity();
 ```
 
 ### Core + scheduler as separate layers

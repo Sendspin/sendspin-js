@@ -9,12 +9,17 @@ import { pskId } from "../../src/core/noise/constants";
 import type { PskCategory } from "../../src/core/noise/psk";
 import type {
   ActivatePairing,
+  PairCodeFormat,
   PairOutChannel,
   PairSecretLocation,
   SendspinStorage,
 } from "../../src/types";
 import { CPace } from "../../src/core/pake/cpace";
-import { commitNonce, derivePairingCode } from "../../src/core/pake/pin";
+import {
+  commitNonce,
+  derivePairingCode,
+  deriveQrPairingCode,
+} from "../../src/core/pake/pin";
 import { SUITES } from "../../src/core/noise/suites";
 import { sha256 } from "@noble/hashes/sha2";
 
@@ -64,6 +69,24 @@ function unwrap(
   return SUITES.chacha.aeadDecrypt(kWrap, 0n, EMPTY, wrapped);
 }
 
+/** Server side: the payload of a pairing token, decoded per the spec. */
+function decodeTokenPayload(token: string): Uint8Array {
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+  const out: number[] = [];
+  let bits = 0;
+  let value = 0;
+  for (const ch of token.slice(4).replace(/9/g, "2")) {
+    value = (value << 5) | alphabet.indexOf(ch);
+    bits += 5;
+    if (bits >= 8) {
+      bits -= 8;
+      out.push((value >>> bits) & 0xff);
+      value &= (1 << bits) - 1;
+    }
+  }
+  return Uint8Array.from(out);
+}
+
 function memStorage(): SendspinStorage & { data: Map<string, string> } {
   const data = new Map<string, string>();
   return {
@@ -73,16 +96,22 @@ function memStorage(): SendspinStorage & { data: Map<string, string> } {
   };
 }
 
-type OnPin = (pin: string | null, languages?: string[]) => void;
+type OnPin = (
+  pin: string | null,
+  languages?: string[],
+  format?: PairCodeFormat,
+) => void;
 
 interface SetupOpts {
   category?: PskCategory;
   storage?: SendspinStorage | null;
   onPairingCode?: OnPin | null;
   pairingCodeOutChannels?: PairOutChannel[];
+  pairingCodeFormats?: PairCodeFormat[];
   staticPairingCode?: string;
   staticPairingCodeLocations?: PairSecretLocation[];
   pairingPskLocations?: PairSecretLocation[];
+  onEvent?: (e: string) => void;
 }
 
 function setup(opts: SetupOpts = {}) {
@@ -104,12 +133,14 @@ function setup(opts: SetupOpts = {}) {
     storage: opts.storage ?? null,
     onPairingCode: onPairingCode as OnPin | null,
     pairingCodeOutChannels: opts.pairingCodeOutChannels,
+    pairingCodeFormats: opts.pairingCodeFormats,
     staticPairingCode: opts.staticPairingCode,
     staticPairingCodeLocations: opts.staticPairingCodeLocations,
     pairingPskLocations: opts.pairingPskLocations,
     onEvent: (e, d) => {
       events.push(e);
       details.push(d);
+      opts.onEvent?.(e);
     },
   });
   return { store, sent, events, details, close, mgr, onPairingCode };
@@ -139,16 +170,33 @@ function serverPake(pin: string, index = 1, round = 1) {
 }
 
 describe("PairingManager (pairing_psk)", () => {
-  it("finalizes a pairing_psk flow and persists a bound record", () => {
+  it("finalizes a pairing_psk flow and replaces the server's record", () => {
     const { store, sent, mgr } = setup();
+    const oldPsk = new Uint8Array(32).fill(9);
+    store.addLongTerm(oldPsk, "SERVER_ID");
     mgr.onActivate(["pairing"], { method: "pairing_psk" });
-    const fin = sent[0] as { type: string; payload: { long_term_psk: string } };
-    expect(fin.type).toBe("client/pair-finalize");
+    expect(sent.map((m) => m.type)).toEqual([
+      "client/pair-init",
+      "client/pair-finalize",
+    ]);
+    expect(sent[0]!.payload).toEqual({ pairing_index: 1 });
+    const fin = sent[1] as { type: string; payload: { long_term_psk: string } };
     expect(fin.payload.long_term_psk).toHaveLength(43);
 
     mgr.onPairFinalize();
     const ltPsk = base64urlDecode(fin.payload.long_term_psk);
     expect(store.lookup(pskId(ltPsk))?.serverId).toBe("SERVER_ID");
+    expect(store.lookup(pskId(oldPsk))).toBeNull();
+  });
+
+  it("cancels the attempt from the started callback", () => {
+    const { sent, mgr } = setup({
+      onEvent: (e) => e === "started" && mgr.cancelPairing(),
+    });
+    mgr.onActivate(["pairing"], { method: "pairing_psk" });
+    expect(lastOfType(sent, "pair/abort")!.payload!.reason).toBe(
+      "user_cancelled",
+    );
   });
 
   it("aborts an unsupported method and keeps the connection open", () => {
@@ -224,7 +272,9 @@ describe("PairingManager (pairing_psk)", () => {
   it("discards the pending PSK on leave-pairing (non-pairing activate)", () => {
     const { store, sent, close, mgr } = setup();
     mgr.onActivate(["pairing"], { method: "pairing_psk" });
-    const fin = sent[0] as { payload: { long_term_psk: string } };
+    const fin = lastOfType(sent, "client/pair-finalize") as {
+      payload: { long_term_psk: string };
+    };
     mgr.onActivate(["playback"]); // leave pairing without finalize
     // The server left pairing itself, so a later server/pair-finalize is out of sequence.
     mgr.onPairFinalize();
@@ -289,6 +339,21 @@ describe("client/hello supported_pair_methods", () => {
       pairing_psk: { locations: ["leaflet"] },
       static_pairing_code: { locations: ["device", "leaflet"] },
     });
+  });
+
+  it("advertises the configured formats and rejects ones client/hello may not carry", () => {
+    const { mgr } = setup({ pairingCodeFormats: ["digits", "qr_code"] });
+    expect(mgr.supportedPairMethods().dynamic_pairing_code!.formats).toEqual([
+      "digits",
+      "qr_code",
+    ]);
+    expect(() => setup({ pairingCodeFormats: [] })).toThrow(/not be empty/);
+    expect(() =>
+      setup({
+        pairingCodeFormats: ["qr_code"],
+        pairingCodeOutChannels: ["speaker"],
+      }),
+    ).toThrow(/display/);
   });
 
   it("rejects a malformed static PIN", () => {
@@ -407,6 +472,51 @@ describe("PairingManager (dynamic_pairing_code)", () => {
     expect(
       (onPairingCode as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[0],
     ).toBe(null);
+  });
+
+  it("shows a qr_code attempt as a version 1 token and runs CPace on the raw code", () => {
+    const { mgr, sent, onPairingCode } = setup({
+      category: "sentinel",
+      onPairingCode: vi.fn(),
+      pairingCodeFormats: ["qr_code"],
+    });
+    mgr.onActivate(["pairing"], {
+      method: "dynamic_pairing_code",
+      format: "qr_code",
+    });
+    const nonceA = new Uint8Array(32).fill(0xa1);
+    mgr.onPairInit({ nonce_A: base64urlEncode(nonceA) });
+    const [token, , format] = (onPairingCode as ReturnType<typeof vi.fn>).mock
+      .calls[0]!;
+    expect(format).toBe("qr_code");
+    expect(token).toMatch(/^SP:1[A-Z3-9]{39}$/);
+
+    // The server scans the token and feeds the raw 24-byte code to CPace.
+    const code = decodeTokenPayload(token);
+    expect(code).toHaveLength(24);
+    const server = CPace.start({
+      role: "initiator",
+      prs: code,
+      sid: sidFor(1),
+      ada: CPACE_AD_A,
+      adb: CPACE_AD_B,
+    });
+    mgr.onPairAuth({ pake_msg_1: base64urlEncode(server.publicShare) });
+    const auth = lastOfType(sent, "client/pair-auth")!;
+    server.derive(base64urlDecode(auth.payload!.pake_msg_2 as string));
+    mgr.onPairConfirm({ server_kc: base64urlEncode(server.tag()) });
+
+    const confirm = lastOfType(sent, "client/pair-confirm")!;
+    expect(
+      server.verify(base64urlDecode(confirm.payload!.client_kc as string)),
+    ).toBe(true);
+    const nonceB = unwrap(
+      NONCE_WRAP_LABEL,
+      base64urlDecode(confirm.payload!.wrapped_nonce_B as string),
+      sidFor(1),
+      server.isk,
+    );
+    expect(deriveQrPairingCode(HANDSHAKE_HASH, nonceA, nonceB)).toEqual(code);
   });
 
   it("forwards the server/hello languages alongside the PIN", () => {

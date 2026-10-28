@@ -24,22 +24,29 @@ function encodeBase32(bytes: Uint8Array): string {
   return encoded;
 }
 
+function encodeToken(version: string, payload: Uint8Array): string {
+  return `SP:${version}${encodeBase32(payload).replace(/2/g, "9")}`;
+}
+
 export function encodePairingToken(
   clientId: string,
-  pairingPsk: string,
+  pairingPsk: Uint8Array,
 ): string {
   const clientKey = base64urlDecode(clientId);
-  const psk = base64urlDecode(pairingPsk);
   if (clientKey.length !== KEY_SIZE) {
     throw new Error(`clientId must decode to ${KEY_SIZE} bytes`);
   }
-  if (psk.length !== KEY_SIZE) {
-    throw new Error(`pairingPsk must decode to ${KEY_SIZE} bytes`);
+  if (pairingPsk.length !== KEY_SIZE) {
+    throw new Error(`pairingPsk must be ${KEY_SIZE} bytes`);
   }
 
-  const payload = new Uint8Array(clientKey.length + psk.length);
+  const payload = new Uint8Array(clientKey.length + pairingPsk.length);
   payload.set(clientKey);
-  payload.set(psk, clientKey.length);
-  const body = encodeBase32(payload).replace(/2/g, "9");
-  return `SP:0${body}`;
+  payload.set(pairingPsk, clientKey.length);
+  return encodeToken("0", payload);
+}
+
+/** The version 1 token carrying a dynamic pairing code in the qr_code format. */
+export function encodeQrCodeToken(code: Uint8Array): string {
+  return encodeToken("1", code);
 }

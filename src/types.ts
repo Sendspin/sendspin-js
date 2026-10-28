@@ -735,9 +735,15 @@ export interface SendspinCoreConfig {
    * Called with null when the attempt ends, so hide the code then.
    * languages lists the operator's preferred languages for speaking it, most
    * preferred first, if the server sent any.
+   * format is set with every code. For "digits" the code is 6 digits. For
+   * "qr_code" it is a pairing token to render as a QR code.
    * Avoid setting both this and staticPairingCode.
    */
-  onPairingCode?: (code: string | null, languages?: string[]) => void;
+  onPairingCode?: (
+    code: string | null,
+    languages?: string[],
+    format?: PairCodeFormat,
+  ) => void;
 
   /**
    * How the app presents the pairing code. Default ["display"].
@@ -745,6 +751,13 @@ export interface SendspinCoreConfig {
    * passed to onPairingCode.
    */
   pairingCodeOutChannels?: PairOutChannel[];
+
+  /**
+   * The pairing code formats the app can present. Default ["digits"].
+   * Add "qr_code" only if the app can render a QR code on its display, which
+   * pairingCodeOutChannels must then include.
+   */
+  pairingCodeFormats?: PairCodeFormat[];
 
   /**
    * This device's fixed 8-digit pairing code, for devices with no display or

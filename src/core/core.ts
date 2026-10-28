@@ -20,7 +20,7 @@ import { SendspinTransport } from "./transport";
 import type { HandshakeInfo } from "./transport";
 import { SUITES } from "./noise/suites";
 import { PairingManager } from "./pairing";
-import { base64urlEncode, base64urlDecode } from "./noise/base64url";
+import { base64urlDecode } from "./noise/base64url";
 import { encodePairingToken } from "./noise/pairing-token";
 import type {
   ActivatePairing,
@@ -101,7 +101,7 @@ export class SendspinCore implements StreamHandler {
       if (!r.serverId) throw new Error("longTermPsks entries need a serverId");
       this.pskStore.addLongTerm(base64urlDecode(r.psk), r.serverId);
     }
-    // Standing candidate: a server may re-handshake to it before the app reads pairingPsk.
+    // Standing candidate: a server may re-handshake to it before the app reads pairingToken.
     this.pskStore.getOrCreatePairingPsk();
 
     this.transport = new SendspinTransport(
@@ -144,6 +144,7 @@ export class SendspinCore implements StreamHandler {
       storage: config.storage ?? null,
       onPairingCode: config.onPairingCode ?? null,
       pairingCodeOutChannels: config.pairingCodeOutChannels,
+      pairingCodeFormats: config.pairingCodeFormats,
       staticPairingCode: config.staticPairingCode,
       staticPairingCodeLocations: config.staticPairingCodeLocations,
       pairingPskLocations: config.pairingPskLocations,
@@ -522,21 +523,16 @@ export class SendspinCore implements StreamHandler {
     return this.identity.clientId;
   }
 
-  /**
-   * The client's Pairing PSK (base64url). Keep it secret, and show the
-   * operator pairingToken, not this.
-   */
-  get pairingPsk(): string {
-    return base64urlEncode(this.pskStore.getOrCreatePairingPsk());
-  }
-
   get pairingToken(): string {
-    return encodePairingToken(this.clientId, this.pairingPsk);
+    return encodePairingToken(
+      this.clientId,
+      this.pskStore.getOrCreatePairingPsk(),
+    );
   }
 
   rotatePairingPsk(): string {
     this.pskStore.rotatePairingPsk();
-    return this.pairingPsk;
+    return this.pairingToken;
   }
 
   /**

@@ -95,6 +95,7 @@ export class SendspinPlayer {
       onPairing: config.onPairing,
       onPairingCode: config.onPairingCode,
       pairingCodeOutChannels: config.pairingCodeOutChannels,
+      pairingCodeFormats: config.pairingCodeFormats,
       staticPairingCode: config.staticPairingCode,
       staticPairingCodeLocations: config.staticPairingCodeLocations,
       pairingPskLocations: config.pairingPskLocations,
@@ -339,14 +340,6 @@ export class SendspinPlayer {
   }
 
   /**
-   * The client's Pairing PSK (base64url). Keep it secret, and show the
-   * operator pairingToken, not this.
-   */
-  get pairingPsk(): string {
-    return this.core.pairingPsk;
-  }
-
-  /**
    * The token the operator enters on the server to pair. Keep it secret,
    * since anyone with it can pair.
    */
@@ -354,7 +347,7 @@ export class SendspinPlayer {
     return this.core.pairingToken;
   }
 
-  /** Rotate the Pairing PSK, returning the new value. */
+  /** Rotate the Pairing PSK, returning the new pairing token. */
   rotatePairingPsk(): string {
     return this.core.rotatePairingPsk();
   }

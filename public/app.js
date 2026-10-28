@@ -32,6 +32,7 @@ const STORAGE_KEYS = {
   STATIC_PIN_LOCATIONS: "sendspin-sample-static-pin-locations",
   PAIRING_PSK_LOCATIONS: "sendspin-sample-pairing-psk-locations",
   PIN_SPEAKER: "sendspin-sample-pin-speaker",
+  PIN_QR: "sendspin-sample-pin-qr",
 };
 
 // DOM Elements
@@ -69,6 +70,7 @@ const unpairedAccessCheckbox = document.getElementById("unpaired-access");
 const pairingPinGroup = document.getElementById("pairing-pin-group");
 const pairingPinEl = document.getElementById("pairing-pin");
 const pairingPinHint = document.getElementById("pairing-pin-hint");
+const pairingQrEl = document.getElementById("pairing-qr");
 const pairingPendingGroup = document.getElementById("pairing-pending-group");
 const cancelPairingBtn = document.getElementById("cancel-pairing");
 const staticPinInput = document.getElementById("static-pin");
@@ -80,6 +82,7 @@ const pairingPskLocationInputs = document.querySelectorAll(
   "#pairing-psk-locations input[type=checkbox]",
 );
 const pinSpeakerInput = document.getElementById("pin-speaker");
+const pinQrInput = document.getElementById("pin-qr");
 const openPairingWindowBtn = document.getElementById("open-pairing-window");
 const roundLimitEl = document.getElementById("round-limit");
 const releasePairingHoldBtn = document.getElementById("release-pairing-hold");
@@ -305,10 +308,21 @@ function onPairing(event, detail) {
 
 /**
  * Show or hide the dynamic pairing code (null = attempt ended). languages is
- * the server's spoken-code preference, absent when it sent none.
+ * the server's spoken-code preference, absent when it sent none. In the
+ * qr_code format the code is a pairing token to show as a QR code.
  */
-function onPairingCode(pin, languages) {
+function onPairingCode(pin, languages, format) {
   pairingPinGroup.hidden = pin === null;
+  pairingQrEl.hidden = format !== "qr_code";
+  if (format === "qr_code") {
+    pairingPinEl.textContent = pin;
+    pairingPinHint.textContent =
+      "Scan this QR code with the server, or paste the token into it.";
+    renderQrCode(pin).catch(() =>
+      showToast("Could not load the QR code library", "error"),
+    );
+    return;
+  }
   pairingPinEl.textContent = pin === null ? "-" : codeGroups(pin).join("-");
   pairingPinHint.textContent = languages?.length
     ? `Enter this code into the server. Spoken preference: ${languages.join(", ")}.`
@@ -319,6 +333,16 @@ function onPairingCode(pin, languages) {
     return;
   }
   if (pinSpeakerInput.checked) speakPin(pin, languages);
+}
+
+/** Render the token as a QR code with a QR library loaded on first use. */
+async function renderQrCode(token) {
+  const { qrcode } =
+    await import("https://unpkg.com/qrcode-generator@2.0.4/dist/qrcode.mjs");
+  const qr = qrcode(0, "M");
+  qr.addData(token, "Alphanumeric");
+  qr.make();
+  pairingQrEl.innerHTML = qr.createSvgTag(4);
 }
 
 /** Split the 6-digit code into the 3-3 groups the spec presents it in. */
@@ -651,6 +675,7 @@ function loadSettings() {
 
   pinSpeakerInput.checked =
     localStorage.getItem(STORAGE_KEYS.PIN_SPEAKER) === "true";
+  pinQrInput.checked = localStorage.getItem(STORAGE_KEYS.PIN_QR) === "true";
 
   const savedCorrectionMode = localStorage.getItem(
     STORAGE_KEYS.CORRECTION_MODE,
@@ -830,6 +855,9 @@ async function connect() {
       pairingCodeOutChannels: pinSpeakerInput.checked
         ? ["display", "speaker"]
         : ["display"],
+      pairingCodeFormats: pinQrInput.checked
+        ? ["digits", "qr_code"]
+        : ["digits"],
       onPairing,
       onPairingCode,
       onStateChange,
@@ -1081,8 +1109,7 @@ function init() {
   });
   rotatePskBtn.addEventListener("click", () => {
     if (!player) return;
-    player.rotatePairingPsk();
-    pairingTokenEl.textContent = player.pairingToken;
+    pairingTokenEl.textContent = player.rotatePairingPsk();
     showToast("Pairing token rotated", "success");
   });
   staticPinInput.addEventListener("change", () => {
@@ -1118,6 +1145,10 @@ function init() {
       String(pinSpeakerInput.checked),
     );
     if (player) showToast("Out-channels apply on the next connect", "info");
+  });
+  pinQrInput.addEventListener("change", () => {
+    localStorage.setItem(STORAGE_KEYS.PIN_QR, String(pinQrInput.checked));
+    if (player) showToast("Formats apply on the next connect", "info");
   });
   openPairingWindowBtn.addEventListener("click", () => {
     if (!player) {

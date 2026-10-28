@@ -6,9 +6,4 @@ export interface KnownViolation {
 }
 
 /** Non-compliance the client still shows, removed as each gap is fixed. */
-export const KNOWN_VIOLATIONS: readonly KnownViolation[] = [
-  {
-    gap: "G20",
-    message: "Pairing PSK client/pair-finalize sent without client/pair-init",
-  },
-];
+export const KNOWN_VIOLATIONS: readonly KnownViolation[] = [];
