@@ -52,7 +52,8 @@ connectButton.addEventListener('click', async () => {
   await player.connect();
 });
 
-// Local volume control (affects this player only)
+// Local volume control (affects this player only). The SDK saves volume and
+// mute through `storage` (localStorage by default) and restores them on load.
 player.setVolume(80);
 player.setMuted(false);
 

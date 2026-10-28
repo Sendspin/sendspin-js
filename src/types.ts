@@ -641,8 +641,9 @@ export interface SendspinCoreConfig {
 
   /**
    * Storage for persisting SDK state: the identity key, the Pairing PSK,
-   * paired server keys, the pairing round count, cached output latency and
-   * the server-commanded output delay. Keys are stored as plain text.
+   * paired server keys, the pairing round count, cached output latency,
+   * the output delay, and the volume and mute state. Keys are stored as plain
+   * text.
    * SendspinCore persists only when this is provided. SendspinPlayer defaults
    * it to localStorage. Pass null to disable persistence.
    */

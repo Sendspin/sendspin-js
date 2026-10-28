@@ -19,9 +19,10 @@ console.log(`Loading SDK from: ${sdkPath}`);
 // LocalStorage keys
 const STORAGE_KEYS = {
   SERVER_URL: "sendspin-server-url",
+  // Shared with the SDK, which persists volume, mute and the output delay
+  // under these keys.
   VOLUME: "sendspin-volume",
   MUTED: "sendspin-muted",
-  // Shared with the SDK, which persists the output delay under this key.
   SYNC_DELAY: "sendspin-static-delay-ms-v2",
   REQUIRED_LEAD_TIME: "sendspin-required-lead-time",
   MIN_BUFFER: "sendspin-min-buffer",
@@ -700,20 +701,6 @@ function loadSettings() {
 }
 
 /**
- * Save volume to localStorage
- */
-function saveVolume(volume) {
-  localStorage.setItem(STORAGE_KEYS.VOLUME, volume.toString());
-}
-
-/**
- * Save muted state to localStorage
- */
-function saveMuted(muted) {
-  localStorage.setItem(STORAGE_KEYS.MUTED, muted.toString());
-}
-
-/**
  * Save sync delay to localStorage
  */
 function saveSyncDelay(delay) {
@@ -808,10 +795,6 @@ async function connect() {
 
   try {
     // Get saved settings
-    const savedVolume = parseInt(
-      localStorage.getItem(STORAGE_KEYS.VOLUME) || "80",
-      10,
-    );
     const savedCorrectionMode =
       localStorage.getItem(STORAGE_KEYS.CORRECTION_MODE) || "sync";
 
@@ -882,13 +865,6 @@ async function connect() {
     await player.unlock();
     await player.connect();
     updatePairingDisplay();
-
-    // Apply saved volume
-    player.setVolume(savedVolume);
-
-    // Apply saved muted state
-    const savedMuted = localStorage.getItem(STORAGE_KEYS.MUTED) === "true";
-    player.setMuted(savedMuted);
 
     updateConnectionUI(true, serverUrl);
     showToast("Connected to server", "success");
@@ -968,7 +944,6 @@ async function copyShareUrl() {
 function updateVolume() {
   const volume = parseInt(volumeSlider.value, 10);
   volumeValue.textContent = `${volume}%`;
-  saveVolume(volume);
   player.setVolume(volume);
 }
 
@@ -986,7 +961,6 @@ function toggleMute() {
   const newMuted = !player.muted;
   player.setMuted(newMuted);
   updateMuteIcon(newMuted);
-  saveMuted(newMuted);
 }
 
 /**

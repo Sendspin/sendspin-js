@@ -1105,7 +1105,6 @@ export class AudioScheduler {
   stop(): void {
     this.clearBuffers();
     this.stopAudioElement();
-    this.updateVolume();
   }
 
   close(): void {

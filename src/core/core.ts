@@ -13,6 +13,7 @@ import { StateManager } from "./state-manager";
 import { WebSocketManager } from "./websocket-manager";
 import { SendspinTimeFilter } from "./time-filter";
 import { StaticDelayStore } from "./static-delay-store";
+import { VolumeStore } from "./volume-store";
 import { clampSyncDelayMs } from "../sync-delay";
 import { Identity } from "./noise/identity";
 import { PskStore } from "./noise/psk";
@@ -87,7 +88,10 @@ export class SendspinCore implements StreamHandler {
     this._syncDelayMs = clampSyncDelayMs(initialDelay);
 
     this.timeFilter = new SendspinTimeFilter(0, 1.1, 2.0, 1e-12);
-    this.stateManager = new StateManager(config.onStateChange);
+    this.stateManager = new StateManager(
+      config.onStateChange,
+      new VolumeStore(config.storage ?? null),
+    );
 
     this.decoder = new SendspinDecoder(
       (chunk) => this._onAudioData?.(chunk),
