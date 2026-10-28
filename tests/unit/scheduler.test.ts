@@ -20,6 +20,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { AudioScheduler, SYNC_ERROR_ALPHA } from "../../src/audio/scheduler";
 import { StateManager } from "../../src/core/state-manager";
+import { UNREPORTED_OUTPUT_LATENCY_SEC } from "../../src/audio/output-latency-tracker";
 import type { DecodedAudioChunk, StreamFormat } from "../../src/types";
 
 const SAMPLE_RATE = 48000;
@@ -381,6 +382,18 @@ describe("AudioScheduler scheduling math", () => {
     expect(scheduler.syncInfo.outputLatencyMs).toBe(100);
     expect(ctx.startedSources[0].started!).toBeCloseTo(
       ctx.currentTime + 0.9,
+      6,
+    );
+  });
+
+  it("ignores an implausibly large reported outputLatency", () => {
+    const { scheduler, ctx } = setup({ useOutputLatencyCompensation: true });
+    ctx.outputLatency = 55.392;
+    scheduler.handleDecodedChunk(makeChunk(nowUs() + 1_000_000, 0));
+    scheduler.processAudioQueue();
+
+    expect(ctx.startedSources[0].started!).toBeCloseTo(
+      ctx.currentTime + 1 - UNREPORTED_OUTPUT_LATENCY_SEC,
       6,
     );
   });
