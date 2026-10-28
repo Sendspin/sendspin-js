@@ -864,6 +864,7 @@ export class AudioScheduler {
       let playbackTime: number;
       let scheduleTime: number;
       let playbackRate: number;
+      let startOffsetSec = 0;
 
       const targetPlaybackTime = this.computeTargetPlaybackTime(
         chunk.serverTime,
@@ -880,12 +881,13 @@ export class AudioScheduler {
         const minScheduleTimeSec = this.recorrectionMonitor.minScheduleTimeSec;
         if (minScheduleTimeSec !== null) {
           // After a cutover, drop backlog that ends at or before the kept tail
-          // rather than clamping it forward, so the snap claws back lateness.
+          // and trim the chunk overlapping it, so the snap claws back lateness.
           if (scheduleTime + chunk.buffer.duration <= minScheduleTimeSec) {
             continue;
           }
-          scheduleTime = Math.max(scheduleTime, minScheduleTimeSec);
-          playbackTime = scheduleTime + scheduleAdvanceSec;
+          startOffsetSec = Math.max(0, minScheduleTimeSec - scheduleTime);
+          scheduleTime += startOffsetSec;
+          playbackTime += startOffsetSec;
         }
         this.recorrectionMonitor.clearMinScheduleTime();
         playbackRate = 1.0;
@@ -996,9 +998,10 @@ export class AudioScheduler {
       source.buffer = chunk.buffer;
       source.playbackRate.value = playbackRate;
       source.connect(this.gainNode);
-      source.start(scheduleTime);
+      source.start(scheduleTime, startOffsetSec);
 
-      const actualDuration = chunk.buffer.duration / playbackRate;
+      const actualDuration =
+        (chunk.buffer.duration - startOffsetSec) / playbackRate;
       this.nextPlaybackTime = playbackTime + actualDuration;
       this.nextScheduleTime = scheduleTime + actualDuration;
       this.lastScheduledServerTime =

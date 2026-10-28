@@ -53,6 +53,7 @@ class FakeBufferSource {
   playbackRate = { value: 1.0 };
   onended: (() => void) | null = null;
   started: number | null = null;
+  offset = 0;
   stopped: number | null = null;
   connected = false;
   ctx: FakeAudioContext;
@@ -62,8 +63,9 @@ class FakeBufferSource {
   connect() {
     this.connected = true;
   }
-  start(when: number) {
+  start(when: number, offset = 0) {
     this.started = when;
+    this.offset = offset;
     this.ctx.startedSources.push(this);
   }
   stop(when?: number) {
@@ -680,6 +682,25 @@ describe("AudioScheduler quality mode thresholds", () => {
       first.started! - 0.1,
       6,
     );
+  });
+
+  it("trims the chunk that overlaps the kept tail after a delay increase", () => {
+    const h = setup({ correctionMode: "quality-local" });
+    const base = nowUs();
+    for (let i = 0; i < 3; i++) {
+      h.scheduler.handleDecodedChunk(
+        makeChunk(base + 250_000 + i * 100_000, 0),
+      );
+    }
+    h.scheduler.processAudioQueue();
+    const [, second, third] = h.ctx.startedSources;
+
+    h.scheduler.setSyncDelay(10);
+
+    const restarted = h.ctx.startedSources.slice(3);
+    expect(restarted[0].started!).toBeCloseTo(second.started!, 6);
+    expect(restarted[0].offset).toBeCloseTo(0.01, 6);
+    expect(restarted[1].started!).toBeCloseTo(third.started! - 0.01, 6);
   });
 });
 
