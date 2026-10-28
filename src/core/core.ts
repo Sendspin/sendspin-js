@@ -257,19 +257,25 @@ export class SendspinCore implements StreamHandler {
 
   handleStreamStart(format: StreamFormat, isFormatUpdate: boolean): void {
     if (!isFormatUpdate) {
-      this.decoder.clearState();
+      this.discardPendingAudio();
     }
     this._onStreamStart?.(format, isFormatUpdate);
   }
 
   handleStreamClear(): void {
-    this.decoder.clearState();
+    this.discardPendingAudio();
     this._onStreamClear?.();
   }
 
   handleStreamEnd(): void {
-    this.decoder.clearState();
+    this.discardPendingAudio();
     this._onStreamEnd?.();
+  }
+
+  // A new generation makes the decoder drop decodes still in flight.
+  private discardPendingAudio(): void {
+    this.stateManager.resetStreamAnchors();
+    this.decoder.clearState();
   }
 
   handleVolumeUpdate(): void {
