@@ -743,6 +743,58 @@ describe("SendspinCore.disconnect ordering and idempotency", () => {
   });
 });
 
+describe("SendspinCore reconnect", () => {
+  let sockets: { onopen: (() => void) | null; onclose: (() => void) | null }[];
+  let OrigWS: typeof WebSocket;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    sockets = [];
+    OrigWS = globalThis.WebSocket;
+    class FakeWS {
+      static OPEN = 1;
+      static CONNECTING = 0;
+      static CLOSING = 2;
+      static CLOSED = 3;
+      readyState = 0;
+      binaryType = "";
+      onopen: (() => void) | null = null;
+      onmessage: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      onclose: (() => void) | null = null;
+      constructor() {
+        sockets.push(this);
+      }
+      close() {}
+      send() {}
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    globalThis.WebSocket = FakeWS as any;
+  });
+
+  afterEach(() => {
+    globalThis.WebSocket = OrigWS;
+    vi.useRealTimers();
+  });
+
+  it("keeps the time filter after a drop and resets it when the new socket opens", () => {
+    const core = new SendspinCore({ baseUrl: "http://h" });
+    void core.connect();
+    sockets[0].onopen!();
+    core._timeFilter.update(10000, 500, 1_000_000);
+
+    sockets[0].onclose!();
+    expect(core._timeFilter.is_synchronized).toBe(true);
+
+    vi.runOnlyPendingTimers();
+    expect(sockets).toHaveLength(2);
+    sockets[1].onopen!();
+    expect(core._timeFilter.is_synchronized).toBe(false);
+
+    core.disconnect();
+  });
+});
+
 describe("SendspinCore identity fallbacks", () => {
   it("derives a 43-char base64url clientId and a clientName from it", () => {
     const core = new SendspinCore({ baseUrl: "http://h" });
