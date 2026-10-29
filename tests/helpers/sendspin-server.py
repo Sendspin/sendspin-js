@@ -84,6 +84,7 @@ class HarnessServer:
             languages=["ca", "en"],
             pairing_store=self.pairing_store,
             allow_unencrypted=False,
+            allow_noncompliant_clients=False,
         )
         self._install_client_state_capture()
         self.server.add_event_listener(self._on_event)
