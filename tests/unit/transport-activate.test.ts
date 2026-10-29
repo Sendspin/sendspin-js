@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { harness, completeHandshakeWithPsk } from "./transport-harness";
+import {
+  harness,
+  completeHandshake,
+  completeHandshakeWithPsk,
+} from "./transport-harness";
 
 const utf8 = new TextEncoder();
 const concat = (a: Uint8Array, b: Uint8Array) => {
@@ -65,5 +69,16 @@ describe("transport server/activate active_roles", () => {
       },
       expect.any(Number),
     );
+  });
+
+  it("closes without any message on a pairing activation missing its method", () => {
+    const h = harness();
+    const { serverSession } = completeHandshake(h);
+    const before = h.ws.sentBinary.length;
+    h.transport.handleRaw({
+      data: activate(serverSession, { activities: ["pairing"] }),
+    } as MessageEvent);
+    expect(h.ws.disconnected).toBe(true);
+    expect(h.ws.sentBinary.length).toBe(before);
   });
 });

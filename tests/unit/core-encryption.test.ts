@@ -507,6 +507,56 @@ describe("SendspinCore encryption wiring", () => {
     core.disconnect();
   });
 
+  it("resumes client/state after a re-handshake when the next activation is refused", async () => {
+    const ws = new MockWS();
+    const server = SUITES.chacha.generateKeypair();
+    const core = new SendspinCore({
+      webSocket: ws as unknown as WebSocket,
+      storage: memStorage(),
+    });
+    await core.connect();
+    const { serverSession, clientId, priorHash } = completeHandshake(
+      ws,
+      server,
+    );
+    serverSend(ws, serverSession, {
+      type: "server/activate",
+      payload: { activities: ["playback"], active_roles: ["player@v1"] },
+    });
+    for (const frame of binaryFrames(ws)) serverSession.decrypt(frame);
+
+    const rehandshake = rehandshakeTo(
+      ws,
+      serverSession,
+      priorHash,
+      server,
+      clientId,
+      core["pskStore"].getOrCreatePairingPsk(),
+      "pr",
+    );
+    const refusalStart = binaryFrames(ws).length;
+    serverSend(ws, rehandshake.session, {
+      type: "server/activate",
+      payload: {
+        activities: ["pairing"],
+        pairing: { method: "static_pairing_code" },
+      },
+    });
+    const types = binaryFrames(ws)
+      .slice(refusalStart)
+      .map(
+        (frame) =>
+          JSON.parse(
+            new TextDecoder().decode(
+              rehandshake.session.decrypt(frame).subarray(1),
+            ),
+          ).type,
+      );
+    expect(types).toContain("pair/abort");
+    expect(types).toContain("client/state");
+    core.disconnect();
+  });
+
   it("exposes bound pairing tokens that rotate with the Pairing PSK", () => {
     const core = new SendspinCore({
       webSocket: new MockWS() as unknown as WebSocket,

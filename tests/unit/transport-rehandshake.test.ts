@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import {
   harness,
   completeHandshake,
+  completeHandshakeWithPsk,
   fakeWsSend,
   noise1Payload,
 } from "./transport-harness";
@@ -46,10 +47,10 @@ function setupRehandshake(
     session: NoiseSession,
   ) => void,
   toPairingPsk = false,
+  h = harness(),
+  initial = completeHandshake(h),
 ) {
-  const h = harness();
-  const { serverSession, serverId, server, clientId, priorHash } =
-    completeHandshake(h);
+  const { serverSession, serverId, server, clientId, priorHash } = initial;
   beforeRehandshake?.(h, serverSession);
   const newPsk = toPairingPsk
     ? h.store.getOrCreatePairingPsk()
@@ -270,5 +271,87 @@ describe("transport re-handshake", () => {
     deliverActivate(h, newServerSession, ["pairing"], [], "pairing_psk");
 
     expect(fakeWsSend(h).binary.length).toBe(before + 1);
+  });
+
+  it("ends the hold and hands a refused pairing activation to onActivateRefused", () => {
+    const { h, newServerSession } = setupRehandshake(undefined, true);
+    h.cb.onActivateRefused.mockImplementation(() =>
+      h.transport.sendControl({
+        type: "pair/abort",
+        payload: { reason: "method_not_supported" },
+      }),
+    );
+    const before = fakeWsSend(h).binary.length;
+    const forwarded = h.cb.onControlMessage.mock.calls.length;
+
+    deliverActivate(
+      h,
+      newServerSession,
+      ["pairing"],
+      [],
+      "static_pairing_code",
+    );
+
+    expect(h.cb.onActivateRefused).toHaveBeenCalledOnce();
+    expect(h.cb.onControlMessage).toHaveBeenCalledTimes(forwarded);
+    expect(fakeWsSend(h).binary.length).toBe(before + 1);
+    expect(h.ws.disconnected).toBe(false);
+  });
+
+  it("keeps the active_roles and queued commands across a refused pairing activation", () => {
+    const { h, newServerSession } = setupRehandshake(
+      (h, session) =>
+        deliverActivate(h, session, ["playback"], ["controller@v1"]),
+      true,
+    );
+    const before = fakeWsSend(h).binary.length;
+    h.transport.sendControl({
+      type: "client/command",
+      payload: { controller: { command: "play" } },
+    });
+
+    deliverActivate(
+      h,
+      newServerSession,
+      ["pairing"],
+      ["player@v1"],
+      "static_pairing_code",
+    );
+    expect(fakeWsSend(h).binary.length).toBe(before + 1);
+
+    deliverActivate(h, newServerSession, ["pairing"], undefined, "pairing_psk");
+    expect(h.cb.onControlMessage).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        payload: expect.objectContaining({ active_roles: ["controller@v1"] }),
+      }),
+      expect.any(Number),
+    );
+  });
+
+  it("drops the roles and queued commands the new PSK no longer allows on a refused activation", () => {
+    const h = harness(false);
+    const { newServerSession } = setupRehandshake(
+      (h, session) =>
+        deliverActivate(h, session, ["playback"], ["controller@v1"]),
+      true,
+      h,
+      completeHandshakeWithPsk(h, new Uint8Array(32).fill(31)),
+    );
+    h.transport.sendControl({
+      type: "client/command",
+      payload: { controller: { command: "play" } },
+    });
+    const before = fakeWsSend(h).binary.length;
+
+    deliverActivate(
+      h,
+      newServerSession,
+      ["pairing"],
+      undefined,
+      "static_pairing_code",
+    );
+
+    expect(h.cb.onActivateRefused).toHaveBeenCalledWith([]);
+    expect(fakeWsSend(h).binary.length).toBe(before);
   });
 });

@@ -177,6 +177,15 @@ export class ProtocolHandler {
   // Handle server/activate: start the initial client/state, time-sync, and
   // periodic state updates. A repeat activate only applies role changes.
   private handleServerActivate(message: ServerActivate): void {
+    this.applyActivation(message.payload.active_roles);
+  }
+
+  /** Resume after a server/activate the client refused, under the roles still in effect. */
+  resumeActivation(activeRoles: string[]): void {
+    this.applyActivation(activeRoles);
+  }
+
+  private applyActivation(activeRoles: string[] | undefined): void {
     // Roles are unset only on a new connection, which starts without streams.
     if (
       this.activeRoles === null &&
@@ -185,8 +194,8 @@ export class ProtocolHandler {
       this.endPlayerStream();
     }
     let rolesChanged = false;
-    if (message.payload.active_roles !== undefined) {
-      const nextRoles = new Set(message.payload.active_roles);
+    if (activeRoles !== undefined) {
+      const nextRoles = new Set(activeRoles);
       const removedRoles = [...(this.activeRoles ?? [])].filter(
         (role) => !nextRoles.has(role),
       );

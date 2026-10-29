@@ -497,6 +497,16 @@ describe("ProtocolHandler extra", () => {
       expect(Object.keys(stateManager.serverState)).toEqual(["controller"]);
     });
 
+    it("resumes client/state and time sync under the kept roles after a refused activation", () => {
+      const handler = makeHandler();
+      activate(handler);
+      handler.resetActivation(true);
+      send.mockClear();
+      handler.resumeActivation(["player@v1"]);
+      expect(lastSent(send, "client/state")!.payload).toHaveProperty("player");
+      expect(lastSent(send, "client/time")).toBeDefined();
+    });
+
     it("re-sends the initial client/state on activate after resetActivation", () => {
       const handler = makeHandler();
       activate(handler);

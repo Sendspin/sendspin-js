@@ -115,6 +115,7 @@ export class SendspinCore implements StreamHandler {
         pskStore: this.pskStore,
         suiteId: config.suite ?? "chacha",
         unpairedAccess: config.unpairedAccess ?? true,
+        pairMethods: () => this.pairing.supportedPairMethods(),
       },
       {
         onHandshakeComplete: (info) => {
@@ -128,6 +129,10 @@ export class SendspinCore implements StreamHandler {
           this.routeControl(msg, receivedAtUs),
         onBinaryMessage: (bytes) =>
           this.handleBinaryMessage(bytes.buffer as ArrayBuffer),
+        onActivateRefused: (activeRoles) => {
+          this.protocolHandler.resumeActivation(activeRoles);
+          this.pairing.onRefusedActivate();
+        },
       },
     );
 
@@ -136,7 +141,6 @@ export class SendspinCore implements StreamHandler {
       close: () => this.transport.close(),
       pskStore: this.pskStore,
       serverId: () => this.handshakeInfo?.serverId ?? "",
-      matchedCategory: () => this.handshakeInfo?.category ?? "sentinel",
       handshakeHash: () => this.transport.handshakeHash,
       aeadSeal: (key, plaintext) =>
         SUITES[config.suite ?? "chacha"].aeadEncrypt(
