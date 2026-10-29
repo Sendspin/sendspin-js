@@ -16,13 +16,16 @@ const strictUtf8 = new TextDecoder("utf-8", { fatal: true });
 const HANDSHAKE_TIMEOUT_MS = 30000;
 const MAX_TRANSPORT_PLAINTEXT = 65519; // 65535 - 16 (tag); includes the type byte
 const MAX_TRANSPORT_CIPHERTEXT = MAX_TRANSPORT_PLAINTEXT + 16; // Noise transport message cap
-// Cap total reassembled size so an endless run of fragment-more frames can't exhaust memory.
+// Cap total reassembled size so an endless run of non-last fragments can't exhaust memory.
 const MAX_REASSEMBLY_BYTES = 4 * 1024 * 1024;
+const MSG_TYPE_FRAGMENT = 1;
+const FRAGMENT_FLAG_LAST = 0x01;
+const FRAGMENT_FLAG_FIRST = 0x02;
+const FRAGMENT_FLAGS_RESERVED = 0xfc;
 
 type State = "idle" | "await_server_init" | "await_noise1" | "transport";
 
 export interface HandshakeInfo {
-  trustLevel: "user" | "none";
   category: PskEntry["category"];
   serverId: string;
   entry: PskEntry;
@@ -30,7 +33,10 @@ export interface HandshakeInfo {
 
 export interface TransportCallbacks {
   onHandshakeComplete(info: HandshakeInfo): void;
-  onControlMessage(msg: { type: string; payload?: unknown }): void;
+  onControlMessage(
+    msg: { type: string; payload?: unknown },
+    receivedAtUs: number,
+  ): void;
   onBinaryMessage(bytes: Uint8Array): void;
 }
 
@@ -104,7 +110,6 @@ export class SendspinTransport {
   get handshakeInfo(): HandshakeInfo | null {
     if (!this.matched) return null;
     return {
-      trustLevel: this.matched.category === "long_term" ? "user" : "none",
       category: this.matched.category,
       serverId: this.serverId,
       entry: this.matched,
@@ -164,6 +169,7 @@ export class SendspinTransport {
   }
 
   handleRaw(event: MessageEvent): void {
+    const receivedAtUs = Math.floor(performance.now() * 1000);
     if (this.state === "transport") {
       if (typeof event.data === "string") return this.fail(); // unexpected cleartext
       let plain: Uint8Array;
@@ -178,7 +184,7 @@ export class SendspinTransport {
       // A malformed payload or a throwing app callback must not close the socket
       // or disable reconnect. Log and keep the connection.
       try {
-        this.dispatchPlain(plain);
+        this.dispatchPlain(plain, receivedAtUs);
       } catch (e) {
         console.warn("Sendspin: dropped malformed transport message", e);
       }
@@ -197,6 +203,12 @@ export class SendspinTransport {
       type: string;
       payload: Record<string, unknown>;
     };
+    if (this.state === "await_server_init" && msg.type === "server/error") {
+      console.error(
+        `Sendspin: Server refused the connection (reason: ${String(msg.payload?.reason)})`,
+      );
+      return this.fail();
+    }
     if (this.state === "await_server_init" && msg.type === "server/init") {
       if (msg.payload.version !== 1) return this.fail();
       this.serverId = String(msg.payload.server_id);
@@ -251,14 +263,18 @@ export class SendspinTransport {
   }
 
   /** Route one decrypted plaintext frame on its leading message-type byte. */
-  private dispatchPlain(full: Uint8Array): void {
+  private dispatchPlain(full: Uint8Array, receivedAtUs: number): void {
     const type = full[0];
+    if (type === MSG_TYPE_FRAGMENT)
+      return this.handleFragment(full, receivedAtUs);
+    if (this.frag !== null) return this.fail();
     // The body view is built per branch: the binary path below is the hot one
     // and reads only `full`.
     if (type === 0) {
-      this.handleControl(JSON.parse(dutf8.decode(full.subarray(1))));
-    } else if (type === 2 || type === 3) {
-      this.handleFragment(type, full.subarray(1));
+      this.handleControl(
+        JSON.parse(dutf8.decode(full.subarray(1))),
+        receivedAtUs,
+      );
     } else {
       // full is the decrypt output: exclusively owned, offset 0, exact length,
       // type byte intact. Hand it over without re-copying.
@@ -266,32 +282,27 @@ export class SendspinTransport {
     }
   }
 
-  private handleFragment(type: number, body: Uint8Array): void {
-    if (type === 2 && this.frag === null) {
-      if (body.length < 1) return this.fail();
-      // Reject a fragment whose inner type is itself a fragment marker.
-      if (body[0] === 2 || body[0] === 3) return this.fail();
-      const first = body.subarray(1);
-      this.frag = { origType: body[0], parts: [first], size: first.length };
-      return;
+  private handleFragment(full: Uint8Array, receivedAtUs: number): void {
+    if (full.length < 2) return this.fail();
+    const flags = full[1];
+    if (flags & FRAGMENT_FLAGS_RESERVED) return this.fail();
+    let data: Uint8Array;
+    if (flags & FRAGMENT_FLAG_FIRST) {
+      if (this.frag !== null || full.length < 3) return this.fail();
+      if (full[2] === MSG_TYPE_FRAGMENT) return this.fail();
+      this.frag = { origType: full[2], parts: [], size: 0 };
+      data = full.subarray(3);
+    } else {
+      if (this.frag === null) return this.fail();
+      data = full.subarray(2);
     }
-    if (type === 2) {
-      this.frag!.parts.push(body);
-      this.frag!.size += body.length;
-      if (this.frag!.size > MAX_REASSEMBLY_BYTES) {
-        this.frag = null;
-        return this.fail();
-      }
-      return;
-    }
-    // type === 3: closing frame
-    if (this.frag === null) return this.fail();
-    this.frag.parts.push(body);
-    this.frag.size += body.length;
+    this.frag.parts.push(data);
+    this.frag.size += data.length;
     if (this.frag.size > MAX_REASSEMBLY_BYTES) {
       this.frag = null;
       return this.fail();
     }
+    if (!(flags & FRAGMENT_FLAG_LAST)) return;
     const origType = this.frag.origType;
     // Assemble into a size+1 buffer with the type byte at offset 0, so the
     // binary path can hand it over without a second copy to prepend the type.
@@ -304,13 +315,19 @@ export class SendspinTransport {
     }
     this.frag = null;
     if (origType === 0) {
-      this.handleControl(JSON.parse(dutf8.decode(assembled.subarray(1))));
+      this.handleControl(
+        JSON.parse(dutf8.decode(assembled.subarray(1))),
+        receivedAtUs,
+      );
     } else {
       this.cb.onBinaryMessage(assembled);
     }
   }
 
-  protected handleControl(msg: { type: string; payload?: unknown }): void {
+  protected handleControl(
+    msg: { type: string; payload?: unknown },
+    receivedAtUs: number,
+  ): void {
     if (msg.type === "noise/handshake") {
       try {
         this.handleRehandshake(msg as { payload: { data: string } });
@@ -329,6 +346,7 @@ export class SendspinTransport {
             active_roles?: string[];
           };
         },
+        receivedAtUs,
       );
       return;
     }
@@ -336,7 +354,7 @@ export class SendspinTransport {
       this.handleUnpair();
       return;
     }
-    this.cb.onControlMessage(msg);
+    this.cb.onControlMessage(msg, receivedAtUs);
   }
 
   private handleRehandshake(msg: { payload: { data: string } }): void {
@@ -366,13 +384,16 @@ export class SendspinTransport {
     this.lastHandshakeHash = newHs.handshakeHash;
   }
 
-  protected handleActivate(msg: {
-    type: string;
-    payload: {
-      activities: string[];
-      active_roles?: string[];
-    };
-  }): void {
+  protected handleActivate(
+    msg: {
+      type: string;
+      payload: {
+        activities: string[];
+        active_roles?: string[];
+      };
+    },
+    receivedAtUs: number,
+  ): void {
     const result = authorizeActivate(
       this.matched!.category,
       msg.payload.activities,
@@ -386,24 +407,25 @@ export class SendspinTransport {
     }
     this.activeRoles = result.activeRoles;
     this.clearTimeout();
-    const queuedCommands =
-      !msg.payload.activities.includes("pairing") &&
-      this.activeRoles.includes("controller@v1")
-        ? this.outboundQueue.filter(
-            (queued) => (queued as { type?: string }).type === "client/command",
-          )
-        : [];
+    const queuedCommands = this.activeRoles.includes("controller@v1")
+      ? this.outboundQueue.filter(
+          (queued) => (queued as { type?: string }).type === "client/command",
+        )
+      : [];
     this.quiesced = false;
     this.outboundQueue = [];
-    this.cb.onControlMessage({
-      ...msg,
-      payload: { ...msg.payload, active_roles: this.activeRoles },
-    });
+    this.cb.onControlMessage(
+      {
+        ...msg,
+        payload: { ...msg.payload, active_roles: this.activeRoles },
+      },
+      receivedAtUs,
+    );
     for (const command of queuedCommands) this.encryptSend(command);
   }
 
   private handleUnpair(): void {
-    // trust_level none (Sentinel or in-flight pairing): ignore.
+    // Not a long-term PSK (Sentinel or in-flight pairing): ignore.
     if (this.matched?.category !== "long_term") return;
     this.deps.pskStore.removeByPskId(this.matched.pskId);
     this.sendGoodbyeAndClose("unpaired");
@@ -435,11 +457,27 @@ export class SendspinTransport {
 
   private encryptSend(msg: object): void {
     const json = utf8.encode(JSON.stringify(msg));
-    const pt = concat(Uint8Array.of(0), json);
-    if (pt.length > MAX_TRANSPORT_PLAINTEXT) {
-      throw new Error("Sendspin: control message exceeds single-frame limit");
+    if (json.length < MAX_TRANSPORT_PLAINTEXT) {
+      const pt = concat(Uint8Array.of(0), json);
+      this.wsManager.sendBinary(this.session!.encrypt(pt));
+      return;
     }
-    this.wsManager.sendBinary(this.session!.encrypt(pt));
+    for (let start = 0; start < json.length;) {
+      const first = start === 0;
+      const end = Math.min(
+        json.length,
+        start + MAX_TRANSPORT_PLAINTEXT - (first ? 3 : 2),
+      );
+      const flags =
+        (first ? FRAGMENT_FLAG_FIRST : 0) |
+        (end === json.length ? FRAGMENT_FLAG_LAST : 0);
+      const header = first
+        ? Uint8Array.of(MSG_TYPE_FRAGMENT, flags, 0)
+        : Uint8Array.of(MSG_TYPE_FRAGMENT, flags);
+      const pt = concat(header, json.subarray(start, end));
+      this.wsManager.sendBinary(this.session!.encrypt(pt));
+      start = end;
+    }
   }
 
   private armTimeout(): void {

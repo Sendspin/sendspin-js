@@ -164,15 +164,18 @@ describe("transport re-handshake", () => {
     deliverActivate(h, newServerSession, ["playback"], undefined);
 
     expect(h.ws.disconnected).toBe(false);
-    expect(h.cb.onControlMessage).toHaveBeenLastCalledWith({
-      type: "server/activate",
-      payload: { activities: ["playback"], active_roles: ["player@v1"] },
-    });
+    expect(h.cb.onControlMessage).toHaveBeenLastCalledWith(
+      {
+        type: "server/activate",
+        payload: { activities: ["playback"], active_roles: ["player@v1"] },
+      },
+      expect.any(Number),
+    );
   });
 
   it("retains a queued command when playback restores the controller role", () => {
     const { h, newServerSession } = setupRehandshake();
-    expect(h.transport.handshakeInfo?.trustLevel).toBe("user");
+    expect(h.transport.handshakeInfo?.category).toBe("long_term");
 
     const before = fakeWsSend(h).binary.length;
     h.transport.sendControl({
@@ -227,7 +230,30 @@ describe("transport re-handshake", () => {
     expect(fakeWsSend(h).binary.length).toBe(before + 1);
   });
 
-  it("drops queued normal traffic when the re-handshake enters pairing", () => {
+  it("retains a queued command when a pairing activation keeps the controller role", () => {
+    const { h, newServerSession } = setupRehandshake(undefined, true);
+    const before = fakeWsSend(h).binary.length;
+    h.transport.sendControl({
+      type: "client/command",
+      payload: { controller: { command: "play" } },
+    });
+
+    deliverActivate(
+      h,
+      newServerSession,
+      ["playback", "pairing"],
+      ["controller@v1"],
+      "pairing_psk",
+    );
+
+    expect(fakeWsSend(h).binary.length).toBe(before + 1);
+    const command = newServerSession.decrypt(fakeWsSend(h).binary.at(-1)!);
+    expect(JSON.parse(new TextDecoder().decode(command.subarray(1))).type).toBe(
+      "client/command",
+    );
+  });
+
+  it("drops queued traffic when a pairing activation leaves no role active", () => {
     const { h, newServerSession } = setupRehandshake(undefined, true);
     const before = fakeWsSend(h).binary.length;
     h.transport.sendControl({

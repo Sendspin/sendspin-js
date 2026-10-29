@@ -18,7 +18,6 @@ import type { StreamHandler } from "../../src/internal-types";
 
 function makeHelloContext(overrides: Partial<HelloContext> = {}): HelloContext {
   return {
-    trustLevel: () => "none",
     pairMethods: () => ({ pairing_psk: {} }),
     unpairedAccess: true,
     ...overrides,
@@ -38,9 +37,16 @@ function makeStreamHandler(): StreamHandler &
   } as StreamHandler & Record<string, ReturnType<typeof vi.fn>>;
 }
 
+const PCM_STREAM = {
+  codec: "pcm",
+  sample_rate: 48000,
+  channels: 2,
+  bit_depth: 16,
+};
+
 // Dispatch a parsed server message through the real entry point.
 const dispatch = (handler: ProtocolHandler, msg: unknown): void =>
-  handler.handleServerMessage(msg as never);
+  handler.handleServerMessage(msg as never, 0);
 
 function makeStreamHandlerWithDelay(
   syncDelayMs = 0,
@@ -104,6 +110,26 @@ describe("ProtocolHandler", () => {
       dispatch(handler, { type: "server/bogus" });
       expect(streamHandler.handleBinaryMessage).not.toHaveBeenCalled();
       expect(streamHandler.handleStreamStart).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("stream/start without a player object", () => {
+    it("starts no player stream, so the next player stream/start is not a format update", () => {
+      dispatch(handler, {
+        type: "stream/start",
+        payload: { server_transmitted: 0 },
+      });
+      expect(streamHandler.handleStreamStart).not.toHaveBeenCalled();
+      expect(stateManager.isPlaying).toBe(false);
+
+      dispatch(handler, {
+        type: "stream/start",
+        payload: { server_transmitted: 0, player: PCM_STREAM },
+      });
+      expect(streamHandler.handleStreamStart).toHaveBeenCalledWith(
+        PCM_STREAM,
+        false,
+      );
     });
   });
 
@@ -247,7 +273,7 @@ describe("ProtocolHandler extra", () => {
       expect(payload.supported_pair_methods).toEqual({ pairing_psk: {} });
 
       const support = payload["player@v1_support"] as Record<string, unknown>;
-      expect(support.supported_commands).toEqual(["volume", "mute"]);
+      expect(support).not.toHaveProperty("supported_commands");
       expect(support.buffer_capacity).toBeTypeOf("number");
       const fmt = (
         support.supported_formats as Array<Record<string, unknown>>
@@ -288,29 +314,37 @@ describe("ProtocolHandler extra", () => {
   });
 
   describe("handleServerHello", () => {
-    it("sends client/hello with trust_level and unpaired_access", () => {
+    it("sends client/hello with unpaired_access and no trust_level", () => {
       const handler = makeHandler();
       dispatch(handler, { type: "server/hello", payload: {} });
       const hello = lastSent(send, "client/hello")!;
       const payload = hello.payload as Record<string, unknown>;
-      expect(payload.trust_level).toBe("none");
+      expect(payload).not.toHaveProperty("trust_level");
       expect(payload.unpaired_access).toEqual({ enabled: true });
     });
 
-    it("advertises the configured product name, omitting it when unset", () => {
+    it("advertises the configured device info, omitting fields that are unset", () => {
       const dflt = makeHandler();
       dispatch(dflt, { type: "server/hello", payload: {} });
       let info = (lastSent(send, "client/hello")!.payload as never)[
         "device_info"
-      ] as { product_name?: string };
-      expect(info.product_name).toBeUndefined();
+      ] as Record<string, unknown>;
+      expect(info).toEqual({});
 
-      const named = makeHandler({ productName: "My App" });
+      const named = makeHandler({
+        productName: "My App",
+        manufacturer: "My Company",
+        softwareVersion: "1.2.0",
+      });
       dispatch(named, { type: "server/hello", payload: {} });
       info = (lastSent(send, "client/hello")!.payload as never)[
         "device_info"
-      ] as { product_name?: string };
-      expect(info.product_name).toBe("My App");
+      ] as Record<string, unknown>;
+      expect(info).toEqual({
+        product_name: "My App",
+        manufacturer: "My Company",
+        software_version: "1.2.0",
+      });
     });
 
     it("does not send the initial client/state (deferred to server/activate)", () => {
@@ -366,20 +400,101 @@ describe("ProtocolHandler extra", () => {
       });
     });
 
-    it("suspends periodic traffic until pairing ends", () => {
+    it("ends the player stream when player@v1 is removed", () => {
       const handler = makeHandler();
       activate(handler);
-      send.mockClear();
+      dispatch(handler, {
+        type: "stream/start",
+        payload: {
+          player: {
+            codec: "pcm",
+            sample_rate: 48000,
+            channels: 2,
+            bit_depth: 16,
+          },
+        },
+      });
 
-      handler.suspendForPairing();
-      handler.sendStateUpdate();
-      handler.sendCommand("play", undefined as never);
-      vi.advanceTimersByTime(5000);
-      expect(lastSent(send, "client/state")).toBeUndefined();
-      expect(lastSent(send, "client/command")).toBeUndefined();
+      dispatch(handler, {
+        type: "server/activate",
+        payload: { activities: ["playback"], active_roles: [] },
+      });
 
+      expect(streamHandler.handleStreamEnd).toHaveBeenCalledTimes(1);
+      expect(stateManager.currentStreamFormat).toBeNull();
+      expect(stateManager.isPlaying).toBe(false);
+    });
+
+    it("starts a new stream on a new connection instead of updating the old one", () => {
+      const handler = makeHandler();
+      const streamStart = {
+        type: "stream/start",
+        payload: { player: PCM_STREAM },
+      };
       activate(handler);
-      expect(lastSent(send, "client/state")).toBeDefined();
+      dispatch(handler, streamStart);
+
+      handler.resetActivation();
+      activate(handler);
+
+      expect(streamHandler.handleStreamEnd).toHaveBeenCalledTimes(1);
+      expect(stateManager.isPlaying).toBe(false);
+      dispatch(handler, streamStart);
+      expect(streamHandler.handleStreamStart).toHaveBeenLastCalledWith(
+        PCM_STREAM,
+        false,
+      );
+    });
+
+    it("keeps the player stream across a re-handshake", () => {
+      const handler = makeHandler();
+      activate(handler);
+      dispatch(handler, {
+        type: "stream/start",
+        payload: { player: PCM_STREAM },
+      });
+
+      handler.resetActivation(true);
+      activate(handler);
+
+      expect(streamHandler.handleStreamEnd).not.toHaveBeenCalled();
+      expect(stateManager.isPlaying).toBe(true);
+    });
+
+    it("discards the state of removed roles, including a scheduled metadata update", () => {
+      const onStateChange = vi.fn();
+      stateManager = new StateManager(onStateChange);
+      const handler = makeHandler();
+      dispatch(handler, {
+        type: "server/activate",
+        payload: {
+          activities: ["playback"],
+          active_roles: ["metadata@v1", "controller@v1"],
+        },
+      });
+      stateManager.updateServerState({
+        controller: {
+          supported_commands: ["play"],
+          volume: 50,
+          muted: false,
+          repeat: "off",
+          shuffle: false,
+        },
+        metadata: { timestamp: 0 },
+      });
+      stateManager.updateServerState({ metadata: { timestamp: 1 } }, 1000);
+
+      dispatch(handler, {
+        type: "server/activate",
+        payload: { activities: ["playback"], active_roles: ["controller@v1"] },
+      });
+
+      expect(Object.keys(stateManager.serverState)).toEqual(["controller"]);
+      expect(Object.keys(onStateChange.mock.lastCall![0].serverState)).toEqual([
+        "controller",
+      ]);
+      vi.advanceTimersByTime(1000);
+      expect(Object.keys(stateManager.serverState)).toEqual(["controller"]);
     });
 
     it("re-sends the initial client/state on activate after resetActivation", () => {
@@ -411,12 +526,45 @@ describe("ProtocolHandler extra", () => {
       expect((state.payload as Record<string, unknown>).player).toBeUndefined();
     });
 
-    it("reports top-level availability", () => {
+    it("reports available once the first time sync burst completes", () => {
+      timeFilter = new SendspinTimeFilter();
       const handler = makeHandler();
       activate(handler);
+      const available = () =>
+        (lastSent(send, "client/state")!.payload as Record<string, unknown>)
+          .available;
+      expect(available()).toBe(false);
+
+      for (let i = 0; i < 8; i++) {
+        const t1 = (
+          lastSent(send, "client/time")!.payload as Record<string, number>
+        ).client_transmitted;
+        handler.handleServerMessage(
+          {
+            type: "server/time",
+            payload: {
+              client_transmitted: t1,
+              server_received: t1 + 100,
+              server_transmitted: t1 + 200,
+            },
+          } as never,
+          t1 + 300,
+        );
+      }
+
+      expect(available()).toBe(true);
+    });
+
+    it("reports unavailable before time sync without the player role", () => {
+      timeFilter = new SendspinTimeFilter();
+      const handler = makeHandler();
+      dispatch(handler, {
+        type: "server/activate",
+        payload: { activities: [], active_roles: ["controller@v1"] },
+      });
 
       const state = lastSent(send, "client/state")!;
-      expect((state.payload as Record<string, unknown>).available).toBe(true);
+      expect((state.payload as Record<string, unknown>).available).toBe(false);
     });
 
     it("includes output_delay_ms clamped to 0-5000", () => {
@@ -649,6 +797,21 @@ describe("ProtocolHandler extra", () => {
       expect((bye.payload as Record<string, unknown>).reason).toBe(
         "user_request",
       );
+    });
+  });
+
+  describe("sendLeave", () => {
+    it("sends client/leave with an empty payload only after server/activate", () => {
+      const handler = makeHandler();
+      handler.sendLeave();
+      expect(lastSent(send, "client/leave")).toBeUndefined();
+
+      activate(handler);
+      handler.sendLeave();
+      expect(lastSent(send, "client/leave")).toEqual({
+        type: "client/leave",
+        payload: {},
+      });
     });
   });
 

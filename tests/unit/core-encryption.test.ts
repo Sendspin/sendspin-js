@@ -262,6 +262,25 @@ describe("SendspinCore encryption wiring", () => {
     core.disconnect(); // clear the periodic state/time-sync intervals
   });
 
+  it("resets the session on disconnect before the socket's close event arrives", async () => {
+    const ws = new MockWS();
+    ws.close = () => {
+      ws.readyState = 3;
+    };
+    const core = new SendspinCore({
+      webSocket: ws as unknown as WebSocket,
+      storage: memStorage(),
+    });
+    await core.connect();
+    completeHandshake(ws);
+
+    core.disconnect();
+
+    expect(
+      (core as unknown as { handshakeInfo: unknown }).handshakeInfo,
+    ).toBeNull();
+  });
+
   it("refreshes core's trust snapshot after an in-band re-handshake, so a Pairing-PSK activation is accepted instead of aborted", async () => {
     const ws = new MockWS();
     const core = new SendspinCore({
@@ -274,7 +293,7 @@ describe("SendspinCore encryption wiring", () => {
       completeHandshake(ws);
 
     // The client's own Pairing PSK, provisioned out of band, is the re-handshake target.
-    const pairingPsk = base64urlDecode(core.pairingPsk!);
+    const pairingPsk = core["pskStore"].getOrCreatePairingPsk();
 
     // Server re-handshakes to the Pairing PSK, prologue = prior handshake hash.
     const ini = new HandshakeState({
@@ -308,6 +327,7 @@ describe("SendspinCore encryption wiring", () => {
 
     // Without the fix, core's cached category snapshot stays "sentinel" and
     // PairingManager aborts with method_not_supported instead of finalizing.
+    const before = ws.sent.length;
     serverSend(ws, newServerSession, {
       type: "server/activate",
       payload: {
@@ -317,11 +337,17 @@ describe("SendspinCore encryption wiring", () => {
       },
     });
 
-    const reply = ws.sent[ws.sent.length - 1] as Uint8Array;
-    const replyMsg = JSON.parse(
-      new TextDecoder().decode(newServerSession.decrypt(reply).subarray(1)),
-    );
-    expect(replyMsg.type).toBe("client/pair-finalize");
+    const replyTypes = ws.sent
+      .slice(before)
+      .map(
+        (frame) =>
+          JSON.parse(
+            new TextDecoder().decode(
+              newServerSession.decrypt(frame as Uint8Array).subarray(1),
+            ),
+          ).type,
+      );
+    expect(replyTypes).toContain("client/pair-finalize");
   });
 
   it("drops an in-flight pairing PSK across a re-handshake, so a late finalize does not persist", async () => {
@@ -336,7 +362,7 @@ describe("SendspinCore encryption wiring", () => {
 
     const { serverSession, server, clientId, priorHash } =
       completeHandshake(ws);
-    const pairingPsk = base64urlDecode(core.pairingPsk!);
+    const pairingPsk = core["pskStore"].getOrCreatePairingPsk();
 
     // Re-handshake #1: promote to the Pairing PSK so activations count as pairing.
     const s1 = rehandshakeTo(
@@ -350,6 +376,7 @@ describe("SendspinCore encryption wiring", () => {
     );
 
     // Pairing activate -> client mints a PSK and sends client/pair-finalize.
+    const before = ws.sent.length;
     serverSend(ws, s1.session, {
       type: "server/activate",
       payload: {
@@ -359,15 +386,18 @@ describe("SendspinCore encryption wiring", () => {
       },
     });
     expect(events).toContain("started");
-    // Consume the pair-finalize frame to keep s1's recv nonce aligned.
-    const finType = JSON.parse(
-      new TextDecoder().decode(
-        s1.session
-          .decrypt(ws.sent[ws.sent.length - 1] as Uint8Array)
-          .subarray(1),
-      ),
-    ).type;
-    expect(finType).toBe("client/pair-finalize");
+    // Consume every reply frame to keep s1's recv nonce aligned.
+    const replyTypes = ws.sent
+      .slice(before)
+      .map(
+        (frame) =>
+          JSON.parse(
+            new TextDecoder().decode(
+              s1.session.decrypt(frame as Uint8Array).subarray(1),
+            ),
+          ).type,
+      );
+    expect(replyTypes).toContain("client/pair-finalize");
 
     // Re-handshake #2: must reset the in-flight pairing state.
     const s2 = rehandshakeTo(
@@ -482,16 +512,14 @@ describe("SendspinCore encryption wiring", () => {
       webSocket: new MockWS() as unknown as WebSocket,
       storage: memStorage(),
     });
-    const psk = core.pairingPsk;
     const token = core.pairingToken;
-    expect(psk).toHaveLength(43);
     expect(token).toHaveLength(107);
     expect(token).toMatch(/^SP:0/);
     expect("getPairingToken" in core).toBe(false);
+    expect("pairingPsk" in core).toBe(false);
     const rotated = core.rotatePairingPsk();
-    expect(rotated).toHaveLength(43);
-    expect(rotated).not.toBe(psk);
-    expect(core.pairingToken).not.toBe(token);
+    expect(rotated).toBe(core.pairingToken);
+    expect(rotated).not.toBe(token);
   });
 
   it("offers pairing_psk without storage", async () => {

@@ -17,8 +17,10 @@ const player = new SendspinPlayer({
   baseUrl: 'http://your-server:8095',
   clientName: 'My Web Player',
   productName: 'My App',
+  manufacturer: 'My Company',
+  softwareVersion: '1.2.0',
   // Optional: "sync" (default), "quality" (no pitch shifts; not recommended for bad networks),
-  // or "quality-local" (best for unsynced playback)
+  // or "quality-local" (best for unsynced playback, makes the player non-compliant with the Sendspin spec)
   correctionMode: 'sync',
   onStateChange: (state) => {
     // Local player state
@@ -52,7 +54,8 @@ connectButton.addEventListener('click', async () => {
   await player.connect();
 });
 
-// Local volume control (affects this player only)
+// Local volume control (affects this player only). The SDK saves volume and
+// mute through `storage` (localStorage by default) and restores them on load.
 player.setVolume(80);
 player.setMuted(false);
 
@@ -74,12 +77,21 @@ player.sendCommand('switch');  // Switch group
 player.sendCommand('seek', { position_ms: 90_000 });  // Clamped to 0 through seek_max_ms
 player.sendCommand('seek_relative', { offset_ms: -10_000 });
 
-// Disconnect with reason (optional)
+// Leave the current group, for example while the device plays other audio
+player.leaveGroup();
+
+// Disconnect with reason (optional, defaults to 'user_request')
 player.disconnect('user_request');
+
+// Release the audio output when you no longer need the player
+player.destroy();
 ```
 
 Call `unlock()` directly from a click or tap handler, before any other awaited
 work, so the browser can initialize or resume audio during the user gesture.
+
+Keep one player for repeated stops and starts, and call `destroy()` only when
+you drop it. A player dropped after `disconnect()` keeps its audio output open.
 
 ## Advanced configuration
 
@@ -122,6 +134,28 @@ const player = new SendspinPlayer({
 
 Reconnection only applies to connections opened via `baseUrl`; adopted
 sockets (`webSocket`) never auto-reconnect.
+
+### Hardware volume
+
+Set `useHardwareVolume` when the device applies volume itself (a TV, a Cast
+device). The SDK then passes server volume and mute commands to
+`onVolumeCommand` and reports the device volume from `getExternalVolume`. When
+the device volume changes through its own controls, call `setVolume` and
+`setMuted` so the server learns of it right away.
+
+```typescript
+const player = new SendspinPlayer({
+  baseUrl: 'http://your-server:8095',
+  useHardwareVolume: true,
+  onVolumeCommand: (volume, muted) => device.setVolume(volume, muted),
+  getExternalVolume: () => ({ volume: device.volume, muted: device.muted }),
+});
+
+device.onVolumeChange = () => {
+  player.setVolume(device.volume);
+  player.setMuted(device.muted);
+};
+```
 
 ### Tuning correction thresholds
 
@@ -180,14 +214,17 @@ const player = new SendspinPlayer({
   ],
   onPairing: (event, detail) => {
     // event: "pending" | "started" | "finalized" | "aborted"
-    // "pending" means the attempt is waiting for openPairingWindow().
+    // "pending" means the attempt is waiting for openPairingWindow() or releasePairingHold().
     console.log('Pairing:', event, detail);
   },
   // Dynamic pairing: show the derived code to the operator (null = hide).
   // languages carries the operator's spoken-code preference, when the server sends one.
-  onPairingCode: (code, languages) => showCodeDialog(code, languages),
+  // format is "digits" for a 6-digit code or "qr_code" for a pairing token to render as a QR code.
+  onPairingCode: (code, languages, format) => showCodeDialog(code, languages, format),
   // Advertise "speaker" if the app can speak the code. `languages` says which language to use.
   pairingCodeOutChannels: ['display'],
+  // Add "qr_code" if the app can render a QR code on its display.
+  pairingCodeFormats: ['digits', 'qr_code'],
   // Or, for devices with no display or speaker: a fixed 8-digit code,
   // random and unique per device. Avoid setting both code methods.
   // staticPairingCode: deviceStaticCode,
@@ -207,28 +244,35 @@ The SDK supports all three pairing methods from the spec:
 - **Pairing PSK** (always available): transfer the client-bound pairing token.
 - **Dynamic pairing code** (enabled by `onPairingCode`): the server starts
   pairing, the SDK derives a one-time code and passes it to `onPairingCode` for
-  display, and the operator enters it into the server.
+  display, and the operator enters it into the server. After a wrong entry the
+  SDK asks the server for another round and passes the same code again. With
+  `qr_code` in `pairingCodeFormats` the server may instead ask for a QR code:
+  the SDK then passes a version 1 pairing token, which the app renders as a QR
+  code with a library of its choice.
 - **Static pairing code** (enabled by `staticPairingCode`): the operator enters
   this device's fixed 8-digit code into the server, then makes a local gesture
-  that calls `player.openPairingWindow()` (window lasts ~5 minutes, one attempt).
+  that calls `player.openPairingWindow()`. The window lasts ~5 minutes and
+  closes early after a completed pairing, five wrong codes, a drop of the
+  connection that used it, or `cancelPairing()`.
 
-Some attempts are **gesture-gated**: the SDK withholds `client/pair-init` until
-`openPairingWindow()` is called, signalling `client/pair-pending` meanwhile and
-firing `onPairing("pending")`. That applies to every static pairing code
-attempt, and to dynamic pairing code attempts when the method has escalated.
-Ten consecutive dynamic pairing code failures escalate the method, and any
-later success de-escalates it.
+Some attempts are **held back**: the SDK withholds `client/pair-init`,
+signalling `client/pair-pending` meanwhile and firing `onPairing("pending")`.
+A static pairing code attempt waits for an open pairing window. After 20
+dynamic pairing code rounds without a correct code, dynamic pairing code
+attempts wait for `releasePairingHold()`, which also resets the count. Call it
+only on a deliberate action on the device.
 
 ```typescript
 console.log('Client ID:', player.clientId);              // 43-char base64url pubkey
 console.log('Pairing token:', player.pairingToken);      // spec version 0
 
-// Rotate the Pairing PSK (e.g. if it may have leaked)
-const newPsk = player.rotatePairingPsk();
+// Rotate the Pairing PSK (e.g. if the token may have leaked)
+const newToken = player.rotatePairingPsk();
 
-player.openPairingWindow();                      // operator gesture for a gated attempt
-player.cancelPairing();                          // abort an in-progress attempt
-player.isDynamicPinEscalated();                  // gesture-gated after 10 failures
+player.openPairingWindow();                      // operator gesture for a static code attempt
+player.releasePairingHold();                     // operator action after the round limit
+player.cancelPairing();                          // close the window and abort any attempt
+player.isRoundLimitReached();                    // held back after 20 rounds without a correct code
 ```
 
 Pairing requires a server speaking the current specification. A non-compliant
@@ -247,7 +291,7 @@ exists. A player built afterwards on the same storage adopts this identity.
 ```typescript
 import { loadSendspinClientIdentity } from '@sendspin/sendspin-js';
 
-const { clientId, pairingPsk, pairingToken } = loadSendspinClientIdentity();
+const { clientId, pairingToken } = loadSendspinClientIdentity();
 ```
 
 ### Core + scheduler as separate layers

@@ -3,6 +3,7 @@ import type {
   ClientCommand,
   ClientGoodbye,
   ClientHello,
+  ClientLeave,
   ClientState,
   Codec,
   ControllerCommand,
@@ -46,7 +47,6 @@ export interface MessageSender {
 }
 
 export interface HelloContext {
-  trustLevel(): "user" | "none";
   pairMethods(): SupportedPairMethods;
   unpairedAccess: boolean;
 }
@@ -54,6 +54,8 @@ export interface HelloContext {
 export interface ProtocolHandlerConfig {
   clientName?: string;
   productName?: string;
+  manufacturer?: string;
+  softwareVersion?: string;
   codecs?: Codec[];
   bufferCapacity?: number;
   requiredLeadTimeMs?: number;
@@ -67,6 +69,8 @@ export interface ProtocolHandlerConfig {
 export class ProtocolHandler {
   private clientName: string;
   private productName?: string;
+  private manufacturer?: string;
+  private softwareVersion?: string;
   private codecs: Codec[];
   private bufferCapacity: number | undefined;
   private requiredLeadTimeMs: number;
@@ -78,7 +82,6 @@ export class ProtocolHandler {
   private timeSyncManager: TimeSyncManager;
   private activated = false;
   private activeRoles: Set<string> | null = null;
-  private pairingSuspended = false;
   private lastSentState: string | null = null;
 
   constructor(
@@ -91,6 +94,8 @@ export class ProtocolHandler {
   ) {
     this.clientName = config.clientName ?? "Sendspin Player";
     this.productName = config.productName;
+    this.manufacturer = config.manufacturer;
+    this.softwareVersion = config.softwareVersion;
     this.codecs = config.codecs ?? ["opus", "flac", "pcm"];
     // Left undefined so the capacity is derived from the formats actually
     // advertised in client/hello (see sendClientHello).
@@ -114,11 +119,12 @@ export class ProtocolHandler {
       sender,
       stateManager,
       timeFilter,
+      () => this.sendStateUpdate(),
     );
   }
 
   // Handle server messages
-  handleServerMessage(message: ServerMessage): void {
+  handleServerMessage(message: ServerMessage, receivedAtUs: number): void {
     switch (message.type) {
       case "server/hello":
         this.handleServerHello();
@@ -129,7 +135,10 @@ export class ProtocolHandler {
         break;
 
       case "server/time":
-        this.timeSyncManager.handleServerTime(message as ServerTime);
+        this.timeSyncManager.handleServerTime(
+          message as ServerTime,
+          receivedAtUs,
+        );
         break;
 
       case "stream/start":
@@ -166,17 +175,35 @@ export class ProtocolHandler {
   }
 
   // Handle server/activate: start the initial client/state, time-sync, and
-  // periodic state updates. Guarded so a repeat activate is a no-op.
+  // periodic state updates. A repeat activate only applies role changes.
   private handleServerActivate(message: ServerActivate): void {
-    this.pairingSuspended = false;
+    // Roles are unset only on a new connection, which starts without streams.
+    if (
+      this.activeRoles === null &&
+      this.stateManager.currentStreamFormat !== null
+    ) {
+      this.endPlayerStream();
+    }
     let rolesChanged = false;
     if (message.payload.active_roles !== undefined) {
       const nextRoles = new Set(message.payload.active_roles);
+      const removedRoles = [...(this.activeRoles ?? [])].filter(
+        (role) => !nextRoles.has(role),
+      );
       rolesChanged =
         this.activeRoles === null ||
-        nextRoles.size !== this.activeRoles.size ||
-        [...nextRoles].some((role) => !this.activeRoles!.has(role));
+        removedRoles.length > 0 ||
+        nextRoles.size !== this.activeRoles.size;
       this.activeRoles = nextRoles;
+      if (
+        removedRoles.includes("player@v1") &&
+        this.stateManager.currentStreamFormat !== null
+      ) {
+        this.endPlayerStream();
+      }
+      this.stateManager.discardRoleState(
+        removedRoles.map((role) => role.split("@")[0]),
+      );
     }
     if (this.activated) {
       if (rolesChanged) this.sendStateUpdate();
@@ -209,21 +236,12 @@ export class ProtocolHandler {
     this.timeSyncManager.stop();
   }
 
-  suspendForPairing(): void {
-    this.pairingSuspended = true;
-    this.activated = false;
-    this.activeRoles = new Set();
-    this.timeSyncManager.stop();
-    this.stateManager.clearStateUpdateInterval();
-  }
-
   /**
    * Clear the activate guard so the next server/activate (e.g. after a reconnect on a
    * reused handler) restarts time-sync and state updates.
    * @internal called by SendspinCore on transport close, not part of the public API.
    */
   resetActivation(preserveActiveRoles = false): void {
-    this.pairingSuspended = false;
     this.activated = false;
     if (!preserveActiveRoles) this.activeRoles = null;
     this.timeSyncManager.stop();
@@ -243,26 +261,25 @@ export class ProtocolHandler {
   }
 
   private handleStreamStart(message: StreamStart): void {
+    const format = message.payload.player;
+    if (!format) return;
     const isFormatUpdate = this.stateManager.currentStreamFormat !== null;
 
-    this.stateManager.currentStreamFormat = message.payload.player;
+    this.stateManager.currentStreamFormat = format;
     console.log(
       isFormatUpdate
         ? "Sendspin: Stream format updated"
         : "Sendspin: Stream started",
-      this.stateManager.currentStreamFormat,
+      format,
     );
     console.log(
-      `Sendspin: Codec=${this.stateManager.currentStreamFormat.codec.toUpperCase()}, ` +
-        `SampleRate=${this.stateManager.currentStreamFormat.sample_rate}Hz, ` +
-        `Channels=${this.stateManager.currentStreamFormat.channels}, ` +
-        `BitDepth=${this.stateManager.currentStreamFormat.bit_depth}bit`,
+      `Sendspin: Codec=${format.codec.toUpperCase()}, ` +
+        `SampleRate=${format.sample_rate}Hz, ` +
+        `Channels=${format.channels}, ` +
+        `BitDepth=${format.bit_depth}bit`,
     );
 
-    this.streamHandler.handleStreamStart(
-      this.stateManager.currentStreamFormat,
-      isFormatUpdate,
-    );
+    this.streamHandler.handleStreamStart(format, isFormatUpdate);
 
     this.stateManager.isPlaying = true;
 
@@ -284,14 +301,18 @@ export class ProtocolHandler {
     const roles = message.payload?.roles;
     if (!roles || roles.includes("player")) {
       console.log("Sendspin: Stream ended");
-      this.streamHandler.handleStreamEnd();
+      this.endPlayerStream();
+    }
+  }
 
-      this.stateManager.currentStreamFormat = null;
-      this.stateManager.isPlaying = false;
+  private endPlayerStream(): void {
+    this.streamHandler.handleStreamEnd();
 
-      if (typeof navigator !== "undefined" && navigator.mediaSession) {
-        navigator.mediaSession.playbackState = "paused";
-      }
+    this.stateManager.currentStreamFormat = null;
+    this.stateManager.isPlaying = false;
+
+    if (typeof navigator !== "undefined" && navigator.mediaSession) {
+      navigator.mediaSession.playbackState = "paused";
     }
   }
 
@@ -353,22 +374,17 @@ export class ProtocolHandler {
       payload: {
         name: this.clientName,
         supported_roles: ["player@v1", "controller@v1", "metadata@v1"],
-        trust_level: this.helloContext.trustLevel(),
         supported_pair_methods: this.helloContext.pairMethods(),
         unpaired_access: { enabled: this.helloContext.unpairedAccess },
         device_info: {
           product_name: this.productName,
-          manufacturer:
-            (typeof navigator !== "undefined" && navigator.vendor) || "Unknown",
-          software_version:
-            (typeof navigator !== "undefined" && navigator.userAgent) ||
-            "Unknown",
+          manufacturer: this.manufacturer,
+          software_version: this.softwareVersion,
         },
         "player@v1_support": {
           supported_formats: supportedFormats,
           buffer_capacity:
             this.bufferCapacity ?? getDefaultBufferCapacity(supportedFormats),
-          supported_commands: ["volume", "mute"],
         },
       },
     };
@@ -400,7 +416,7 @@ export class ProtocolHandler {
     }
 
     const payload: ClientState["payload"] = {
-      available: true,
+      available: this.timeFilter.is_synchronized,
     };
     if (this.activeRoles?.has("player@v1")) {
       payload.player = {
@@ -434,13 +450,20 @@ export class ProtocolHandler {
     } satisfies ClientGoodbye);
   }
 
+  sendLeave(): void {
+    if (!this.activated) return;
+    this.sender.sendControl({
+      type: "client/leave" as MessageType.CLIENT_LEAVE,
+      payload: {},
+    } satisfies ClientLeave);
+  }
+
   // Send controller command to server
   sendCommand<T extends ControllerCommand>(
     command: T,
     params: ControllerCommands[T],
   ): void {
-    if (this.pairingSuspended || !this.activeRoles?.has("controller@v1"))
-      return;
+    if (!this.activeRoles?.has("controller@v1")) return;
     let fields = params as object;
     if (command === "volume") {
       const { volume } = params as ControllerCommands["volume"];

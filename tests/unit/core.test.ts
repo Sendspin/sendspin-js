@@ -145,13 +145,47 @@ describe("SendspinCore (offline)", () => {
   });
 
   describe("handleBinaryMessage", () => {
+    afterEach(() => vi.restoreAllMocks());
+
     it("drops audio chunks that arrive before a stream format is set", () => {
       const onAudioData = vi.fn();
       core.onAudioData = onAudioData;
 
-      core.handleBinaryMessage(new ArrayBuffer(20));
+      const chunk = new Uint8Array(20);
+      chunk[0] = 4;
+      core.handleBinaryMessage(chunk.buffer);
 
       expect(onAudioData).not.toHaveBeenCalled();
+    });
+
+    it("ignores binary IDs other than audio chunks without an audio warning", () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const artwork = new Uint8Array(20);
+      artwork[0] = 8;
+
+      core.handleBinaryMessage(artwork.buffer);
+
+      expect(warn).not.toHaveBeenCalled();
+    });
+
+    it("drops a chunk still decoding when stream/clear arrives", async () => {
+      const onAudioData = vi.fn();
+      core.onAudioData = onAudioData;
+      core._stateManager.currentStreamFormat = PCM_FORMAT;
+      const chunk = (timestampUs: number) => {
+        const data = new Uint8Array(9 + 4 * PCM_FORMAT.channels);
+        data[0] = 4;
+        new DataView(data.buffer).setBigInt64(1, BigInt(timestampUs));
+        return data.buffer;
+      };
+
+      core.handleBinaryMessage(chunk(1000));
+      core.handleStreamClear();
+      core.handleBinaryMessage(chunk(2000));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(onAudioData).toHaveBeenCalledTimes(1);
+      expect(onAudioData.mock.calls[0][0].serverTimeUs).toBe(2000);
     });
   });
 
@@ -166,14 +200,15 @@ describe("SendspinCore (offline)", () => {
       expect(core.currentFormat).toBeNull();
     });
 
-    it("disconnect resets state even when never connected", () => {
+    it("disconnect resets state but keeps volume and mute", () => {
       core._stateManager.volume = 50;
       core._stateManager.muted = true;
+      core._stateManager.isPlaying = true;
 
       core.disconnect();
 
-      expect(core.volume).toBe(100);
-      expect(core.muted).toBe(false);
+      expect(core.volume).toBe(50);
+      expect(core.muted).toBe(true);
       expect(core.isPlaying).toBe(false);
       expect(core.isConnected).toBe(false);
     });
@@ -381,6 +416,74 @@ describe("SendspinCore command + state forwarding", () => {
     core.disconnect();
   });
 
+  it("closes a bound pairing window when connect() replaces a live socket", async () => {
+    core = new SendspinCore({
+      baseUrl: "http://h",
+      staticPairingCode: "12345678",
+    });
+    const send = spySend(core);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const internals = core as any;
+    internals.wsManager.connect = vi.fn().mockResolvedValue(undefined);
+    internals.wsManager.isConnected = () => true;
+    const activatePairing = () =>
+      internals.routeControl({
+        type: "server/activate",
+        payload: {
+          activities: ["pairing"],
+          pairing: { method: "static_pairing_code" },
+        },
+      });
+    core.openPairingWindow();
+    activatePairing();
+    expect(send.mock.lastCall?.[0].type).toBe("client/pair-init");
+
+    await core.connect();
+    activatePairing();
+    expect(send.mock.lastCall?.[0].type).toBe("client/pair-pending");
+    core.disconnect();
+  });
+
+  it("does not report a close when connect() replaces a live socket", async () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const internals = core as any;
+    internals.wsManager.connect = vi.fn().mockResolvedValue(undefined);
+    internals.wsManager.isConnected = () => true;
+    const onClose = vi.fn();
+    core.onConnectionClose = onClose;
+
+    await core.connect();
+    expect(onClose).not.toHaveBeenCalled();
+    core.disconnect();
+  });
+
+  it("keeps player state and controller commands during a pairing activation", () => {
+    core = new SendspinCore({
+      baseUrl: "http://h",
+      staticPairingCode: "12345678",
+    });
+    const send = spySend(core);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (core as any).routeControl({
+      type: "server/activate",
+      payload: {
+        activities: ["playback", "pairing"],
+        active_roles: ["player@v1", "controller@v1"],
+        pairing: { method: "static_pairing_code" },
+      },
+    });
+    const state = send.mock.calls
+      .map((call) => call[0])
+      .find((msg) => msg.type === "client/state");
+    expect(state.payload.player).toBeDefined();
+
+    seedController(core, ["play"]);
+    send.mockClear();
+    core.sendCommand("play", undefined);
+    expect(send.mock.calls[0][0].type).toBe("client/command");
+    core.disconnect();
+  });
+
   it("setVolume clamps in state manager and sends a client/state update", () => {
     const send = spySend(core);
     activatePlayer(core, send);
@@ -411,6 +514,32 @@ describe("SendspinCore command + state forwarding", () => {
     expect(() => core.setVolume(NaN)).toThrow(RangeError);
     expect(core.volume).toBe(42);
     expect(send).not.toHaveBeenCalled();
+  });
+
+  it("reports a hardware volume change from setVolume without echoing it to the hardware", () => {
+    const onVolumeCommand = vi.fn();
+    const device = { volume: 60, muted: false };
+    const hardwareCore = new SendspinCore({
+      baseUrl: "http://h",
+      storage: null,
+      useHardwareVolume: true,
+      onVolumeCommand,
+      getExternalVolume: () => ({ ...device }),
+    });
+    const send = spySend(hardwareCore);
+    activatePlayer(hardwareCore, send);
+
+    device.volume = 25;
+    device.muted = true;
+    hardwareCore.setVolume(25);
+
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send.mock.calls[0][0].payload.player).toMatchObject({
+      volume: 25,
+      muted: true,
+    });
+    expect(onVolumeCommand).not.toHaveBeenCalled();
+    hardwareCore.disconnect();
   });
 
   it("setVolume invokes the onVolumeUpdate callback", () => {
@@ -538,6 +667,31 @@ describe("SendspinCore output delay persistence", () => {
   });
 });
 
+describe("SendspinCore volume persistence", () => {
+  it("restores server-commanded volume and mute on a fresh core with the same storage", () => {
+    const storage = makeStorage();
+    const core = new SendspinCore({ baseUrl: "http://h", storage });
+    const send = spySend(core);
+    activatePlayer(core, send);
+    for (const player of [
+      { command: "volume", volume: 35 },
+      { command: "mute", mute: true },
+    ]) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (core as any).routeControl({
+        type: "server/command",
+        payload: { player },
+      });
+    }
+    core._stateManager.clearAllIntervals();
+
+    const restored = new SendspinCore({ baseUrl: "http://h", storage });
+
+    expect(restored.volume).toBe(35);
+    expect(restored.muted).toBe(true);
+  });
+});
+
 describe("SendspinCore.disconnect ordering and idempotency", () => {
   it("resets the time filter on disconnect", () => {
     const core = new SendspinCore({ baseUrl: "http://h" });
@@ -557,7 +711,7 @@ describe("SendspinCore.disconnect ordering and idempotency", () => {
     expect(send).not.toHaveBeenCalled();
   });
 
-  it("defaults the goodbye reason to restart, but forwards an explicit reason", () => {
+  it("defaults the goodbye reason to user_request, but forwards an explicit reason", () => {
     const core = new SendspinCore({ baseUrl: "http://h" });
     const send = spySend(core);
     markTransportReady(core);
@@ -566,10 +720,11 @@ describe("SendspinCore.disconnect ordering and idempotency", () => {
     expect(send).toHaveBeenLastCalledWith(
       expect.objectContaining({
         type: "client/goodbye",
-        payload: { reason: "restart" },
+        payload: { reason: "user_request" },
       }),
     );
 
+    markTransportReady(core);
     core.disconnect("shutdown");
     expect(send).toHaveBeenLastCalledWith(
       expect.objectContaining({

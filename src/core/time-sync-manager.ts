@@ -25,6 +25,7 @@ export class TimeSyncManager {
     private sender: MessageSender,
     private stateManager: StateManager,
     private timeFilter: SendspinTimeFilter,
+    private onSynchronized: () => void,
   ) {}
 
   // Start an initial burst and schedule recurring bursts.
@@ -103,6 +104,7 @@ export class TimeSyncManager {
   private finalizeTimeSyncBurst(): void {
     this.clearTimeSyncProbeTimeout();
 
+    const wasSynchronized = this.timeFilter.is_synchronized;
     const candidate = this.selectTimeSyncBurstCandidate();
     if (candidate) {
       // Floor at 1 ms so coarse timers never yield a zero max_error.
@@ -114,6 +116,10 @@ export class TimeSyncManager {
     this.timeSyncBurstSentCount = 0;
     this.timeSyncInFlightClientTransmitted = null;
     this.timeSyncBurstSamples = [];
+
+    if (!wasSynchronized && this.timeFilter.is_synchronized) {
+      this.onSynchronized();
+    }
   }
 
   private selectTimeSyncBurstCandidate(): TimeSyncSample | null {
@@ -142,7 +148,7 @@ export class TimeSyncManager {
   }
 
   // Handle server/time response
-  handleServerTime(message: ServerTime): void {
+  handleServerTime(message: ServerTime, receivedAtUs: number): void {
     if (
       !this.timeSyncBurstActive ||
       this.timeSyncInFlightClientTransmitted === null
@@ -161,7 +167,7 @@ export class TimeSyncManager {
       return;
     }
 
-    const T4 = Math.floor(performance.now() * 1000); // client received time
+    const T4 = receivedAtUs;
     const T2 = message.payload.server_received;
     const T3 = message.payload.server_transmitted;
 

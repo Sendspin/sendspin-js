@@ -78,6 +78,8 @@ export class SendspinPlayer {
       baseUrl: config.baseUrl,
       clientName: config.clientName,
       productName: config.productName,
+      manufacturer: config.manufacturer,
+      softwareVersion: config.softwareVersion,
       webSocket: config.webSocket,
       codecs: config.codecs,
       bufferCapacity: config.bufferCapacity,
@@ -95,6 +97,7 @@ export class SendspinPlayer {
       onPairing: config.onPairing,
       onPairingCode: config.onPairingCode,
       pairingCodeOutChannels: config.pairingCodeOutChannels,
+      pairingCodeFormats: config.pairingCodeFormats,
       staticPairingCode: config.staticPairingCode,
       staticPairingCodeLocations: config.staticPairingCodeLocations,
       pairingPskLocations: config.pairingPskLocations,
@@ -212,6 +215,7 @@ export class SendspinPlayer {
    */
   async unlock(): Promise<void> {
     this.scheduler.initAudioContext();
+    this.scheduler.startAudioElement();
     await this.scheduler.resumeAudioContext();
   }
 
@@ -222,17 +226,17 @@ export class SendspinPlayer {
   }
 
   /**
-   * Disconnect from Sendspin server
-   * @param reason - Optional reason for disconnecting (default: 'restart')
+   * Disconnect from Sendspin server. The player keeps its audio output for the
+   * next connect(). Call destroy() instead when dropping the player.
+   * @param reason - Optional reason for disconnecting (default: 'user_request')
    */
-  disconnect(reason: GoodbyeReason = "restart"): void {
+  disconnect(reason: GoodbyeReason = "user_request"): void {
     this.cancelPendingDisconnectPlaybackReset();
     this.suppressDisconnectPlaybackReset = true;
 
     this.core.disconnect(reason);
 
-    // Close scheduler
-    this.scheduler.close();
+    this.scheduler.stop();
 
     // Reset MediaSession playbackState (if available)
     if (typeof navigator !== "undefined" && navigator.mediaSession) {
@@ -241,12 +245,26 @@ export class SendspinPlayer {
     }
   }
 
-  // Set volume (0-100). Throws RangeError if NaN.
+  /**
+   * Disconnect and release the audio output. Call this when dropping the player.
+   * @param reason - Optional reason for disconnecting (default: 'user_request')
+   */
+  destroy(reason?: GoodbyeReason): void {
+    this.disconnect(reason);
+    this.scheduler.close();
+  }
+
+  /** Leave the current group. Does nothing until the server has activated the connection. */
+  leaveGroup(): void {
+    this.core.leaveGroup();
+  }
+
+  // Set volume (0-100). Throws RangeError if NaN. With useHardwareVolume, report a device volume change.
   setVolume(volume: number): void {
     this.core.setVolume(volume);
   }
 
-  // Set muted state
+  // Set muted state. With useHardwareVolume, report a device mute change.
   setMuted(muted: boolean): void {
     this.core.setMuted(muted);
   }
@@ -329,14 +347,6 @@ export class SendspinPlayer {
   }
 
   /**
-   * The client's Pairing PSK (base64url). Keep it secret, and show the
-   * operator pairingToken, not this.
-   */
-  get pairingPsk(): string {
-    return this.core.pairingPsk;
-  }
-
-  /**
    * The token the operator enters on the server to pair. Keep it secret,
    * since anyone with it can pair.
    */
@@ -344,31 +354,43 @@ export class SendspinPlayer {
     return this.core.pairingToken;
   }
 
-  /** Rotate the Pairing PSK, returning the new value. */
+  /** Rotate the Pairing PSK, returning the new pairing token. */
   rotatePairingPsk(): string {
     return this.core.rotatePairingPsk();
   }
 
   /**
-   * Allows one pairing attempt in the next 5 minutes.
+   * Opens the pairing window for 5 minutes. It admits pairing attempts on
+   * the connection that carries its first, and closes on a completed pairing,
+   * the fifth wrong code, a drop of that connection, or cancelPairing().
    * Call it only when the user presses a pairing button on the device, never
    * because the server asked.
-   * Static code pairing always needs it. Dynamic code pairing needs it after
-   * 10 failed attempts.
+   * Static code pairing always needs it.
    * onPairing("pending") fires while an attempt waits for it.
    */
   openPairingWindow(): void {
     this.core.openPairingWindow();
   }
 
-  /** Cancel an in-progress pairing attempt (sends pair/abort user_cancelled). */
+  /** Close the pairing window and cancel an in-progress attempt with pair/abort user_cancelled. */
   cancelPairing(): void {
     this.core.cancelPairing();
   }
 
-  /** Whether dynamic pairing code has escalated to gesture-gating (10 failures). */
-  isDynamicPinEscalated(): boolean {
-    return this.core.isDynamicPinEscalated();
+  /**
+   * Releases dynamic code pairing after 20 rounds without a correct code and
+   * resets the count.
+   * Call it only when the user acts on the device, never because the server
+   * asked. It has no effect while an attempt is running.
+   * onPairing("pending") fires while an attempt waits for it.
+   */
+  releasePairingHold(): void {
+    this.core.releasePairingHold();
+  }
+
+  /** Whether dynamic code pairing is held back after 20 rounds without a correct code. */
+  isRoundLimitReached(): boolean {
+    return this.core.isRoundLimitReached();
   }
 
   // Get current correction mode

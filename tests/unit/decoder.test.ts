@@ -11,20 +11,21 @@ import type { DecodedAudioChunk, StreamFormat } from "../../src/types";
 
 /**
  * Build a binary audio message in Sendspin protocol format:
- *   [1 byte type=4] [8 bytes BE int64 timestamp] [audio payload]
+ *   [1 byte type=4] [8 bytes BE int64 timestamp] [4 bytes BE uint32 send_ahead] [audio payload]
  */
 function buildBinaryMessage(
   serverTimeUs: number,
   audioPayload: ArrayBuffer,
 ): ArrayBuffer {
-  const header = new ArrayBuffer(9);
+  const header = new ArrayBuffer(13);
   const view = new DataView(header);
   view.setUint8(0, 4); // audio chunk type
   view.setBigInt64(1, BigInt(serverTimeUs), false); // big-endian
+  view.setUint32(9, 250_000, false);
 
-  const combined = new Uint8Array(9 + audioPayload.byteLength);
+  const combined = new Uint8Array(13 + audioPayload.byteLength);
   combined.set(new Uint8Array(header), 0);
-  combined.set(new Uint8Array(audioPayload), 9);
+  combined.set(new Uint8Array(audioPayload), 13);
   return combined.buffer;
 }
 
@@ -275,12 +276,12 @@ describe("SendspinDecoder", () => {
   });
 
   describe("PCM bit depth handling", () => {
-    it("decodes an omitted bit_depth as 16-bit", async () => {
-      const format: StreamFormat = {
+    it("emits no chunk for an omitted bit_depth", async () => {
+      const format = {
         codec: "pcm",
         sample_rate: 48000,
         channels: 2,
-      };
+      } as StreamFormat;
 
       const pcmData = createPcm16Sine(960, 2);
       await decoder.handleBinaryMessage(
@@ -289,11 +290,7 @@ describe("SendspinDecoder", () => {
         0,
       );
 
-      expect(chunks.length).toBe(1);
-      expect(chunks[0].samples[0].length).toBe(960);
-      let peak = 0;
-      for (const s of chunks[0].samples[0]) peak = Math.max(peak, Math.abs(s));
-      expect(peak).toBeGreaterThan(0.4);
+      expect(chunks.length).toBe(0);
     });
 
     it("emits no chunk for an unsupported bit_depth", async () => {

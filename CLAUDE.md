@@ -62,6 +62,8 @@ The `SendspinPlayerConfig` interface in `src/types.ts` defines all available opt
 - `baseUrl`: Server URL
 - `clientName`: Human-readable player name
 - `productName`: Product name advertised in client/hello
+- `manufacturer`: Manufacturer advertised in client/hello
+- `softwareVersion`: App version advertised in client/hello
 - `audioOutputMode`: "direct" or "media-element" (for mobile)
 - `audioElement`: Required for media-element mode
 - `codecs`: Preferred codec order (opus, flac, pcm)
@@ -76,7 +78,7 @@ Encryption and pairing options:
 - `suite`: Noise cipher suite, "chacha" (default) or "aesgcm"
 - `unpairedAccess`: Admit unpaired playback on the Sentinel PSK
 - `longTermPsks`: Preloaded long-term PSK records
-- `storage`: Backing store for identity, PSKs, and pairing failure counters
+- `storage`: Backing store for identity, PSKs, and the pairing round count
 - `onPairing`: Pairing lifecycle callback
 - `onPairingCode`: Enables the dynamic pairing code method, receives the derived code
 - `staticPairingCode`: Enables the static pairing code method with a fixed 8-digit code

@@ -8,6 +8,7 @@ const PAIRING_CODE_DERIVE_LABEL = new TextEncoder().encode(
 const PAIR_COMMIT_LABEL = new TextEncoder().encode("sendspin-pair-commit-v1");
 export const NONCE_SIZE = 32;
 const DYNAMIC_CODE_DIGITS = 6;
+const QR_CODE_SIZE = 24;
 export const STATIC_PIN_DIGITS = 8;
 
 const STATIC_PIN_RE = new RegExp(`^[0-9]{${STATIC_PIN_DIGITS}}$`);
@@ -30,12 +31,11 @@ export function commitNonce(nonce: Uint8Array): Uint8Array {
   return sha256(input);
 }
 
-/** Derive the 6-digit dynamic pairing code from the handshake hash and both nonces. */
-export function derivePairingCode(
+function pairingCodeDigest(
   handshakeHash: Uint8Array,
   nonceA: Uint8Array,
   nonceB: Uint8Array,
-): string {
+): Uint8Array {
   const input = new Uint8Array(
     PAIRING_CODE_DERIVE_LABEL.length +
       handshakeHash.length +
@@ -49,9 +49,30 @@ export function derivePairingCode(
     nonceB,
     PAIRING_CODE_DERIVE_LABEL.length + handshakeHash.length + nonceA.length,
   );
-  const digest = sha256(input);
+  return sha256(input);
+}
+
+/** Derive the 6-digit dynamic pairing code from the handshake hash and both nonces. */
+export function derivePairingCode(
+  handshakeHash: Uint8Array,
+  nonceA: Uint8Array,
+  nonceB: Uint8Array,
+): string {
+  const digest = pairingCodeDigest(handshakeHash, nonceA, nonceB);
   let n = 0n;
   for (const b of digest) n = (n << 8n) | BigInt(b);
   const code = n % 10n ** BigInt(DYNAMIC_CODE_DIGITS);
   return code.toString().padStart(DYNAMIC_CODE_DIGITS, "0");
+}
+
+/** Derive the 24-byte dynamic pairing code of the qr_code format. */
+export function deriveQrPairingCode(
+  handshakeHash: Uint8Array,
+  nonceA: Uint8Array,
+  nonceB: Uint8Array,
+): Uint8Array {
+  return pairingCodeDigest(handshakeHash, nonceA, nonceB).slice(
+    0,
+    QR_CODE_SIZE,
+  );
 }

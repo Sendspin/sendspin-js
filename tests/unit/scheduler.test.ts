@@ -20,6 +20,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { AudioScheduler, SYNC_ERROR_ALPHA } from "../../src/audio/scheduler";
 import { StateManager } from "../../src/core/state-manager";
+import { UNREPORTED_OUTPUT_LATENCY_SEC } from "../../src/audio/output-latency-tracker";
 import type { DecodedAudioChunk, StreamFormat } from "../../src/types";
 
 const SAMPLE_RATE = 48000;
@@ -53,6 +54,7 @@ class FakeBufferSource {
   playbackRate = { value: 1.0 };
   onended: (() => void) | null = null;
   started: number | null = null;
+  offset = 0;
   stopped: number | null = null;
   connected = false;
   ctx: FakeAudioContext;
@@ -62,8 +64,9 @@ class FakeBufferSource {
   connect() {
     this.connected = true;
   }
-  start(when: number) {
+  start(when: number, offset = 0) {
     this.started = when;
+    this.offset = offset;
     this.ctx.startedSources.push(this);
   }
   stop(when?: number) {
@@ -366,10 +369,10 @@ describe("AudioScheduler scheduling math", () => {
     );
   });
 
-  it("compensates Apple WebKit without changing the user sync delay", () => {
+  it("compensates iOS WebKit without changing the user sync delay", () => {
     vi.stubGlobal("navigator", {
       userAgent:
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.5.2 Safari/605.1.15",
+        "Mozilla/5.0 (iPhone; CPU iPhone OS 18_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Mobile/15E148 Safari/604.1",
     });
     const { scheduler, ctx } = setup({
       useOutputLatencyCompensation: true,
@@ -378,9 +381,21 @@ describe("AudioScheduler scheduling math", () => {
     scheduler.processAudioQueue();
 
     expect(scheduler.getSyncDelayMs()).toBe(0);
-    expect(scheduler.syncInfo.outputLatencyMs).toBe(100);
+    expect(scheduler.syncInfo.outputLatencyMs).toBe(55);
     expect(ctx.startedSources[0].started!).toBeCloseTo(
-      ctx.currentTime + 0.9,
+      ctx.currentTime + 0.945,
+      6,
+    );
+  });
+
+  it("ignores an implausibly large reported outputLatency", () => {
+    const { scheduler, ctx } = setup({ useOutputLatencyCompensation: true });
+    ctx.outputLatency = 55.392;
+    scheduler.handleDecodedChunk(makeChunk(nowUs() + 1_000_000, 0));
+    scheduler.processAudioQueue();
+
+    expect(ctx.startedSources[0].started!).toBeCloseTo(
+      ctx.currentTime + 1 - UNREPORTED_OUTPUT_LATENCY_SEC,
       6,
     );
   });
@@ -419,8 +434,20 @@ describe("AudioScheduler late-chunk dropping", () => {
     scheduler.handleDecodedChunk(makeChunk(serverTime, 0));
     scheduler.processAudioQueue();
 
-    // playbackTime < raw ctx time => skipped, no source started
+    // scheduleTime < raw ctx time => skipped, no source started
     expect(ctx.startedSources.length).toBe(0);
+  });
+
+  it("drops a chunk whose start is past once the output delay is subtracted", () => {
+    const { scheduler, ctx } = setup({ syncDelayMs: 200 });
+    const base = nowUs() + 100_000;
+    scheduler.handleDecodedChunk(makeChunk(base, 0));
+    scheduler.handleDecodedChunk(makeChunk(base + 100_000, 0));
+    scheduler.processAudioQueue();
+
+    // The second chunk is due in 200ms, so it starts now.
+    expect(ctx.startedSources.length).toBe(1);
+    expect(ctx.startedSources[0].started!).toBeCloseTo(ctx.currentTime, 6);
   });
 });
 
@@ -673,6 +700,40 @@ describe("AudioScheduler quality mode thresholds", () => {
     h.scheduler.processAudioQueue();
     expect(h.scheduler.syncInfo.playbackRate).toBe(1.0);
     expect(h.scheduler.syncInfo.correctionMethod).not.toBe("rate");
+  });
+
+  it("reschedules buffered audio at a changed output delay in quality mode", () => {
+    const h = setup({ correctionMode: "quality" });
+    h.scheduler.handleDecodedChunk(makeChunk(nowUs() + 1_000_000, 0));
+    h.scheduler.processAudioQueue();
+    const first = h.ctx.startedSources[0];
+
+    h.scheduler.setSyncDelay(100);
+
+    expect(first.stopped).not.toBeNull();
+    expect(h.ctx.startedSources.at(-1)!.started!).toBeCloseTo(
+      first.started! - 0.1,
+      6,
+    );
+  });
+
+  it("trims the chunk that overlaps the kept tail after a delay increase", () => {
+    const h = setup({ correctionMode: "quality-local" });
+    const base = nowUs();
+    for (let i = 0; i < 3; i++) {
+      h.scheduler.handleDecodedChunk(
+        makeChunk(base + 250_000 + i * 100_000, 0),
+      );
+    }
+    h.scheduler.processAudioQueue();
+    const [, second, third] = h.ctx.startedSources;
+
+    h.scheduler.setSyncDelay(10);
+
+    const restarted = h.ctx.startedSources.slice(3);
+    expect(restarted[0].started!).toBeCloseTo(second.started!, 6);
+    expect(restarted[0].offset).toBeCloseTo(0.01, 6);
+    expect(restarted[1].started!).toBeCloseTo(third.started! - 0.01, 6);
   });
 });
 

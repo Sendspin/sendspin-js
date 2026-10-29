@@ -34,7 +34,6 @@ describe("SendspinTransport", () => {
     const { serverSession, serverId } = completeHandshake(h);
     expect(h.cb.onHandshakeComplete).toHaveBeenCalledWith(
       expect.objectContaining({
-        trustLevel: "none",
         category: "sentinel",
         serverId,
       }),
@@ -52,6 +51,7 @@ describe("SendspinTransport", () => {
     } as MessageEvent);
     expect(h.cb.onControlMessage).toHaveBeenCalledWith(
       expect.objectContaining({ type: "server/hello" }),
+      expect.any(Number),
     );
 
     // outbound control decrypts on the server
@@ -73,8 +73,8 @@ describe("SendspinTransport", () => {
     expect(got[9]).toBe(0xaa);
 
     // fragmentation: origType 4, two parts
-    const f1 = new Uint8Array([2, 4, 1, 2, 3]); // [more][origType=4][data 1,2,3]
-    const f2 = new Uint8Array([3, 4, 5]); // [end][data 4,5]
+    const f1 = new Uint8Array([1, 0x02, 4, 1, 2, 3]); // [1][first][origType=4][data 1,2,3]
+    const f2 = new Uint8Array([1, 0x01, 4, 5]); // [1][last][data 4,5]
     h.transport.handleRaw({
       data: serverSession.encrypt(f1).buffer,
     } as MessageEvent);
@@ -156,6 +156,23 @@ describe("SendspinTransport", () => {
       }),
     } as MessageEvent);
     expect(h.ws.disconnected).toBe(true);
+  });
+
+  it("logs the server/error reason and closes", () => {
+    const h = harness();
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    h.transport.start();
+    h.transport.handleRaw({
+      data: JSON.stringify({
+        type: "server/error",
+        payload: { reason: "unsupported_suite" },
+      }),
+    } as MessageEvent);
+    expect(error).toHaveBeenCalledWith(
+      expect.stringContaining("unsupported_suite"),
+    );
+    expect(h.ws.disconnected).toBe(true);
+    error.mockRestore();
   });
 
   it("closes when the next handshake message times out", () => {

@@ -57,8 +57,8 @@ export class SendspinDecoder {
       const timestampView = new DataView(data, 1, 8);
       const serverTimeUs = Number(timestampView.getBigInt64(0, false));
 
-      // Rest is audio data
-      const audioData = data.slice(9);
+      // Bytes 9-12 carry send_ahead, which has no bearing on playback.
+      const audioData = data.slice(13);
 
       // For Opus: use native decoder (non-blocking async path)
       if (format.codec === "opus" && this.useNativeOpus) {
@@ -114,7 +114,7 @@ export class SendspinDecoder {
     audioData: ArrayBuffer,
     format: StreamFormat,
   ): { samples: Float32Array[]; sampleRate: number } | null {
-    const bitDepth = format.bit_depth ?? 16;
+    const bitDepth = format.bit_depth;
     if (bitDepth !== 16 && bitDepth !== 24 && bitDepth !== 32) {
       console.warn(`Sendspin: unsupported PCM bit_depth ${bitDepth}`);
       return null;

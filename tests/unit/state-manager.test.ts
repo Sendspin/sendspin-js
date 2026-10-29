@@ -203,8 +203,6 @@ describe("StateManager", () => {
 
   describe("reset", () => {
     it("resets all state to defaults", () => {
-      sm.volume = 42;
-      sm.muted = true;
       sm.playerState = "error";
       sm.isPlaying = true;
       sm.currentStreamFormat = {
@@ -221,8 +219,6 @@ describe("StateManager", () => {
 
       sm.reset();
 
-      expect(sm.volume).toBe(100);
-      expect(sm.muted).toBe(false);
       expect(sm.playerState).toBe("synchronized");
       expect(sm.isPlaying).toBe(false);
       expect(sm.currentStreamFormat).toBeNull();

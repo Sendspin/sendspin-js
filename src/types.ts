@@ -9,6 +9,7 @@ export enum MessageType {
   SERVER_STATE = "server/state",
   CLIENT_COMMAND = "client/command",
   CLIENT_GOODBYE = "client/goodbye",
+  CLIENT_LEAVE = "client/leave",
   SERVER_COMMAND = "server/command",
   STREAM_START = "stream/start",
   STREAM_CLEAR = "stream/clear",
@@ -25,6 +26,7 @@ export enum MessageType {
   SERVER_PAIR_AUTH = "server/pair-auth",
   CLIENT_PAIR_AUTH = "client/pair-auth",
   SERVER_PAIR_CONFIRM = "server/pair-confirm",
+  CLIENT_PAIR_RETRY = "client/pair-retry",
   CLIENT_PAIR_CONFIRM = "client/pair-confirm",
   CLIENT_PAIR_FINALIZE = "client/pair-finalize",
   SERVER_PAIR_FINALIZE = "server/pair-finalize",
@@ -82,7 +84,6 @@ export interface ClientHello {
   payload: {
     name: string;
     supported_roles: string[];
-    trust_level: "user" | "none";
     supported_pair_methods: SupportedPairMethods;
     unpaired_access: { enabled: boolean };
     device_info?: {
@@ -98,7 +99,6 @@ export interface ClientHello {
         bit_depth: number;
       }>;
       buffer_capacity: number;
-      supported_commands: string[];
     };
   };
 }
@@ -130,6 +130,11 @@ export interface ClientGoodbye {
   payload: {
     reason: GoodbyeReason;
   };
+}
+
+export interface ClientLeave {
+  type: MessageType.CLIENT_LEAVE;
+  payload: Record<string, never>;
 }
 
 export interface ClientCommand {
@@ -214,19 +219,15 @@ export interface ServerState {
 export interface StreamStart {
   type: MessageType.STREAM_START;
   payload: {
-    player: {
-      codec: string;
-      sample_rate: number;
-      channels: number;
-      bit_depth?: number;
-      codec_header?: string;
-    };
+    server_transmitted: number;
+    player?: StreamFormat;
   };
 }
 
 export interface StreamClear {
   type: MessageType.STREAM_CLEAR;
   payload: {
+    server_transmitted: number;
     roles?: string[];
   };
 }
@@ -303,8 +304,6 @@ export interface ActivatePairing {
   method: PairMethod;
   /** Dynamic pairing code only: the emission format for this attempt. */
   format?: PairCodeFormat;
-  /** Dynamic pairing code only: BCP 47 tags in descending operator preference. */
-  languages?: string[];
 }
 
 export interface ServerActivate {
@@ -329,7 +328,8 @@ export interface ClientPairInit {
 
 export interface ServerPairInit {
   type: MessageType.SERVER_PAIR_INIT;
-  payload: { nonce_A: string };
+  /** nonce_A is present in the first round only. */
+  payload: { nonce_A?: string };
 }
 
 export interface ServerPairAuth {
@@ -345,6 +345,11 @@ export interface ClientPairAuth {
 export interface ServerPairConfirm {
   type: MessageType.SERVER_PAIR_CONFIRM;
   payload: { server_kc: string };
+}
+
+export interface ClientPairRetry {
+  type: MessageType.CLIENT_PAIR_RETRY;
+  payload: Record<string, never>;
 }
 
 export interface ClientPairConfirm {
@@ -401,13 +406,18 @@ export type ServerMessage =
   | GroupUpdate;
 
 export type ClientMessage =
-  ClientHello | ClientTime | ClientState | ClientCommand | ClientGoodbye;
+  | ClientHello
+  | ClientTime
+  | ClientState
+  | ClientCommand
+  | ClientGoodbye
+  | ClientLeave;
 
 export type StreamFormat = {
   codec: string;
   sample_rate: number;
   channels: number;
-  bit_depth?: number;
+  bit_depth: number;
   codec_header?: string;
 };
 
@@ -421,7 +431,7 @@ export type Codec = "pcm" | "opus" | "flac";
  * Audio sync correction mode:
  * - "sync": Multi-device sync, may use small playback-rate adjustments (capped at ±0.5%, inaudible) for faster convergence.
  * - "quality": No rate changes; uses sample fixes and tighter resyncs, so you get fewer adjustments but occasional jumps. Starts out of sync until the clock converges. Not recommended for bad networks.
- * - "quality-local": Avoids playback-rate changes; may drift vs. group sync and only resyncs as a last resort.
+ * - "quality-local": Avoids playback-rate changes; may drift vs. group sync and only resyncs as a last resort. Using this mode makes the player non-compliant with the Sendspin specification.
  */
 export type CorrectionMode = "sync" | "quality" | "quality-local";
 
@@ -442,8 +452,6 @@ export interface CorrectionThresholds {
   deadbandBelowMs: number;
   /** Whether the recorrection monitor runs in this mode */
   enableRecorrectionMonitor: boolean;
-  /** Whether runtime sync delay changes trigger immediate cutover */
-  immediateDelayCutover: boolean;
 }
 
 export interface SupportedFormat {
@@ -468,7 +476,7 @@ export interface SendspinPlayerConfig extends SendspinCoreConfig {
    * - "quality": No playback-rate changes; uses sample fixes and tighter resyncs, so expect fewer adjustments but occasional jumps. Starts out of sync until the clock converges. Not recommended for bad networks.
    * - "quality-local": Avoids playback-rate changes; may drift vs. other players and only resyncs
    *   as a last resort.
-   *   Best for single-device playback where audio quality is priority.
+   *   Best for single-device playback where audio quality is priority. Using this mode makes the player non-compliant with the Sendspin specification.
    */
   correctionMode?: CorrectionMode;
 
@@ -578,6 +586,12 @@ export interface SendspinCoreConfig {
   /** Product name advertised in client/hello. Omitted when not set. */
   productName?: string;
 
+  /** Manufacturer advertised in client/hello. Omitted when not set. */
+  manufacturer?: string;
+
+  /** App version advertised in client/hello, not the Sendspin version. Omitted when not set. */
+  softwareVersion?: string;
+
   /**
    * Codecs to use for audio streaming, in priority order.
    * Unsupported codecs for the current browser are automatically filtered out:
@@ -640,8 +654,9 @@ export interface SendspinCoreConfig {
 
   /**
    * Storage for persisting SDK state: the identity key, the Pairing PSK,
-   * paired server keys, the pairing failure count, cached output latency and
-   * the server-commanded output delay. Keys are stored as plain text.
+   * paired server keys, the pairing round count, cached output latency,
+   * the output delay, and the volume and mute state. Keys are stored as plain
+   * text.
    * SendspinCore persists only when this is provided. SendspinPlayer defaults
    * it to localStorage. Pass null to disable persistence.
    */
@@ -666,7 +681,9 @@ export interface SendspinCoreConfig {
   /**
    * Use hardware/external volume control instead of software gain.
    * When true, the internal gain node stays at 1.0 and volume commands
-   * are delegated to the onVolumeCommand callback.
+   * are delegated to the onVolumeCommand callback. When the device volume
+   * changes through its own controls, call setVolume and setMuted with the
+   * new values so the server learns of it right away.
    *
    * Default: false
    */
@@ -688,7 +705,7 @@ export interface SendspinCoreConfig {
 
   /**
    * Getter for external volume state.
-   * Called periodically when reporting state to server if useHardwareVolume is true.
+   * Called when reporting state to server if useHardwareVolume is true.
    * Should return current hardware volume (0-100) and muted state.
    * Not called immediately after volume commands to wait for hardware to apply the change.
    */
@@ -719,7 +736,7 @@ export interface SendspinCoreConfig {
 
   /**
    * Callback for pairing lifecycle events. "pending" means the attempt is
-   * gesture-gated and waiting for openPairingWindow().
+   * held back, waiting for openPairingWindow() or releasePairingHold().
    */
   onPairing?: (
     event: "pending" | "started" | "finalized" | "aborted",
@@ -729,12 +746,20 @@ export interface SendspinCoreConfig {
   /**
    * Setting it turns on dynamic code pairing.
    * Called with a code to show or speak to the operator, who enters it on the
-   * server. Called with null when the attempt ends, so hide the code then.
+   * server. Called again with the same code in each new round after a wrong
+   * entry, so speak it again then.
+   * Called with null when the attempt ends, so hide the code then.
    * languages lists the operator's preferred languages for speaking it, most
    * preferred first, if the server sent any.
+   * format is set with every code. For "digits" the code is 6 digits. For
+   * "qr_code" it is a pairing token to render as a QR code.
    * Avoid setting both this and staticPairingCode.
    */
-  onPairingCode?: (code: string | null, languages?: string[]) => void;
+  onPairingCode?: (
+    code: string | null,
+    languages?: string[],
+    format?: PairCodeFormat,
+  ) => void;
 
   /**
    * How the app presents the pairing code. Default ["display"].
@@ -744,10 +769,17 @@ export interface SendspinCoreConfig {
   pairingCodeOutChannels?: PairOutChannel[];
 
   /**
+   * The pairing code formats the app can present. Default ["digits"].
+   * Add "qr_code" only if the app can render a QR code on its display, which
+   * pairingCodeOutChannels must then include.
+   */
+  pairingCodeFormats?: PairCodeFormat[];
+
+  /**
    * This device's fixed 8-digit pairing code, for devices with no display or
    * speaker. Setting it turns on static code pairing.
    * Use a secure random code that is unique to each device.
-   * Call openPairingWindow() before each attempt.
+   * Attempts wait for openPairingWindow().
    * Avoid setting both this and onPairingCode.
    */
   staticPairingCode?: string;

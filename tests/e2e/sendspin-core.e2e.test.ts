@@ -387,6 +387,24 @@ describe("SendspinCore E2E (aiosendspin)", () => {
     });
   });
 
+  // ===== Leave =====
+
+  describe("leave group", () => {
+    it("stops playback when the client leaves its group", async () => {
+      await connectCore();
+      const events: string[] = [];
+      core!.onStreamStart = () => events.push("stream-start");
+      core!.onStreamEnd = () => events.push("stream-end");
+
+      await server.streamStart();
+      await waitFor(() => events.includes("stream-start"), 3000);
+
+      core!.leaveGroup();
+      await waitFor(() => events.includes("stream-end"), 3000);
+      expect(core!.isPlaying).toBe(false);
+    });
+  });
+
   // ===== Disconnect =====
 
   describe("disconnect", () => {
@@ -400,7 +418,7 @@ describe("SendspinCore E2E (aiosendspin)", () => {
       expect(core!.isConnected).toBe(false);
     });
 
-    it("resets state on disconnect", async () => {
+    it("resets state on disconnect but keeps volume and mute", async () => {
       await connectCore();
 
       core!.setVolume(50);
@@ -408,8 +426,8 @@ describe("SendspinCore E2E (aiosendspin)", () => {
 
       core!.disconnect();
 
-      expect(core!.volume).toBe(100); // reset
-      expect(core!.muted).toBe(false); // reset
+      expect(core!.volume).toBe(50);
+      expect(core!.muted).toBe(true);
       expect(core!.isPlaying).toBe(false);
     });
   });

@@ -81,6 +81,7 @@ class HarnessServer:
             loop=asyncio.get_running_loop(),
             identity=identity,
             server_name="Sendspin JS E2E",
+            languages=["ca", "en"],
             pairing_store=self.pairing_store,
             allow_unencrypted=False,
         )
@@ -252,12 +253,13 @@ class HarnessServer:
         method = PairMethod(method_name)
         if method not in (PairMethod.DYNAMIC_PAIRING_CODE, PairMethod.STATIC_PAIRING_CODE):
             raise ValueError("code pairing requires dynamic_pairing_code or static_pairing_code")
-        self.code_future = asyncio.get_running_loop().create_future()
+        self.code_future = None
         self.code_requested = asyncio.Event()
 
+        # Called once per round, so each round waits for its own submitted code.
         async def provide_code() -> str:
             assert self.code_requested is not None
-            assert self.code_future is not None
+            self.code_future = asyncio.get_running_loop().create_future()
             self.code_requested.set()
             return await self.code_future
 
@@ -302,11 +304,12 @@ class HarnessServer:
                 await waiter
 
     async def submit_code(self, code: str) -> dict[str, Any]:
-        if self.code_task is None or self.code_future is None:
+        if self.code_task is None or self.code_future is None or self.code_requested is None:
             raise RuntimeError("no pairing code attempt is running")
         if not self.code_future.done():
             self.code_future.set_result(code)
-        return await self._finish_code_attempt()
+        self.code_requested.clear()
+        return await self.wait_for_code_request(30_000)
 
     async def _finish_code_attempt(self) -> dict[str, Any]:
         assert self.code_task is not None

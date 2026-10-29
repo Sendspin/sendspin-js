@@ -19,9 +19,10 @@ console.log(`Loading SDK from: ${sdkPath}`);
 // LocalStorage keys
 const STORAGE_KEYS = {
   SERVER_URL: "sendspin-server-url",
+  // Shared with the SDK, which persists volume, mute and the output delay
+  // under these keys.
   VOLUME: "sendspin-volume",
   MUTED: "sendspin-muted",
-  // Shared with the SDK, which persists the output delay under this key.
   SYNC_DELAY: "sendspin-static-delay-ms-v2",
   REQUIRED_LEAD_TIME: "sendspin-required-lead-time",
   MIN_BUFFER: "sendspin-min-buffer",
@@ -32,6 +33,7 @@ const STORAGE_KEYS = {
   STATIC_PIN_LOCATIONS: "sendspin-sample-static-pin-locations",
   PAIRING_PSK_LOCATIONS: "sendspin-sample-pairing-psk-locations",
   PIN_SPEAKER: "sendspin-sample-pin-speaker",
+  PIN_QR: "sendspin-sample-pin-qr",
 };
 
 // DOM Elements
@@ -39,6 +41,7 @@ const serverUrlInput = document.getElementById("server-url");
 const connectBtn = document.getElementById("connect-btn");
 const disconnectBtn = document.getElementById("disconnect-btn");
 const copyUrlBtn = document.getElementById("copy-url-btn");
+const leaveGroupBtn = document.getElementById("leave-group-btn");
 const connectedServerUrl = document.getElementById("connected-server-url");
 const volumeSlider = document.getElementById("volume-slider");
 const volumeValue = document.getElementById("volume-value");
@@ -69,6 +72,7 @@ const unpairedAccessCheckbox = document.getElementById("unpaired-access");
 const pairingPinGroup = document.getElementById("pairing-pin-group");
 const pairingPinEl = document.getElementById("pairing-pin");
 const pairingPinHint = document.getElementById("pairing-pin-hint");
+const pairingQrEl = document.getElementById("pairing-qr");
 const pairingPendingGroup = document.getElementById("pairing-pending-group");
 const cancelPairingBtn = document.getElementById("cancel-pairing");
 const staticPinInput = document.getElementById("static-pin");
@@ -80,8 +84,10 @@ const pairingPskLocationInputs = document.querySelectorAll(
   "#pairing-psk-locations input[type=checkbox]",
 );
 const pinSpeakerInput = document.getElementById("pin-speaker");
+const pinQrInput = document.getElementById("pin-qr");
 const openPairingWindowBtn = document.getElementById("open-pairing-window");
-const pinEscalatedEl = document.getElementById("pin-escalated");
+const roundLimitEl = document.getElementById("round-limit");
+const releasePairingHoldBtn = document.getElementById("release-pairing-hold");
 
 // Status elements
 const connectionStatus = document.getElementById("connection-status");
@@ -114,6 +120,8 @@ const progressDuration = document.getElementById("progress-duration");
 
 // Player instance
 let player = null;
+let idlePlayer = null;
+let idlePlayerConfigKey = null;
 let controllerState = null;
 let statusUpdateInterval = null;
 
@@ -246,7 +254,7 @@ function resetStatusDisplay() {
   pairingPinGroup.hidden = true;
   pairingPendingGroup.hidden = true;
   pairingPinEl.textContent = "-";
-  pinEscalatedEl.textContent = "-";
+  roundLimitEl.textContent = "-";
 }
 
 /**
@@ -255,7 +263,7 @@ function resetStatusDisplay() {
 function updatePairingDisplay() {
   clientIdEl.textContent = player.clientId;
   pairingTokenEl.textContent = player.pairingToken;
-  updateEscalationDisplay();
+  updateRoundLimitDisplay();
 }
 
 function isValidStaticPin(pin) {
@@ -272,11 +280,11 @@ function selectedLocations(inputs) {
 }
 
 /**
- * Show whether dynamic PIN has escalated to gesture-gating.
+ * Show whether dynamic pairing is held back at the round limit.
  */
-function updateEscalationDisplay() {
+function updateRoundLimitDisplay() {
   if (!player) return;
-  pinEscalatedEl.textContent = player.isDynamicPinEscalated() ? "yes" : "no";
+  roundLimitEl.textContent = player.isRoundLimitReached() ? "yes" : "no";
 }
 
 /**
@@ -286,8 +294,8 @@ function onPairing(event, detail) {
   console.log("Pairing event:", event, detail ?? "");
   pairingPendingGroup.hidden = event !== "pending";
   if (event === "pending") {
-    trustLevelEl.textContent = "awaiting gesture...";
-    showToast("Pairing needs the window opened", "info");
+    trustLevelEl.textContent = "awaiting operator...";
+    showToast("Pairing needs an operator action", "info");
   } else if (event === "started") {
     trustLevelEl.textContent = "pairing...";
   } else if (event === "finalized") {
@@ -297,16 +305,27 @@ function onPairing(event, detail) {
     trustLevelEl.textContent = `aborted (${detail ?? "unknown"})`;
     showToast(`Pairing aborted: ${detail ?? "unknown"}`, "error");
   }
-  updateEscalationDisplay();
+  updateRoundLimitDisplay();
 }
 
 /**
  * Show or hide the dynamic pairing code (null = attempt ended). languages is
- * the server's spoken-code preference, absent when it sent none.
+ * the server's spoken-code preference, absent when it sent none. In the
+ * qr_code format the code is a pairing token to show as a QR code.
  */
-function onPairingCode(pin, languages) {
+function onPairingCode(pin, languages, format) {
   pairingPinGroup.hidden = pin === null;
-  pairingPinEl.textContent = pin ?? "-";
+  pairingQrEl.hidden = format !== "qr_code";
+  if (format === "qr_code") {
+    pairingPinEl.textContent = pin;
+    pairingPinHint.textContent =
+      "Scan this QR code with the server, or paste the token into it.";
+    renderQrCode(pin).catch(() =>
+      showToast("Could not load the QR code library", "error"),
+    );
+    return;
+  }
+  pairingPinEl.textContent = pin === null ? "-" : codeGroups(pin).join("-");
   pairingPinHint.textContent = languages?.length
     ? `Enter this code into the server. Spoken preference: ${languages.join(", ")}.`
     : "Enter this code into the server to complete pairing.";
@@ -318,13 +337,32 @@ function onPairingCode(pin, languages) {
   if (pinSpeakerInput.checked) speakPin(pin, languages);
 }
 
+/** Render the token as a QR code with a QR library loaded on first use. */
+async function renderQrCode(token) {
+  const { qrcode } =
+    await import("https://unpkg.com/qrcode-generator@2.0.4/dist/qrcode.mjs");
+  const qr = qrcode(0, "M");
+  qr.addData(token, "Alphanumeric");
+  qr.make();
+  pairingQrEl.innerHTML = qr.createSvgTag(4);
+}
+
+/** Split the 6-digit code into the 3-3 groups the spec presents it in. */
+function codeGroups(pin) {
+  return [pin.slice(0, 3), pin.slice(3)];
+}
+
 /**
- * Read the PIN aloud, picking the best voice for the server's language
- * preferences under RFC 4647 Lookup matching.
+ * Read the PIN aloud, digit by digit with a longer pause between groups,
+ * picking the best voice for the server's language preferences under
+ * RFC 4647 Lookup matching.
  */
 function speakPin(pin, languages) {
   if (typeof speechSynthesis === "undefined") return;
-  const utterance = new SpeechSynthesisUtterance(pin.split("").join(" "));
+  const text = codeGroups(pin)
+    .map((group) => group.split("").join(" "))
+    .join(". ");
+  const utterance = new SpeechSynthesisUtterance(text);
   const voice = bestVoice(languages ?? []);
   if (voice) {
     utterance.voice = voice;
@@ -639,6 +677,7 @@ function loadSettings() {
 
   pinSpeakerInput.checked =
     localStorage.getItem(STORAGE_KEYS.PIN_SPEAKER) === "true";
+  pinQrInput.checked = localStorage.getItem(STORAGE_KEYS.PIN_QR) === "true";
 
   const savedCorrectionMode = localStorage.getItem(
     STORAGE_KEYS.CORRECTION_MODE,
@@ -660,20 +699,6 @@ function loadSettings() {
   if (savedDeadbandThreshold !== null && deadbandThresholdInput) {
     deadbandThresholdInput.value = savedDeadbandThreshold;
   }
-}
-
-/**
- * Save volume to localStorage
- */
-function saveVolume(volume) {
-  localStorage.setItem(STORAGE_KEYS.VOLUME, volume.toString());
-}
-
-/**
- * Save muted state to localStorage
- */
-function saveMuted(muted) {
-  localStorage.setItem(STORAGE_KEYS.MUTED, muted.toString());
 }
 
 /**
@@ -771,10 +796,6 @@ async function connect() {
 
   try {
     // Get saved settings
-    const savedVolume = parseInt(
-      localStorage.getItem(STORAGE_KEYS.VOLUME) || "80",
-      10,
-    );
     const savedCorrectionMode =
       localStorage.getItem(STORAGE_KEYS.CORRECTION_MODE) || "sync";
 
@@ -789,7 +810,7 @@ async function connect() {
       250,
     );
 
-    player = new SendspinPlayer({
+    const config = {
       baseUrl: serverUrl,
       clientName: "Sendspin Sample Player",
       productName: "Sendspin JS Sample Player",
@@ -818,21 +839,33 @@ async function connect() {
       pairingCodeOutChannels: pinSpeakerInput.checked
         ? ["display", "speaker"]
         : ["display"],
+      pairingCodeFormats: pinQrInput.checked
+        ? ["digits", "qr_code"]
+        : ["digits"],
       onPairing,
       onPairingCode,
       onStateChange,
-    });
+    };
+
+    // Reuse the disconnected player when its settings are unchanged, so it
+    // keeps its audio output.
+    const configKey = JSON.stringify(config);
+    if (idlePlayer && idlePlayerConfigKey === configKey) {
+      player = idlePlayer;
+      // Reapply settings the player may have changed at runtime since it was built.
+      player.setRequiredLeadTimeMs(requiredLeadTimeMs);
+      player.setMinBufferMs(minBufferMs);
+      player.setCorrectionMode(savedCorrectionMode);
+    } else {
+      idlePlayer?.destroy();
+      player = new SendspinPlayer(config);
+    }
+    idlePlayer = null;
+    idlePlayerConfigKey = configKey;
 
     await player.unlock();
     await player.connect();
     updatePairingDisplay();
-
-    // Apply saved volume
-    player.setVolume(savedVolume);
-
-    // Apply saved muted state
-    const savedMuted = localStorage.getItem(STORAGE_KEYS.MUTED) === "true";
-    player.setMuted(savedMuted);
 
     updateConnectionUI(true, serverUrl);
     showToast("Connected to server", "success");
@@ -849,6 +882,10 @@ async function connect() {
     console.error("Connection failed:", error);
     showToast(`Connection failed: ${error.message}`, "error");
     updateConnectionUI(false);
+    if (player) {
+      player.disconnect("user_request");
+      idlePlayer = player;
+    }
     player = null;
   }
 }
@@ -864,6 +901,7 @@ function disconnect() {
 
   if (player) {
     player.disconnect("user_request");
+    idlePlayer = player;
     player = null;
   }
 
@@ -907,7 +945,6 @@ async function copyShareUrl() {
 function updateVolume() {
   const volume = parseInt(volumeSlider.value, 10);
   volumeValue.textContent = `${volume}%`;
-  saveVolume(volume);
   player.setVolume(volume);
 }
 
@@ -925,7 +962,6 @@ function toggleMute() {
   const newMuted = !player.muted;
   player.setMuted(newMuted);
   updateMuteIcon(newMuted);
-  saveMuted(newMuted);
 }
 
 /**
@@ -934,8 +970,9 @@ function toggleMute() {
 function applySyncDelay() {
   const delay = sanitizeSyncDelay(parseInt(syncDelayInput.value, 10));
   syncDelayInput.value = delay;
-  if (player) {
-    player.setSyncDelay(delay);
+  const activePlayer = player ?? idlePlayer;
+  if (activePlayer) {
+    activePlayer.setSyncDelay(delay);
   } else {
     // No player yet, so seed the SDK's key for the next connect.
     saveSyncDelay(delay);
@@ -1011,6 +1048,10 @@ function init() {
   connectBtn.addEventListener("click", connect);
   disconnectBtn.addEventListener("click", disconnect);
   copyUrlBtn.addEventListener("click", copyShareUrl);
+  leaveGroupBtn.addEventListener("click", () => {
+    player.leaveGroup();
+    showToast("Left the group", "info");
+  });
   volumeSlider.addEventListener("input", updateVolume);
   muteBtn.addEventListener("click", toggleMute);
   applySyncDelayBtn.addEventListener("click", applySyncDelay);
@@ -1047,8 +1088,7 @@ function init() {
   });
   rotatePskBtn.addEventListener("click", () => {
     if (!player) return;
-    player.rotatePairingPsk();
-    pairingTokenEl.textContent = player.pairingToken;
+    pairingTokenEl.textContent = player.rotatePairingPsk();
     showToast("Pairing token rotated", "success");
   });
   staticPinInput.addEventListener("change", () => {
@@ -1085,13 +1125,25 @@ function init() {
     );
     if (player) showToast("Out-channels apply on the next connect", "info");
   });
+  pinQrInput.addEventListener("change", () => {
+    localStorage.setItem(STORAGE_KEYS.PIN_QR, String(pinQrInput.checked));
+    if (player) showToast("Formats apply on the next connect", "info");
+  });
   openPairingWindowBtn.addEventListener("click", () => {
     if (!player) {
       showToast("Connect first", "error");
       return;
     }
     player.openPairingWindow();
-    showToast("Pairing window open (~5 minutes, one attempt)", "info");
+    showToast("Pairing window open (~5 minutes)", "info");
+  });
+  releasePairingHoldBtn.addEventListener("click", () => {
+    if (!player) {
+      showToast("Connect first", "error");
+      return;
+    }
+    player.releasePairingHold();
+    updateRoundLimitDisplay();
   });
   cancelPairingBtn.addEventListener("click", () => {
     if (!player) return;
@@ -1134,9 +1186,7 @@ function init() {
 
   // Cleanup on page unload
   window.addEventListener("beforeunload", () => {
-    if (player) {
-      player.disconnect("shutdown");
-    }
+    (player ?? idlePlayer)?.destroy("shutdown");
   });
 
   // Show HTTPS warning when page is served over HTTPS

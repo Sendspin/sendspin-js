@@ -22,7 +22,10 @@ import {
   RECORRECTION_CUTOVER_GUARD_SEC,
 } from "./recorrection-monitor";
 import { OutputLatencyTracker } from "./output-latency-tracker";
-import { getUnreportedOutputLatencyMs } from "./platform-output-latency";
+import {
+  getUnreportedOutputLatencyMs,
+  reportsContextTimeAtRenderPosition,
+} from "./platform-output-latency";
 import { clampSyncDelayMs } from "../sync-delay";
 
 // Sync correction constants
@@ -92,7 +95,6 @@ const DEFAULT_CORRECTION_THRESHOLDS: Record<
     samplesBelowMs: 8,
     deadbandBelowMs: 1,
     enableRecorrectionMonitor: true,
-    immediateDelayCutover: true,
   },
   quality: {
     resyncAboveMs: 35,
@@ -101,7 +103,6 @@ const DEFAULT_CORRECTION_THRESHOLDS: Record<
     samplesBelowMs: 35,
     deadbandBelowMs: 1,
     enableRecorrectionMonitor: false,
-    immediateDelayCutover: false,
   },
   "quality-local": {
     resyncAboveMs: 600,
@@ -110,7 +111,6 @@ const DEFAULT_CORRECTION_THRESHOLDS: Record<
     samplesBelowMs: 0,
     deadbandBelowMs: 5,
     enableRecorrectionMonitor: false,
-    immediateDelayCutover: false,
   },
 };
 
@@ -148,8 +148,10 @@ export class AudioScheduler {
 
   // Controls reported and platform fallback output latency compensation.
   private useOutputLatencyCompensation: boolean;
-  // Accounts for output delay omitted by Safari and iOS WebKit latency APIs.
+  // Accounts for output delay omitted by iOS WebKit latency APIs.
   private unreportedOutputLatencySec: number;
+  // On Apple WebKit and Firefox, getOutputTimestamp() aged to now lands on the render position, not the playout position.
+  private contextTimeAtRenderPosition = reportsContextTimeAtRenderPosition();
   private scheduleTimeout: ReturnType<typeof setTimeout> | null = null;
   private refillTimeout: ReturnType<typeof setTimeout> | null = null;
   private queueProcessScheduled = false;
@@ -236,11 +238,6 @@ export class AudioScheduler {
   private get usesRecorrectionMonitor(): boolean {
     return this.correctionThresholds[this._correctionMode]
       .enableRecorrectionMonitor;
-  }
-
-  private get usesImmediateDelayCutover(): boolean {
-    return this.correctionThresholds[this._correctionMode]
-      .immediateDelayCutover;
   }
 
   /**
@@ -352,7 +349,10 @@ export class AudioScheduler {
 
     const playoutLatencySec = this.measurePlayoutLatencySec();
     const { audioContextTimeSec, audioContextRawTimeSec, nowMs, nowUs } =
-      this.clockSource.getTimingSnapshot(this.audioContext, playoutLatencySec);
+      this.clockSource.getTimingSnapshot(
+        this.audioContext,
+        this.contextTimeAtRenderPosition ? 0 : playoutLatencySec,
+      );
     this.pruneExpiredScheduledSources(audioContextRawTimeSec);
     if (this.getScheduledAheadSec(audioContextRawTimeSec) <= 0) {
       this.recorrectionMonitor.resetCheckState();
@@ -394,7 +394,7 @@ export class AudioScheduler {
     const sanitized = clampSyncDelayMs(delayMs);
     const delta = sanitized - this.syncDelayMs;
     this.syncDelayMs = sanitized;
-    if (delta === 0 || !this.usesImmediateDelayCutover) return;
+    if (delta === 0) return;
     if (!this.audioContext || this.audioContext.state !== "running") return;
     if (!this.stateManager.isPlaying) return;
     if (
@@ -831,7 +831,7 @@ export class AudioScheduler {
       nowUs,
     } = this.clockSource.getTimingSnapshot(
       this.audioContext,
-      playoutLatencySec,
+      this.contextTimeAtRenderPosition ? 0 : playoutLatencySec,
     );
     this.pruneExpiredScheduledSources(audioContextRawTimeSec);
 
@@ -873,6 +873,7 @@ export class AudioScheduler {
       let playbackTime: number;
       let scheduleTime: number;
       let playbackRate: number;
+      let startOffsetSec = 0;
 
       const targetPlaybackTime = this.computeTargetPlaybackTime(
         chunk.serverTime,
@@ -889,12 +890,13 @@ export class AudioScheduler {
         const minScheduleTimeSec = this.recorrectionMonitor.minScheduleTimeSec;
         if (minScheduleTimeSec !== null) {
           // After a cutover, drop backlog that ends at or before the kept tail
-          // rather than clamping it forward, so the snap claws back lateness.
+          // and trim the chunk overlapping it, so the snap claws back lateness.
           if (scheduleTime + chunk.buffer.duration <= minScheduleTimeSec) {
             continue;
           }
-          scheduleTime = Math.max(scheduleTime, minScheduleTimeSec);
-          playbackTime = scheduleTime + scheduleAdvanceSec;
+          startOffsetSec = Math.max(0, minScheduleTimeSec - scheduleTime);
+          scheduleTime += startOffsetSec;
+          playbackTime += startOffsetSec;
         }
         this.recorrectionMonitor.clearMinScheduleTime();
         playbackRate = 1.0;
@@ -994,35 +996,30 @@ export class AudioScheduler {
       }
 
       this.currentPlaybackRate = playbackRate;
-      if (playbackTime < audioContextRawTimeSec) {
+      if (scheduleTime < audioContextRawTimeSec) {
         this.nextPlaybackTime = 0;
         this.nextScheduleTime = 0;
         this.lastScheduledServerTime = 0;
         continue;
       }
 
-      const effectiveScheduleTime = Math.max(
-        scheduleTime,
-        audioContextRawTimeSec,
-      );
-      const effectivePlaybackTime =
-        effectiveScheduleTime + (playbackTime - scheduleTime);
       const source = this.audioContext.createBufferSource();
       source.buffer = chunk.buffer;
       source.playbackRate.value = playbackRate;
       source.connect(this.gainNode);
-      source.start(effectiveScheduleTime);
+      source.start(scheduleTime, startOffsetSec);
 
-      const actualDuration = chunk.buffer.duration / playbackRate;
-      this.nextPlaybackTime = effectivePlaybackTime + actualDuration;
-      this.nextScheduleTime = effectiveScheduleTime + actualDuration;
+      const actualDuration =
+        (chunk.buffer.duration - startOffsetSec) / playbackRate;
+      this.nextPlaybackTime = playbackTime + actualDuration;
+      this.nextScheduleTime = scheduleTime + actualDuration;
       this.lastScheduledServerTime =
         chunk.serverTime + chunk.buffer.duration * 1_000_000;
 
       const scheduledEntry = {
         source,
-        startTime: effectiveScheduleTime,
-        endTime: effectiveScheduleTime + actualDuration,
+        startTime: scheduleTime,
+        endTime: scheduleTime + actualDuration,
         buffer: chunk.buffer,
         serverTime: chunk.serverTime,
         generation: chunk.generation,
@@ -1047,9 +1044,10 @@ export class AudioScheduler {
    *
    * `audioContextTime` is the render clock, the same domain `source.start()`
    * takes; audio handed to the renderer becomes audible one output latency
-   * later, so that latency is subtracted. Chunks whose target has already passed
-   * are dropped by the caller rather than shifted forward, which would render
-   * them late.
+   * later, so that latency is subtracted. Chunks whose start, after subtracting
+   * the output delay and unreported output latency, has already passed are
+   * dropped by the caller rather than shifted forward, which would render them
+   * late.
    */
   private computeTargetPlaybackTime(
     serverTimeUs: number,
@@ -1102,6 +1100,12 @@ export class AudioScheduler {
     this.resyncCount = 0;
     this.latencyTracker.reset();
     this.clockSource.reset();
+  }
+
+  // Leaves the AudioContext running, since a resumed one can play late or silent on Chromium for Android.
+  stop(): void {
+    this.clearBuffers();
+    this.stopAudioElement();
   }
 
   close(): void {

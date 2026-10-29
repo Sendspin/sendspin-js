@@ -27,15 +27,23 @@ describe("TimeSyncManager", () => {
     return all[all.length - 1];
   };
 
-  const respond = (t1: number, t2: number, t3: number): void => {
-    mgr.handleServerTime({
-      type: "server/time",
-      payload: {
-        client_transmitted: t1,
-        server_received: t2,
-        server_transmitted: t3,
-      },
-    } as unknown as ServerTime);
+  const respond = (
+    t1: number,
+    t2: number,
+    t3: number,
+    t4 = nowMs * 1000,
+  ): void => {
+    mgr.handleServerTime(
+      {
+        type: "server/time",
+        payload: {
+          client_transmitted: t1,
+          server_received: t2,
+          server_transmitted: t3,
+        },
+      } as unknown as ServerTime,
+      t4,
+    );
   };
 
   beforeEach(() => {
@@ -52,7 +60,7 @@ describe("TimeSyncManager", () => {
     } as unknown as StateManager;
     const timeFilter = { update } as unknown as SendspinTimeFilter;
 
-    mgr = new TimeSyncManager(sender, stateManager, timeFilter);
+    mgr = new TimeSyncManager(sender, stateManager, timeFilter, vi.fn());
   });
 
   afterEach(() => {
@@ -72,9 +80,10 @@ describe("TimeSyncManager", () => {
 
     for (let i = 0; i < 8; i++) {
       const t1 = lastT1();
-      nowMs = recvMs[i];
       const t4 = recvMs[i] * 1000;
-      respond(t1, t1 + a, t4 + b);
+      // Processing runs after delivery, which must not shift T4.
+      nowMs = recvMs[i] + 5;
+      respond(t1, t1 + a, t4 + b, t4);
     }
 
     // measurement = (a + b) / 2; maxError = max(1000, (a-b)/2). Every sample
@@ -141,15 +150,23 @@ describe("TimeSyncManager extra", () => {
     const all = sentT1();
     return all[all.length - 1];
   };
-  const respond = (t1: number, t2: number, t3: number): void => {
-    mgr.handleServerTime({
-      type: "server/time",
-      payload: {
-        client_transmitted: t1,
-        server_received: t2,
-        server_transmitted: t3,
-      },
-    } as unknown as ServerTime);
+  const respond = (
+    t1: number,
+    t2: number,
+    t3: number,
+    t4 = nowMs * 1000,
+  ): void => {
+    mgr.handleServerTime(
+      {
+        type: "server/time",
+        payload: {
+          client_transmitted: t1,
+          server_received: t2,
+          server_transmitted: t3,
+        },
+      } as unknown as ServerTime,
+      t4,
+    );
   };
 
   beforeEach(() => {
@@ -168,7 +185,7 @@ describe("TimeSyncManager extra", () => {
     } as unknown as StateManager;
     const timeFilter = { update } as unknown as SendspinTimeFilter;
 
-    mgr = new TimeSyncManager(sender, stateManager, timeFilter);
+    mgr = new TimeSyncManager(sender, stateManager, timeFilter, vi.fn());
   });
 
   afterEach(() => {
