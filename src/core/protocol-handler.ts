@@ -209,6 +209,15 @@ export class ProtocolHandler {
       if (rolesChanged) this.sendStateUpdate();
       return;
     }
+    this.startReporting();
+  }
+
+  /** Resume after a server/activate the client refused, keeping the current roles. */
+  resumeActivation(): void {
+    if (!this.activated) this.startReporting();
+  }
+
+  private startReporting(): void {
     this.activated = true;
     this.lastSentState = null;
     this.sendStateUpdate();

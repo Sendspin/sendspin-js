@@ -8,7 +8,11 @@ import { NoiseSession } from "./noise/session";
 import { base64urlEncode, base64urlDecode } from "./noise/base64url";
 import { SENTINEL_PSK_ID } from "./noise/constants";
 import { authorizeActivate } from "./activate-authorization";
-import type { GoodbyeReason } from "../types";
+import type {
+  ActivatePairing,
+  GoodbyeReason,
+  SupportedPairMethods,
+} from "../types";
 
 const utf8 = new TextEncoder();
 const dutf8 = new TextDecoder();
@@ -38,6 +42,7 @@ export interface TransportCallbacks {
     receivedAtUs: number,
   ): void;
   onBinaryMessage(bytes: Uint8Array): void;
+  onActivateRefused(): void;
 }
 
 const PSK_CATEGORY_CODES = new Map<unknown, PskCategory>([
@@ -94,6 +99,7 @@ export class SendspinTransport {
       pskStore: PskStore;
       suiteId: SuiteId;
       unpairedAccess: boolean;
+      pairMethods: () => SupportedPairMethods;
     },
     protected cb: TransportCallbacks,
   ) {}
@@ -390,6 +396,7 @@ export class SendspinTransport {
       payload: {
         activities: string[];
         active_roles?: string[];
+        pairing?: ActivatePairing;
       };
     },
     receivedAtUs: number,
@@ -400,12 +407,22 @@ export class SendspinTransport {
       msg.payload.active_roles,
       this.activeRoles,
       this.deps.unpairedAccess,
+      msg.payload.pairing,
+      this.deps.pairMethods(),
     );
-    if (!result.ok) {
+    if ("protocolError" in result) {
+      // A protocol error closes without any message, so the log tells the integrator why.
+      console.warn(
+        "Sendspin: server/activate is missing its pairing method or format, so the server is non-compliant.",
+      );
+      this.close();
+      return;
+    }
+    if ("goodbye" in result) {
       this.sendGoodbyeAndClose(result.goodbye);
       return;
     }
-    this.activeRoles = result.activeRoles;
+    if (result.ok) this.activeRoles = result.activeRoles;
     this.clearTimeout();
     const queuedCommands = this.activeRoles.includes("controller@v1")
       ? this.outboundQueue.filter(
@@ -414,13 +431,17 @@ export class SendspinTransport {
       : [];
     this.quiesced = false;
     this.outboundQueue = [];
-    this.cb.onControlMessage(
-      {
-        ...msg,
-        payload: { ...msg.payload, active_roles: this.activeRoles },
-      },
-      receivedAtUs,
-    );
+    if (result.ok) {
+      this.cb.onControlMessage(
+        {
+          ...msg,
+          payload: { ...msg.payload, active_roles: this.activeRoles },
+        },
+        receivedAtUs,
+      );
+    } else {
+      this.cb.onActivateRefused();
+    }
     for (const command of queuedCommands) this.encryptSend(command);
   }
 

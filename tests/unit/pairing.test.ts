@@ -6,7 +6,6 @@ import {
   base64urlEncode,
 } from "../../src/core/noise/base64url";
 import { pskId } from "../../src/core/noise/constants";
-import type { PskCategory } from "../../src/core/noise/psk";
 import type {
   ActivatePairing,
   PairCodeFormat,
@@ -103,7 +102,6 @@ type OnPin = (
 ) => void;
 
 interface SetupOpts {
-  category?: PskCategory;
   storage?: SendspinStorage | null;
   onPairingCode?: OnPin | null;
   pairingCodeOutChannels?: PairOutChannel[];
@@ -127,7 +125,6 @@ function setup(opts: SetupOpts = {}) {
     close,
     pskStore: store,
     serverId: () => "SERVER_ID",
-    matchedCategory: () => opts.category ?? "pairing",
     handshakeHash: () => HANDSHAKE_HASH,
     aeadSeal,
     storage: opts.storage ?? null,
@@ -199,12 +196,16 @@ describe("PairingManager (pairing_psk)", () => {
     );
   });
 
-  it("aborts an unsupported method and keeps the connection open", () => {
+  it("aborts a refused activation and counts it toward pairing_index", () => {
     const { sent, close, mgr } = setup();
-    mgr.onActivate(["pairing"], { method: "static_pairing_code" }); // not configured
+    mgr.onRefusedActivate();
     expect(sent[0]!.type).toBe("pair/abort");
     expect(sent[0]!.payload!.reason).toBe("method_not_supported");
     expect(close).not.toHaveBeenCalled();
+    mgr.onActivate(["pairing"], { method: "pairing_psk" });
+    expect(lastOfType(sent, "client/pair-init")!.payload).toEqual({
+      pairing_index: 2,
+    });
   });
 
   it("ignores a pairing object on a non-pairing activation", () => {
@@ -214,30 +215,6 @@ describe("PairingManager (pairing_psk)", () => {
     mgr.onActivate(["playback"], { method: "pairing_psk" });
     expect(sent).toEqual([]);
     expect(close).not.toHaveBeenCalled();
-  });
-
-  it("fails closed on a pairing activation with no pairing object", () => {
-    const { sent, close, mgr } = setup();
-    // A required field no conformant server omits: the abort reasons are all
-    // defined over values that are present, so this is a protocol error.
-    mgr.onActivate(["pairing"]);
-    expect(sent).toEqual([]);
-    expect(close).toHaveBeenCalled();
-  });
-
-  it("rejects a PIN method when the matched PSK is the Pairing PSK", () => {
-    const { sent, mgr } = setup({
-      category: "pairing",
-      onPairingCode: vi.fn(),
-    });
-    mgr.onActivate(["pairing"], dynamic());
-    expect(sent[0]!.payload!.reason).toBe("method_not_supported");
-  });
-
-  it("rejects pairing_psk when the matched PSK is not the Pairing PSK", () => {
-    const { sent, mgr } = setup({ category: "sentinel" });
-    mgr.onActivate(["pairing"], { method: "pairing_psk" });
-    expect(sent[0]!.payload!.reason).toBe("method_not_supported");
   });
 
   it("clears the attempt on an inbound pair/abort but keeps the connection open", () => {
@@ -397,7 +374,6 @@ describe("PairingManager (dynamic_pairing_code)", () => {
 
   function runToConfirm(opts: SetupOpts = {}, languages?: unknown) {
     const ctx = setup({
-      category: "sentinel",
       onPairingCode: vi.fn(),
       ...opts,
     });
@@ -476,7 +452,6 @@ describe("PairingManager (dynamic_pairing_code)", () => {
 
   it("shows a qr_code attempt as a version 1 token and runs CPace on the raw code", () => {
     const { mgr, sent, onPairingCode } = setup({
-      category: "sentinel",
       onPairingCode: vi.fn(),
       pairingCodeFormats: ["qr_code"],
     });
@@ -563,32 +538,6 @@ describe("PairingManager (dynamic_pairing_code)", () => {
     expect(call[1]).toEqual(["ca", "en"]);
   });
 
-  it("fails closed when a dynamic_pairing_code activation omits format", () => {
-    const { mgr, sent, close } = setup({
-      category: "sentinel",
-      onPairingCode: vi.fn(),
-    });
-    mgr.onActivate(["pairing"], { method: "dynamic_pairing_code" });
-    expect(lastOfType(sent, "pair/abort")).toBeUndefined();
-    expect(close).toHaveBeenCalled();
-  });
-
-  it("aborts with method_not_supported on a format the client does not offer", () => {
-    const { mgr, sent, close } = setup({
-      category: "sentinel",
-      onPairingCode: vi.fn(),
-    });
-    mgr.onActivate(["pairing"], {
-      method: "dynamic_pairing_code",
-      format: "qr_code",
-    });
-    expect(lastOfType(sent, "pair/abort")!.payload!.reason).toBe(
-      "method_not_supported",
-    );
-    expect(lastOfType(sent, "client/pair-init")).toBeUndefined();
-    expect(close).not.toHaveBeenCalled();
-  });
-
   it("asks for another round with the same code on a bad server tag", () => {
     const ctx = runToConfirm();
     failConfirm(ctx.server, ctx.mgr);
@@ -640,7 +589,6 @@ describe("PairingManager (dynamic_pairing_code)", () => {
   it("counts an abandoned attempt only once the code was shown", () => {
     const storage = memStorage();
     const ctx = setup({
-      category: "sentinel",
       onPairingCode: vi.fn(),
       storage,
     });
@@ -659,7 +607,6 @@ describe("PairingManager (dynamic_pairing_code)", () => {
   it("holds attempts back at the round limit until released, and still offers the method", () => {
     const storage = storageWithRounds(20);
     const { mgr, sent, events, close } = setup({
-      category: "sentinel",
       onPairingCode: vi.fn(),
       storage,
     });
@@ -689,7 +636,7 @@ describe("PairingManager (dynamic_pairing_code)", () => {
   });
 
   it("fails closed on a low-order server share", () => {
-    const ctx = setup({ category: "sentinel", onPairingCode: vi.fn() });
+    const ctx = setup({ onPairingCode: vi.fn() });
     ctx.mgr.onActivate(["pairing"], dynamic());
     ctx.mgr.onPairInit({
       nonce_A: base64urlEncode(new Uint8Array(32).fill(0xa1)),
@@ -703,7 +650,6 @@ describe("PairingManager (dynamic_pairing_code)", () => {
 
   it("fails closed on out-of-order pairing messages", () => {
     const { mgr, sent, close } = setup({
-      category: "sentinel",
       onPairingCode: vi.fn(),
     });
     mgr.onActivate(["pairing"], dynamic());
@@ -730,7 +676,7 @@ describe("PairingManager (dynamic_pairing_code)", () => {
   });
 
   it("keeps the connection open and advances pairing_index on a retry", () => {
-    const ctx = setup({ category: "sentinel", onPairingCode: vi.fn() });
+    const ctx = setup({ onPairingCode: vi.fn() });
     ctx.mgr.onActivate(["pairing"], dynamic());
     expect(
       lastOfType(ctx.sent, "client/pair-init")!.payload!.pairing_index,
@@ -752,7 +698,7 @@ describe("PairingManager (dynamic_pairing_code)", () => {
   });
 
   it("fails closed on a pairing message when no attempt ran", () => {
-    const ctx = setup({ category: "sentinel", onPairingCode: vi.fn() });
+    const ctx = setup({ onPairingCode: vi.fn() });
     ctx.mgr.onPairAuth({ pake_msg_1: base64urlEncode(new Uint8Array(32)) });
     expect(ctx.close).toHaveBeenCalled();
   });
@@ -775,7 +721,7 @@ describe("PairingManager (dynamic_pairing_code)", () => {
     ],
     ["server/pair-finalize", (mgr: PairingManager) => mgr.onPairFinalize()],
   ])("silently discards a stray %s after the client aborted", (_type, send) => {
-    const ctx = setup({ category: "sentinel", onPairingCode: vi.fn() });
+    const ctx = setup({ onPairingCode: vi.fn() });
     ctx.mgr.onActivate(["pairing"], dynamic());
     ctx.mgr.cancelPairing(); // attempt ends, connection stays open
     send(ctx.mgr);
@@ -783,7 +729,7 @@ describe("PairingManager (dynamic_pairing_code)", () => {
   });
 
   it("stops discarding stray pairing messages at the next server/activate", () => {
-    const ctx = setup({ category: "sentinel", onPairingCode: vi.fn() });
+    const ctx = setup({ onPairingCode: vi.fn() });
     ctx.mgr.onActivate(["pairing"], dynamic());
     ctx.mgr.cancelPairing();
     ctx.mgr.onActivate(["playback"]);
@@ -797,7 +743,6 @@ describe("PairingManager (static_pairing_code)", () => {
 
   function staticSetup() {
     return setup({
-      category: "sentinel",
       onPairingCode: null,
       staticPairingCode: STATIC_PIN,
     });
@@ -881,7 +826,6 @@ describe("PairingManager (static_pairing_code)", () => {
   it("keeps no round count: a mismatch aborts without counting", () => {
     const storage = memStorage();
     const ctx = setup({
-      category: "sentinel",
       onPairingCode: null,
       staticPairingCode: STATIC_PIN,
       storage,
@@ -979,7 +923,6 @@ describe("PairingManager timers", () => {
 
   it("aborts with attempt_timeout two minutes after pair-init", () => {
     const { mgr, sent, close } = setup({
-      category: "sentinel",
       onPairingCode: vi.fn(),
     });
     mgr.onActivate(["pairing"], dynamic());
@@ -992,7 +935,6 @@ describe("PairingManager timers", () => {
 
   it("keeps the attempt timeout running across a retry", () => {
     const { mgr, sent, onPairingCode } = setup({
-      category: "sentinel",
       onPairingCode: vi.fn(),
     });
     mgr.onActivate(["pairing"], dynamic());
@@ -1015,7 +957,6 @@ describe("PairingManager timers", () => {
 
   it("expires an unused pairing window silently", () => {
     const ctx = setup({
-      category: "sentinel",
       onPairingCode: null,
       staticPairingCode: "31415926",
     });
@@ -1029,7 +970,6 @@ describe("PairingManager timers", () => {
 
   it("waits indefinitely for the gesture, leaving the timeout to the server", () => {
     const ctx = setup({
-      category: "sentinel",
       onPairingCode: null,
       staticPairingCode: "31415926",
     });
@@ -1044,7 +984,6 @@ describe("PairingManager timers", () => {
 
   it("keeps the window open after a timed-out attempt", () => {
     const ctx = setup({
-      category: "sentinel",
       onPairingCode: null,
       staticPairingCode: "31415926",
     });
@@ -1060,7 +999,6 @@ describe("PairingManager timers", () => {
 
   it("static attempts also honor the attempt timeout", () => {
     const ctx = setup({
-      category: "sentinel",
       onPairingCode: null,
       staticPairingCode: "31415926",
     });

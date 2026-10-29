@@ -271,4 +271,59 @@ describe("transport re-handshake", () => {
 
     expect(fakeWsSend(h).binary.length).toBe(before + 1);
   });
+
+  it("ends the hold and hands a refused pairing activation to onActivateRefused", () => {
+    const { h, newServerSession } = setupRehandshake(undefined, true);
+    h.cb.onActivateRefused.mockImplementation(() =>
+      h.transport.sendControl({
+        type: "pair/abort",
+        payload: { reason: "method_not_supported" },
+      }),
+    );
+    const before = fakeWsSend(h).binary.length;
+    const forwarded = h.cb.onControlMessage.mock.calls.length;
+
+    deliverActivate(
+      h,
+      newServerSession,
+      ["pairing"],
+      [],
+      "static_pairing_code",
+    );
+
+    expect(h.cb.onActivateRefused).toHaveBeenCalledOnce();
+    expect(h.cb.onControlMessage).toHaveBeenCalledTimes(forwarded);
+    expect(fakeWsSend(h).binary.length).toBe(before + 1);
+    expect(h.ws.disconnected).toBe(false);
+  });
+
+  it("keeps the active_roles and queued commands across a refused pairing activation", () => {
+    const { h, newServerSession } = setupRehandshake(
+      (h, session) =>
+        deliverActivate(h, session, ["playback"], ["controller@v1"]),
+      true,
+    );
+    const before = fakeWsSend(h).binary.length;
+    h.transport.sendControl({
+      type: "client/command",
+      payload: { controller: { command: "play" } },
+    });
+
+    deliverActivate(
+      h,
+      newServerSession,
+      ["pairing"],
+      ["player@v1"],
+      "static_pairing_code",
+    );
+    expect(fakeWsSend(h).binary.length).toBe(before + 1);
+
+    deliverActivate(h, newServerSession, ["pairing"], undefined, "pairing_psk");
+    expect(h.cb.onControlMessage).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        payload: expect.objectContaining({ active_roles: ["controller@v1"] }),
+      }),
+      expect.any(Number),
+    );
+  });
 });

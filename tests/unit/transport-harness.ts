@@ -46,10 +46,17 @@ export function harness() {
     onHandshakeComplete: vi.fn(),
     onControlMessage: vi.fn(),
     onBinaryMessage: vi.fn(),
+    onActivateRefused: vi.fn(),
   };
   const transport = new SendspinTransport(
     ws as never,
-    { identity, pskStore: store, suiteId: "chacha", unpairedAccess: true },
+    {
+      identity,
+      pskStore: store,
+      suiteId: "chacha",
+      unpairedAccess: true,
+      pairMethods: () => ({ pairing_psk: {} }),
+    },
     cb,
   );
   return { ws, identity, store, cb, transport };

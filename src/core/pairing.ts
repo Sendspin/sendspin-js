@@ -1,4 +1,4 @@
-import type { PskStore, PskCategory } from "./noise/psk";
+import type { PskStore } from "./noise/psk";
 import { base64urlEncode, base64urlDecode } from "./noise/base64url";
 import type {
   ActivatePairing,
@@ -96,7 +96,6 @@ export interface PairingDeps {
   close(): void;
   pskStore: PskStore;
   serverId(): string;
-  matchedCategory(): PskCategory;
   /** The Noise handshake hash h, which PIN derivation and the PAKE sid bind to. */
   handshakeHash(): Uint8Array;
   /**
@@ -257,7 +256,7 @@ export class PairingManager {
     this.languages = readLanguages(languages);
   }
 
-  /** Called for every server/activate. */
+  /** Called for every admissible server/activate. */
   onActivate(activities: string[], pairing?: ActivatePairing): void {
     this.discardStray = false;
     const isPairing = activities.includes("pairing");
@@ -272,42 +271,9 @@ export class PairingManager {
     // Each pairing activate is one attempt, indexed for pairing_index and sid.
     this.pairingActivateCount += 1;
     this.attemptIndex = this.pairingActivateCount;
-    const method = pairing?.method;
-    const offered = this.supportedPairMethods();
-    // pairing_psk exactly when the matched PSK is the Pairing PSK, a PIN method otherwise.
-    const fitsPsk =
-      (method === "pairing_psk") ===
-      (this.deps.matchedCategory() === "pairing");
-    if (!method) {
-      // A required field no conformant server omits, so it is a protocol error
-      // rather than a rejection: close without any application-level message.
-      // The log is local, so it still tells the integrator what went wrong.
-      console.warn(
-        "sendspin: server/activate carried no pairing method, so the server is not speaking the current specification.",
-      );
-      this.fail();
-      return;
-    }
-    // A method the PSK disallows or the client no longer offers is something a
-    // conformant server can produce, since its view of the config may be stale.
-    if (!fitsPsk || !Object.keys(offered).includes(method)) {
-      this.abort("method_not_supported");
-      return;
-    }
+    const { method, format } = pairing!;
     this.method = method;
-    if (method === "dynamic_pairing_code") {
-      const format = pairing.format;
-      // A missing format is a protocol error, like a missing method.
-      if (typeof format !== "string") {
-        this.fail();
-        return;
-      }
-      if (!offered.dynamic_pairing_code!.formats.includes(format)) {
-        this.abort("method_not_supported");
-        return;
-      }
-      this.format = format;
-    }
+    if (method === "dynamic_pairing_code") this.format = format!;
     if (this.isHeldBack()) {
       this.phase = "held-back";
       // pair-pending does not start the attempt, so no attempt timer runs. The
@@ -320,6 +286,13 @@ export class PairingManager {
       return;
     }
     this.startAttempt();
+  }
+
+  /** Called for a pairing server/activate whose method or format is not admissible. */
+  onRefusedActivate(): void {
+    this.abandonAttempt("superseded");
+    this.pairingActivateCount += 1;
+    this.abort("method_not_supported");
   }
 
   /**

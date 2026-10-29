@@ -1,8 +1,15 @@
 import type { PskCategory } from "./noise/psk";
-import type { GoodbyeReason } from "../types";
+import type {
+  ActivatePairing,
+  GoodbyeReason,
+  SupportedPairMethods,
+} from "../types";
 
 export type AuthResult =
-  { ok: true; activeRoles: string[] } | { ok: false; goodbye: GoodbyeReason };
+  | { ok: true; activeRoles: string[] }
+  | { ok: false; goodbye: GoodbyeReason }
+  | { ok: false; pairAbort: "method_not_supported" }
+  | { ok: false; protocolError: true };
 
 function isAllowedActivitySet(
   category: PskCategory,
@@ -41,6 +48,34 @@ function isAdmissible(
   );
 }
 
+function isMissingPairingField(
+  activities: readonly string[],
+  pairing: ActivatePairing | undefined,
+): boolean {
+  if (!activities.includes("pairing")) return false;
+  if (!pairing?.method) return true;
+  return (
+    pairing.method === "dynamic_pairing_code" &&
+    typeof pairing.format !== "string"
+  );
+}
+
+function isAllowedPairing(
+  category: PskCategory,
+  activities: readonly string[],
+  pairing: ActivatePairing | undefined,
+  offered: SupportedPairMethods,
+): boolean {
+  if (!activities.includes("pairing")) return true;
+  const { method, format } = pairing!;
+  if ((method === "pairing_psk") !== (category === "pairing")) return false;
+  if (!Object.keys(offered).includes(method)) return false;
+  return (
+    method !== "dynamic_pairing_code" ||
+    offered.dynamic_pairing_code!.formats.includes(format!)
+  );
+}
+
 /** Checks a server/activate and resolves its effective active_roles. */
 export function authorizeActivate(
   category: PskCategory,
@@ -48,24 +83,41 @@ export function authorizeActivate(
   activeRoles: readonly string[] | undefined,
   persistedRoles: readonly string[],
   unpairedAccess: boolean,
+  pairing: ActivatePairing | undefined,
+  offered: SupportedPairMethods,
 ): AuthResult {
-  // The activation's `pairing` object is ignored unless 'pairing' is in
-  // activities, so it never bears on authorization.
+  if (isMissingPairingField(activities, pairing)) {
+    return { ok: false, protocolError: true };
+  }
   const roles =
     activeRoles ??
     (isPlaybackCapable(category, activities, unpairedAccess)
       ? persistedRoles
       : []);
 
-  if (isAdmissible(category, activities, roles, unpairedAccess)) {
+  const pairingAllowed = isAllowedPairing(
+    category,
+    activities,
+    pairing,
+    offered,
+  );
+
+  if (
+    pairingAllowed &&
+    isAdmissible(category, activities, roles, unpairedAccess)
+  ) {
     return { ok: true, activeRoles: [...roles] };
   }
   if (
     category !== "long_term" &&
     !unpairedAccess &&
+    pairingAllowed &&
     isAdmissible(category, activities, roles, true)
   ) {
     return { ok: false, goodbye: "pairing_required" };
   }
-  return { ok: false, goodbye: "unauthorized" };
+  if (!isAdmissible(category, activities, roles, unpairedAccess)) {
+    return { ok: false, goodbye: "unauthorized" };
+  }
+  return { ok: false, pairAbort: "method_not_supported" };
 }
