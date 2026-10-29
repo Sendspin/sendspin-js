@@ -350,6 +350,8 @@ export class SendspinCore implements StreamHandler {
     // Replacing a live socket detaches its close handler, so reset its session here.
     if (this.isConnected) this.resetSession();
     const onOpen = () => {
+      // Reset on open, not close, since buffered audio keeps using the old filter after a drop.
+      this.timeFilter.reset();
       this._onConnectionOpen?.();
       this.transport.start();
     };
@@ -371,24 +373,24 @@ export class SendspinCore implements StreamHandler {
         onClose,
       );
     } else {
-      // Create connection from baseUrl
-      if (!this.config.baseUrl) {
+      if (!this.config.url) {
         throw new Error(
-          "SendspinCore requires either baseUrl or webSocket to be provided.",
+          "SendspinCore requires either url or webSocket to be provided.",
         );
       }
-      // Preserve path from baseUrl for reverse proxy support
-      const url = new URL(
-        this.config.baseUrl,
-        typeof window !== "undefined" ? window.location.href : undefined,
-      );
-      const wsProtocol = url.protocol === "https:" ? "wss:" : "ws:";
-      const basePath = url.pathname.replace(/\/$/, "");
-      const wsUrl = basePath.endsWith("/sendspin")
-        ? `${wsProtocol}//${url.host}${basePath}`
-        : `${wsProtocol}//${url.host}${basePath}/sendspin`;
+      if (!/^wss?:\/\//i.test(this.config.url)) {
+        throw new Error(
+          `The url option must use ws:// or wss://, got ${JSON.stringify(this.config.url)}.`,
+        );
+      }
 
-      await this.wsManager.connect(wsUrl, onOpen, onMessage, onError, onClose);
+      await this.wsManager.connect(
+        this.config.url,
+        onOpen,
+        onMessage,
+        onError,
+        onClose,
+      );
     }
   }
 

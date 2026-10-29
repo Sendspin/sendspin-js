@@ -525,7 +525,7 @@ export interface DecodedAudioChunk {
  * Reconnection behavior when the WebSocket closes unexpectedly.
  *
  * Defaults: exponential backoff starting at 1s, capped at 15s, unlimited attempts.
- * Reconnection is only active for connections opened via `baseUrl` — adopted
+ * Reconnection is only active for connections opened via `url`. Adopted
  * sockets (via `webSocket`) never auto-reconnect.
  */
 export interface ReconnectConfig {
@@ -575,10 +575,11 @@ export interface ReconnectConfig {
  */
 export interface SendspinCoreConfig {
   /**
-   * Base URL of the Sendspin server (e.g., "http://192.168.1.100:8095").
-   * Required unless webSocket is provided.
+   * WebSocket URL of the server's Sendspin endpoint, such as
+   * "ws://192.168.1.100:8927/sendspin". Must use ws:// or wss://.
+   * Required unless webSocket is provided. Use ws:// for a server discovered over mDNS.
    */
-  baseUrl?: string;
+  url?: string;
 
   /** Human-readable name for this player. Auto-generated if not provided. */
   clientName?: string;
@@ -620,8 +621,8 @@ export interface SendspinCoreConfig {
 
   /**
    * Pre-established WebSocket connection.
-   * When provided, the core adopts this socket instead of creating one from baseUrl.
-   * The socket must connect to the Sendspin /sendspin endpoint.
+   * When provided, the core adopts this socket instead of creating one from url.
+   * The socket must connect to the server's Sendspin endpoint.
    * Auto-reconnect is disabled for externally-managed sockets.
    */
   webSocket?: WebSocket;
@@ -708,11 +709,13 @@ export interface SendspinCoreConfig {
    * Called when reporting state to server if useHardwareVolume is true.
    * Should return current hardware volume (0-100) and muted state.
    * Not called immediately after volume commands to wait for hardware to apply the change.
+   * The SDK does not update its own volume from this value, so also call
+   * setVolume and setMuted when the device volume changes through its own controls.
    */
   getExternalVolume?: () => { volume: number; muted: boolean };
 
   /**
-   * Reconnection behavior for connections opened via `baseUrl`.
+   * Reconnection behavior for connections opened via `url`.
    * See {@link ReconnectConfig} for defaults.
    */
   reconnect?: ReconnectConfig;

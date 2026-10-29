@@ -14,7 +14,7 @@ See the SDK website to see Sendspin JS in action: https://sendspin.github.io/sen
 import { SendspinPlayer } from '@sendspin/sendspin-js';
 
 const player = new SendspinPlayer({
-  baseUrl: 'http://your-server:8095',
+  url: 'ws://your-server:8095/sendspin',
   clientName: 'My Web Player',
   productName: 'My App',
   manufacturer: 'My Company',
@@ -95,6 +95,19 @@ you drop it. A player dropped after `disconnect()` keeps its audio output open.
 
 ## Advanced configuration
 
+### Connecting to a discovered server
+
+The SDK doesn't discover servers. An app that finds one over mDNS
+(`_sendspin-server._tcp`) builds `url` from the discovered address, port and
+the TXT record's `path`. The spec requires plain `ws://` for these addresses.
+
+```typescript
+const player = new SendspinPlayer({
+  url: 'ws://192.168.1.20:8927/sendspin',
+  clientName: 'My Player',
+});
+```
+
 ### Bring your own WebSocket
 
 Provide an already-open (or CONNECTING) `WebSocket` via `webSocket` to let the
@@ -120,7 +133,7 @@ drive UI and fatal-error paths via `reconnect`.
 
 ```typescript
 const player = new SendspinPlayer({
-  baseUrl: 'http://your-server:8095',
+  url: 'ws://your-server:8095/sendspin',
   reconnect: {
     baseDelayMs: 1000,
     maxDelayMs: 15000,
@@ -132,7 +145,7 @@ const player = new SendspinPlayer({
 });
 ```
 
-Reconnection only applies to connections opened via `baseUrl`; adopted
+Reconnection only applies to connections opened via `url`; adopted
 sockets (`webSocket`) never auto-reconnect.
 
 ### Hardware volume
@@ -145,7 +158,7 @@ the device volume changes through its own controls, call `setVolume` and
 
 ```typescript
 const player = new SendspinPlayer({
-  baseUrl: 'http://your-server:8095',
+  url: 'ws://your-server:8095/sendspin',
   useHardwareVolume: true,
   onVolumeCommand: (volume, muted) => device.setVolume(volume, muted),
   getExternalVolume: () => ({ volume: device.volume, muted: device.muted }),
@@ -164,7 +177,7 @@ drift. Unspecified fields keep their defaults.
 
 ```typescript
 const player = new SendspinPlayer({
-  baseUrl: 'http://your-server:8095',
+  url: 'ws://your-server:8095/sendspin',
   correctionMode: 'sync',
   correctionThresholds: {
     sync: {
@@ -183,7 +196,7 @@ underruns. Defaults are `requiredLeadTimeMs: 250` and `minBufferMs: 250`.
 
 ```typescript
 const player = new SendspinPlayer({
-  baseUrl: 'http://your-server:8095',
+  url: 'ws://your-server:8095/sendspin',
   requiredLeadTimeMs: 250,  // startup warmup (codec init, decode, DAC)
   minBufferMs: 250,         // ongoing buffer to absorb network jitter
 });
@@ -206,7 +219,7 @@ trusted, per-server long-term PSK.
 
 ```typescript
 const player = new SendspinPlayer({
-  baseUrl: 'http://your-server:8095',
+  url: 'ws://your-server:8095/sendspin',
   suite: 'chacha',            // "chacha" (default) or "aesgcm"
   unpairedAccess: true,       // admit unpaired playback; default true (see note below)
   longTermPsks: [
@@ -305,7 +318,7 @@ Apps that need the decoded PCM stream (e.g. visualizers) can use
 import { SendspinCore } from '@sendspin/sendspin-js';
 
 const core = new SendspinCore({
-  baseUrl: 'http://your-server:8095',
+  url: 'ws://your-server:8095/sendspin',
 });
 
 core.onAudioData = (chunk) => {

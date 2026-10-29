@@ -141,31 +141,41 @@ function isSecureContext() {
 }
 
 /**
- * Normalize server URL to ensure it has a protocol prefix.
- * When running on HTTPS, defaults to HTTPS to avoid mixed content issues.
+ * Turn the typed server address into a WebSocket URL.
+ * Bare addresses get ws:// and, without a port, the default 8927, since the
+ * spec requires plain ws:// for addresses advertised over mDNS. Without a
+ * path, the URL gets the default /sendspin.
  */
 function normalizeServerUrl(input) {
   if (!input) return "";
 
-  const url = input.trim();
+  let url = input.trim();
+  const rest = url.replace(/^[a-z][a-z0-9+.-]*:\/\//i, "");
+  const bare = rest === url;
+  const hasPort = /:\d+$/.test(rest.split("/")[0]);
+  const hasPath = rest.includes("/");
+  if (bare) url = "ws://" + url;
+  url = url.replace(/^http(s?):/i, "ws$1:");
 
-  if (!url.startsWith("http://") && !url.startsWith("https://")) {
-    // If user forgot protocol, prefix based on current page protocol
-    return location.protocol + "//" + url;
+  try {
+    const parsed = new URL(url);
+    if (bare && !hasPort) parsed.port = "8927";
+    if (!hasPath) parsed.pathname = "/sendspin";
+    return parsed.href;
+  } catch {
+    return url;
   }
-
-  return url;
 }
 
 /**
- * Check if URL would cause mixed content issues (HTTP URL on HTTPS page)
- * Note: localhost is considered a secure context, so HTTP to localhost is allowed
+ * Check if URL would cause mixed content issues (ws:// URL on HTTPS page)
+ * Note: localhost is considered a secure context, so ws:// to localhost is allowed
  */
 function isMixedContentUrl(url) {
-  if (!isSecureContext() || !url.startsWith("http://")) {
+  if (!isSecureContext() || !url.startsWith("ws://")) {
     return false;
   }
-  // localhost is a secure context, so HTTP is allowed
+  // localhost is a secure context, so ws:// is allowed
   try {
     const parsed = new URL(url);
     const host = parsed.hostname;
@@ -270,6 +280,10 @@ function isValidStaticPin(pin) {
   return /^[0-9]{8}$/.test(pin);
 }
 
+function staticPinDigits() {
+  return staticPinInput.value.replace(/[\s-]/g, "");
+}
+
 /** The checked location hints in a group, in spec order. */
 function selectedLocations(inputs) {
   const picked = Array.from(inputs)
@@ -347,9 +361,10 @@ async function renderQrCode(token) {
   pairingQrEl.innerHTML = qr.createSvgTag(4);
 }
 
-/** Split the 6-digit code into the 3-3 groups the spec presents it in. */
+/** Split the code into the groups the spec presents it in: 3-3 or 4-4. */
 function codeGroups(pin) {
-  return [pin.slice(0, 3), pin.slice(3)];
+  const half = pin.length / 2;
+  return [pin.slice(0, half), pin.slice(half)];
 }
 
 /**
@@ -650,10 +665,10 @@ function loadSettings() {
   }
 
   const savedStaticPin = localStorage.getItem(STORAGE_KEYS.STATIC_PIN);
-  if (savedStaticPin !== null) {
-    staticPinInput.value = savedStaticPin;
+  if (savedStaticPin) {
+    staticPinInput.value = codeGroups(savedStaticPin).join("-");
   }
-  staticPinBothEl.hidden = !isValidStaticPin(staticPinInput.value);
+  staticPinBothEl.hidden = !isValidStaticPin(staticPinDigits());
 
   for (const [inputs, key] of [
     [staticPinLocationInputs, STORAGE_KEYS.STATIC_PIN_LOCATIONS],
@@ -781,10 +796,10 @@ async function connect() {
     return;
   }
 
-  // Check for mixed content (HTTP URL on HTTPS page)
+  // Check for mixed content (ws:// URL on HTTPS page)
   if (isMixedContentUrl(serverUrl)) {
     showToast(
-      "Cannot connect to HTTP server from HTTPS page. Browsers block mixed content for security. Use an HTTPS server URL instead.",
+      "Cannot connect to a ws:// server from an HTTPS page. Browsers block mixed content for security. Use a wss:// server URL instead.",
       "error",
     );
     serverUrlInput.focus();
@@ -811,7 +826,7 @@ async function connect() {
     );
 
     const config = {
-      baseUrl: serverUrl,
+      url: serverUrl,
       clientName: "Sendspin Sample Player",
       productName: "Sendspin JS Sample Player",
       requiredLeadTimeMs,
@@ -830,8 +845,8 @@ async function connect() {
       },
       unpairedAccess: unpairedAccessCheckbox.checked,
       // Enables static pairing only once the field holds a complete code.
-      staticPairingCode: isValidStaticPin(staticPinInput.value)
-        ? staticPinInput.value
+      staticPairingCode: isValidStaticPin(staticPinDigits())
+        ? staticPinDigits()
         : undefined,
       // Omitted entirely when nothing is picked: the hint is optional.
       staticPairingCodeLocations: selectedLocations(staticPinLocationInputs),
@@ -1092,12 +1107,13 @@ function init() {
     showToast("Pairing token rotated", "success");
   });
   staticPinInput.addEventListener("change", () => {
-    const pin = staticPinInput.value.trim();
+    const pin = staticPinDigits();
     staticPinBothEl.hidden = !isValidStaticPin(pin);
     if (pin && !isValidStaticPin(pin)) {
       showToast("Static pairing code must be exactly 8 digits", "error");
       return;
     }
+    if (pin) staticPinInput.value = codeGroups(pin).join("-");
     localStorage.setItem(STORAGE_KEYS.STATIC_PIN, pin);
     if (player)
       showToast("Static pairing code applies on the next connect", "info");

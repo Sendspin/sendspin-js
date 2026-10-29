@@ -15,7 +15,7 @@ describe("loadSendspinClientIdentity", () => {
   it("returns the identity a core built on the same storage adopts", () => {
     const storage = memStorage();
     const preread = loadSendspinClientIdentity(storage);
-    const core = new SendspinCore({ baseUrl: "http://server", storage });
+    const core = new SendspinCore({ url: "ws://server", storage });
     expect(core.clientId).toBe(preread.clientId);
     expect(core.pairingToken).toBe(preread.pairingToken);
     expect("getPairingToken" in preread).toBe(false);

@@ -59,7 +59,7 @@ bootstrap, then `yarn test`. One suite: `npx vitest run tests/unit`.
 
 The `SendspinPlayerConfig` interface in `src/types.ts` defines all available options:
 
-- `baseUrl`: Server URL
+- `url`: WebSocket URL of the server's Sendspin endpoint
 - `clientName`: Human-readable player name
 - `productName`: Product name advertised in client/hello
 - `manufacturer`: Manufacturer advertised in client/hello

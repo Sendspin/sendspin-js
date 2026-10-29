@@ -100,7 +100,7 @@ describe("SendspinCore (offline)", () => {
   let core: SendspinCore;
 
   beforeEach(() => {
-    core = new SendspinCore({ baseUrl: "http://127.0.0.1:9" });
+    core = new SendspinCore({ url: "ws://127.0.0.1:9" });
   });
 
   describe("sendCommand guard", () => {
@@ -216,7 +216,7 @@ describe("SendspinCore (offline)", () => {
     it("a transport close reports the cached group state as cleared", () => {
       const onStateChange = vi.fn();
       const observed = new SendspinCore({
-        baseUrl: "http://127.0.0.1:9",
+        url: "ws://127.0.0.1:9",
         onStateChange,
       });
       observed._stateManager.updateGroupState({
@@ -239,7 +239,7 @@ describe("SendspinCore.trackProgress", () => {
   let nowMs: number;
 
   beforeEach(() => {
-    core = new SendspinCore({ baseUrl: "http://127.0.0.1:9" });
+    core = new SendspinCore({ url: "ws://127.0.0.1:9" });
     nowMs = 1000;
     vi.spyOn(performance, "now").mockImplementation(() => nowMs);
   });
@@ -326,7 +326,7 @@ describe("SendspinCore.getCurrentServerTimeUs", () => {
   afterEach(() => vi.restoreAllMocks());
 
   it("floors performance.now()*1000 and applies the filter offset", () => {
-    const core = new SendspinCore({ baseUrl: "http://h" });
+    const core = new SendspinCore({ url: "ws://h" });
     // Seed a known offset on the real time filter via one measurement.
     // First measurement sets offset = measurement directly.
     core._timeFilter.update(7000, 500, 1_000_000);
@@ -337,7 +337,7 @@ describe("SendspinCore.getCurrentServerTimeUs", () => {
   });
 });
 
-describe("SendspinCore URL building", () => {
+describe("SendspinCore url option", () => {
   let captured: string[];
   let OrigWS: typeof WebSocket;
 
@@ -370,24 +370,15 @@ describe("SendspinCore URL building", () => {
     globalThis.WebSocket = OrigWS;
   });
 
-  const urlFor = (baseUrl: string): string => {
-    const core = new SendspinCore({ baseUrl });
-    void core.connect(); // fire-and-forget; promise never resolves with FakeWS
-    return captured[captured.length - 1];
-  };
-
-  it("maps http -> ws and appends /sendspin", () => {
-    expect(urlFor("http://host:8927")).toBe("ws://host:8927/sendspin");
+  it("connects to the url as given", () => {
+    void new SendspinCore({ url: "wss://host:8927/ws/" }).connect();
+    expect(captured).toEqual(["wss://host:8927/ws/"]);
   });
 
-  it("preserves a base path for reverse-proxy setups", () => {
-    expect(urlFor("http://host/proxy/audio")).toBe(
-      "ws://host/proxy/audio/sendspin",
-    );
-  });
-
-  it("does not duplicate slashes when baseUrl has a trailing slash", () => {
-    expect(urlFor("http://host/proxy/")).toBe("ws://host/proxy/sendspin");
+  it("rejects a url that does not use ws:// or wss://", async () => {
+    const core = new SendspinCore({ url: "http://host:8927" });
+    await expect(core.connect()).rejects.toThrow(/ws:\/\/ or wss:\/\//);
+    expect(captured).toEqual([]);
   });
 });
 
@@ -395,7 +386,7 @@ describe("SendspinCore command + state forwarding", () => {
   let core: SendspinCore;
 
   beforeEach(() => {
-    core = new SendspinCore({ baseUrl: "http://h" });
+    core = new SendspinCore({ url: "ws://h" });
   });
 
   afterEach(() => {
@@ -418,7 +409,7 @@ describe("SendspinCore command + state forwarding", () => {
 
   it("closes a bound pairing window when connect() replaces a live socket", async () => {
     core = new SendspinCore({
-      baseUrl: "http://h",
+      url: "ws://h",
       staticPairingCode: "12345678",
     });
     const send = spySend(core);
@@ -459,7 +450,7 @@ describe("SendspinCore command + state forwarding", () => {
 
   it("keeps player state and controller commands during a pairing activation", () => {
     core = new SendspinCore({
-      baseUrl: "http://h",
+      url: "ws://h",
       staticPairingCode: "12345678",
     });
     const send = spySend(core);
@@ -520,7 +511,7 @@ describe("SendspinCore command + state forwarding", () => {
     const onVolumeCommand = vi.fn();
     const device = { volume: 60, muted: false };
     const hardwareCore = new SendspinCore({
-      baseUrl: "http://h",
+      url: "ws://h",
       storage: null,
       useHardwareVolume: true,
       onVolumeCommand,
@@ -555,7 +546,7 @@ describe("SendspinCore.setSyncDelay", () => {
   let core: SendspinCore;
 
   beforeEach(() => {
-    core = new SendspinCore({ baseUrl: "http://h" });
+    core = new SendspinCore({ url: "ws://h" });
   });
 
   afterEach(() => {
@@ -578,7 +569,7 @@ describe("SendspinCore.setSyncDelay", () => {
 
   it("seeds the initial sync delay from config (clamped)", () => {
     const c2 = new SendspinCore({
-      baseUrl: "http://h",
+      url: "ws://h",
       syncDelay: 8000,
     });
     expect(c2.getSyncDelayMs()).toBe(5000);
@@ -589,7 +580,7 @@ describe("SendspinCore output delay persistence", () => {
   it("persists a server-commanded delay change to storage", () => {
     const storage = makeStorage();
     const core = new SendspinCore({
-      baseUrl: "http://h",
+      url: "ws://h",
       storage,
     });
 
@@ -600,7 +591,7 @@ describe("SendspinCore output delay persistence", () => {
 
   it("persists and reports a server set_output_delay command", () => {
     const storage = makeStorage();
-    const core = new SendspinCore({ baseUrl: "http://h", storage });
+    const core = new SendspinCore({ url: "ws://h", storage });
     const send = spySend(core);
     activatePlayer(core, send);
 
@@ -624,7 +615,7 @@ describe("SendspinCore output delay persistence", () => {
     storage.data.set(STATIC_DELAY_KEY, "321");
 
     const core = new SendspinCore({
-      baseUrl: "http://h",
+      url: "ws://h",
       storage,
     });
 
@@ -636,7 +627,7 @@ describe("SendspinCore output delay persistence", () => {
     storage.data.set("sendspin-static-delay-ms", "321");
 
     const core = new SendspinCore({
-      baseUrl: "http://h",
+      url: "ws://h",
       storage,
     });
 
@@ -648,7 +639,7 @@ describe("SendspinCore output delay persistence", () => {
     storage.data.set(STATIC_DELAY_KEY, "321");
 
     const core = new SendspinCore({
-      baseUrl: "http://h",
+      url: "ws://h",
       syncDelay: 100,
       storage,
     });
@@ -658,7 +649,7 @@ describe("SendspinCore output delay persistence", () => {
 
   it("does not throw or persist when storage is disabled", () => {
     const core = new SendspinCore({
-      baseUrl: "http://h",
+      url: "ws://h",
       storage: null,
     });
 
@@ -670,7 +661,7 @@ describe("SendspinCore output delay persistence", () => {
 describe("SendspinCore volume persistence", () => {
   it("restores server-commanded volume and mute on a fresh core with the same storage", () => {
     const storage = makeStorage();
-    const core = new SendspinCore({ baseUrl: "http://h", storage });
+    const core = new SendspinCore({ url: "ws://h", storage });
     const send = spySend(core);
     activatePlayer(core, send);
     for (const player of [
@@ -685,7 +676,7 @@ describe("SendspinCore volume persistence", () => {
     }
     core._stateManager.clearAllIntervals();
 
-    const restored = new SendspinCore({ baseUrl: "http://h", storage });
+    const restored = new SendspinCore({ url: "ws://h", storage });
 
     expect(restored.volume).toBe(35);
     expect(restored.muted).toBe(true);
@@ -694,7 +685,7 @@ describe("SendspinCore volume persistence", () => {
 
 describe("SendspinCore.disconnect ordering and idempotency", () => {
   it("resets the time filter on disconnect", () => {
-    const core = new SendspinCore({ baseUrl: "http://h" });
+    const core = new SendspinCore({ url: "ws://h" });
     core._timeFilter.update(10000, 500, 1_000_000);
     expect(core._timeFilter.is_synchronized).toBe(true);
 
@@ -705,14 +696,14 @@ describe("SendspinCore.disconnect ordering and idempotency", () => {
   });
 
   it("does not send goodbye when never connected", () => {
-    const core = new SendspinCore({ baseUrl: "http://h" });
+    const core = new SendspinCore({ url: "ws://h" });
     const send = spySend(core);
     core.disconnect("user_request");
     expect(send).not.toHaveBeenCalled();
   });
 
   it("defaults the goodbye reason to user_request, but forwards an explicit reason", () => {
-    const core = new SendspinCore({ baseUrl: "http://h" });
+    const core = new SendspinCore({ url: "ws://h" });
     const send = spySend(core);
     markTransportReady(core);
 
@@ -735,7 +726,7 @@ describe("SendspinCore.disconnect ordering and idempotency", () => {
   });
 
   it("fires onConnectionClose only via the close handler, not on disconnect()", () => {
-    const core = new SendspinCore({ baseUrl: "http://h" });
+    const core = new SendspinCore({ url: "ws://h" });
     const cb = vi.fn();
     core.onConnectionClose = cb;
     core.disconnect();
@@ -743,9 +734,61 @@ describe("SendspinCore.disconnect ordering and idempotency", () => {
   });
 });
 
+describe("SendspinCore reconnect", () => {
+  let sockets: { onopen: (() => void) | null; onclose: (() => void) | null }[];
+  let OrigWS: typeof WebSocket;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    sockets = [];
+    OrigWS = globalThis.WebSocket;
+    class FakeWS {
+      static OPEN = 1;
+      static CONNECTING = 0;
+      static CLOSING = 2;
+      static CLOSED = 3;
+      readyState = 0;
+      binaryType = "";
+      onopen: (() => void) | null = null;
+      onmessage: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      onclose: (() => void) | null = null;
+      constructor() {
+        sockets.push(this);
+      }
+      close() {}
+      send() {}
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    globalThis.WebSocket = FakeWS as any;
+  });
+
+  afterEach(() => {
+    globalThis.WebSocket = OrigWS;
+    vi.useRealTimers();
+  });
+
+  it("keeps the time filter after a drop and resets it when the new socket opens", () => {
+    const core = new SendspinCore({ url: "ws://h" });
+    void core.connect();
+    sockets[0].onopen!();
+    core._timeFilter.update(10000, 500, 1_000_000);
+
+    sockets[0].onclose!();
+    expect(core._timeFilter.is_synchronized).toBe(true);
+
+    vi.runOnlyPendingTimers();
+    expect(sockets).toHaveLength(2);
+    sockets[1].onopen!();
+    expect(core._timeFilter.is_synchronized).toBe(false);
+
+    core.disconnect();
+  });
+});
+
 describe("SendspinCore identity fallbacks", () => {
   it("derives a 43-char base64url clientId and a clientName from it", () => {
-    const core = new SendspinCore({ baseUrl: "http://h" });
+    const core = new SendspinCore({ url: "ws://h" });
     expect(core.clientId).toHaveLength(43);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const cfg = (core as any).config;
