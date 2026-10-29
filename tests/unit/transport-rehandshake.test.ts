@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import {
   harness,
   completeHandshake,
+  completeHandshakeWithPsk,
   fakeWsSend,
   noise1Payload,
 } from "./transport-harness";
@@ -46,10 +47,10 @@ function setupRehandshake(
     session: NoiseSession,
   ) => void,
   toPairingPsk = false,
+  h = harness(),
+  initial = completeHandshake(h),
 ) {
-  const h = harness();
-  const { serverSession, serverId, server, clientId, priorHash } =
-    completeHandshake(h);
+  const { serverSession, serverId, server, clientId, priorHash } = initial;
   beforeRehandshake?.(h, serverSession);
   const newPsk = toPairingPsk
     ? h.store.getOrCreatePairingPsk()
@@ -325,5 +326,32 @@ describe("transport re-handshake", () => {
       }),
       expect.any(Number),
     );
+  });
+
+  it("drops the roles and queued commands the new PSK no longer allows on a refused activation", () => {
+    const h = harness(false);
+    const { newServerSession } = setupRehandshake(
+      (h, session) =>
+        deliverActivate(h, session, ["playback"], ["controller@v1"]),
+      true,
+      h,
+      completeHandshakeWithPsk(h, new Uint8Array(32).fill(31)),
+    );
+    h.transport.sendControl({
+      type: "client/command",
+      payload: { controller: { command: "play" } },
+    });
+    const before = fakeWsSend(h).binary.length;
+
+    deliverActivate(
+      h,
+      newServerSession,
+      ["pairing"],
+      undefined,
+      "static_pairing_code",
+    );
+
+    expect(h.cb.onActivateRefused).toHaveBeenCalledWith([]);
+    expect(fakeWsSend(h).binary.length).toBe(before);
   });
 });

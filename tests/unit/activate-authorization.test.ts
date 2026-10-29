@@ -5,7 +5,11 @@ import type { PairCodeFormat, PairMethod } from "../../src/types";
 
 const unauthorized = { ok: false, goodbye: "unauthorized" };
 const pairingRequired = { ok: false, goodbye: "pairing_required" };
-const methodNotSupported = { ok: false, pairAbort: "method_not_supported" };
+const methodNotSupported = {
+  ok: false,
+  pairAbort: "method_not_supported",
+  activeRoles: [],
+};
 const offered = { pairing_psk: {}, static_pairing_code: {} };
 const methodFor = (category: PskCategory) =>
   ({
@@ -201,6 +205,24 @@ describe("authorizeActivate", () => {
     expect(refuse("sentinel", { method: "toString" as PairMethod })).toEqual(
       methodNotSupported,
     );
+  });
+
+  it("drops persisted active_roles on a refusal once the matched PSK allows no roles", () => {
+    const refuse = (unpairedAccess: boolean) =>
+      authorizeActivate(
+        "sentinel",
+        ["pairing"],
+        undefined,
+        ["controller@v1"],
+        unpairedAccess,
+        { method: "dynamic_pairing_code", format: "digits" },
+        offered,
+      );
+    expect(refuse(false)).toEqual(methodNotSupported);
+    expect(refuse(true)).toEqual({
+      ...methodNotSupported,
+      activeRoles: ["controller@v1"],
+    });
   });
 
   it("treats a missing pairing method or format as a protocol error", () => {

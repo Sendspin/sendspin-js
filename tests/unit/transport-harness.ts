@@ -38,7 +38,7 @@ export function fakeWs() {
   };
 }
 
-export function harness() {
+export function harness(unpairedAccess = true) {
   const ws = fakeWs();
   const identity = Identity.loadOrCreate(null);
   const store = new PskStore(null);
@@ -54,7 +54,7 @@ export function harness() {
       identity,
       pskStore: store,
       suiteId: "chacha",
-      unpairedAccess: true,
+      unpairedAccess,
       pairMethods: () => ({ pairing_psk: {} }),
     },
     cb,
@@ -149,6 +149,17 @@ export function completeHandshakeWithPsk(
 ) {
   const server = SUITES.chacha.generateKeypair();
   h.store.addLongTerm(psk, base64urlEncode(server.publicKey));
-  const { ini } = sendNoise1(h, psk, noise1Payload(psk, "lt"), server);
-  return { serverSession: readNoise2(h, ini) };
+  const { ini, serverId, clientId } = sendNoise1(
+    h,
+    psk,
+    noise1Payload(psk, "lt"),
+    server,
+  );
+  return {
+    serverSession: readNoise2(h, ini),
+    serverId,
+    server,
+    clientId,
+    priorHash: ini.handshakeHash,
+  };
 }

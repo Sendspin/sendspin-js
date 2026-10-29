@@ -42,7 +42,7 @@ export interface TransportCallbacks {
     receivedAtUs: number,
   ): void;
   onBinaryMessage(bytes: Uint8Array): void;
-  onActivateRefused(): void;
+  onActivateRefused(activeRoles: string[]): void;
 }
 
 const PSK_CATEGORY_CODES = new Map<unknown, PskCategory>([
@@ -422,7 +422,7 @@ export class SendspinTransport {
       this.sendGoodbyeAndClose(result.goodbye);
       return;
     }
-    if (result.ok) this.activeRoles = result.activeRoles;
+    this.activeRoles = result.activeRoles;
     this.clearTimeout();
     const queuedCommands = this.activeRoles.includes("controller@v1")
       ? this.outboundQueue.filter(
@@ -440,7 +440,7 @@ export class SendspinTransport {
         receivedAtUs,
       );
     } else {
-      this.cb.onActivateRefused();
+      this.cb.onActivateRefused(this.activeRoles);
     }
     for (const command of queuedCommands) this.encryptSend(command);
   }

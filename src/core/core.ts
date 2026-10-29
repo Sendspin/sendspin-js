@@ -129,8 +129,8 @@ export class SendspinCore implements StreamHandler {
           this.routeControl(msg, receivedAtUs),
         onBinaryMessage: (bytes) =>
           this.handleBinaryMessage(bytes.buffer as ArrayBuffer),
-        onActivateRefused: () => {
-          this.protocolHandler.resumeActivation();
+        onActivateRefused: (activeRoles) => {
+          this.protocolHandler.resumeActivation(activeRoles);
           this.pairing.onRefusedActivate();
         },
       },

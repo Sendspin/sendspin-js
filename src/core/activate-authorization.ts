@@ -8,7 +8,7 @@ import type {
 export type AuthResult =
   | { ok: true; activeRoles: string[] }
   | { ok: false; goodbye: GoodbyeReason }
-  | { ok: false; pairAbort: "method_not_supported" }
+  | { ok: false; pairAbort: "method_not_supported"; activeRoles: string[] }
   | { ok: false; protocolError: true };
 
 function isAllowedActivitySet(
@@ -119,5 +119,12 @@ export function authorizeActivate(
   if (!isAdmissible(category, activities, roles, unpairedAccess)) {
     return { ok: false, goodbye: "unauthorized" };
   }
-  return { ok: false, pairAbort: "method_not_supported" };
+  // Keep the persisted roles only while the matched PSK allows any roles.
+  return {
+    ok: false,
+    pairAbort: "method_not_supported",
+    activeRoles: isPlaybackCapable(category, [], unpairedAccess)
+      ? [...persistedRoles]
+      : [],
+  };
 }

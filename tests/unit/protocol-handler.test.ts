@@ -502,7 +502,7 @@ describe("ProtocolHandler extra", () => {
       activate(handler);
       handler.resetActivation(true);
       send.mockClear();
-      handler.resumeActivation();
+      handler.resumeActivation(["player@v1"]);
       expect(lastSent(send, "client/state")!.payload).toHaveProperty("player");
       expect(lastSent(send, "client/time")).toBeDefined();
     });
