@@ -8,10 +8,11 @@
 // Detect if running on dev server (must match port in package.json "dev-server" script)
 const isLocalDev = window.location.port === "6001";
 
-// Import the SDK from local build (development) or unpkg CDN (production)
+// Import the SDK from local build (development) or jsDelivr CDN (production).
+// The +esm build rewrites the SDK's npm imports into URLs a browser can load.
 const sdkPath = isLocalDev
   ? "./dev/index.js"
-  : "https://unpkg.com/@sendspin/sendspin-js@latest/dist/index.js";
+  : "https://cdn.jsdelivr.net/npm/@sendspin/sendspin-js@latest/+esm";
 const { SendspinPlayer } = await import(sdkPath);
 
 console.log(`Loading SDK from: ${sdkPath}`);
