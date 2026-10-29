@@ -341,7 +341,7 @@ describe("Sendspin encryption and pairing E2E (aiosendspin)", () => {
   it("rejects a Pairing PSK token bound to another client", async () => {
     const connection = await connect({ clientName: "Wrong token client" });
     const other = new SendspinCore({
-      baseUrl: "http://unused",
+      url: "ws://unused",
       storage: memoryStorage(),
     });
     const result = await server.pairWithToken(other.pairingToken!);
