@@ -75,7 +75,7 @@ export class SendspinPlayer {
     // Create core (protocol + decoding). It resolves the effective initial
     // delay, so read it back below for the scheduler's starting value.
     this.core = new SendspinCore({
-      baseUrl: config.baseUrl,
+      url: config.url,
       clientName: config.clientName,
       productName: config.productName,
       manufacturer: config.manufacturer,
