@@ -44,7 +44,7 @@
     "url": "https://github.com/Sendspin/sendspin-js/issues"
   },
   "engines": {
-    "node": ">=16.0.0"
+    "node": ">=20.19.0"
   },
   "devDependencies": {
     "@rollup/plugin-commonjs": "^29.0.1",
