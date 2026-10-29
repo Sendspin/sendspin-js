@@ -769,7 +769,7 @@ describe("SendspinCore reconnect", () => {
   });
 
   it("keeps the time filter after a drop and resets it when the new socket opens", () => {
-    const core = new SendspinCore({ baseUrl: "http://h" });
+    const core = new SendspinCore({ url: "ws://h" });
     void core.connect();
     sockets[0].onopen!();
     core._timeFilter.update(10000, 500, 1_000_000);
