@@ -708,6 +708,8 @@ export interface SendspinCoreConfig {
    * Called when reporting state to server if useHardwareVolume is true.
    * Should return current hardware volume (0-100) and muted state.
    * Not called immediately after volume commands to wait for hardware to apply the change.
+   * The SDK does not update its own volume from this value, so also call
+   * setVolume and setMuted when the device volume changes through its own controls.
    */
   getExternalVolume?: () => { volume: number; muted: boolean };
 
