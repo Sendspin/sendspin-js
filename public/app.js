@@ -280,6 +280,10 @@ function isValidStaticPin(pin) {
   return /^[0-9]{8}$/.test(pin);
 }
 
+function staticPinDigits() {
+  return staticPinInput.value.replace(/[\s-]/g, "");
+}
+
 /** The checked location hints in a group, in spec order. */
 function selectedLocations(inputs) {
   const picked = Array.from(inputs)
@@ -357,9 +361,10 @@ async function renderQrCode(token) {
   pairingQrEl.innerHTML = qr.createSvgTag(4);
 }
 
-/** Split the 6-digit code into the 3-3 groups the spec presents it in. */
+/** Split the code into the groups the spec presents it in: 3-3 or 4-4. */
 function codeGroups(pin) {
-  return [pin.slice(0, 3), pin.slice(3)];
+  const half = pin.length / 2;
+  return [pin.slice(0, half), pin.slice(half)];
 }
 
 /**
@@ -660,10 +665,10 @@ function loadSettings() {
   }
 
   const savedStaticPin = localStorage.getItem(STORAGE_KEYS.STATIC_PIN);
-  if (savedStaticPin !== null) {
-    staticPinInput.value = savedStaticPin;
+  if (savedStaticPin) {
+    staticPinInput.value = codeGroups(savedStaticPin).join("-");
   }
-  staticPinBothEl.hidden = !isValidStaticPin(staticPinInput.value);
+  staticPinBothEl.hidden = !isValidStaticPin(staticPinDigits());
 
   for (const [inputs, key] of [
     [staticPinLocationInputs, STORAGE_KEYS.STATIC_PIN_LOCATIONS],
@@ -840,8 +845,8 @@ async function connect() {
       },
       unpairedAccess: unpairedAccessCheckbox.checked,
       // Enables static pairing only once the field holds a complete code.
-      staticPairingCode: isValidStaticPin(staticPinInput.value)
-        ? staticPinInput.value
+      staticPairingCode: isValidStaticPin(staticPinDigits())
+        ? staticPinDigits()
         : undefined,
       // Omitted entirely when nothing is picked: the hint is optional.
       staticPairingCodeLocations: selectedLocations(staticPinLocationInputs),
@@ -1102,12 +1107,13 @@ function init() {
     showToast("Pairing token rotated", "success");
   });
   staticPinInput.addEventListener("change", () => {
-    const pin = staticPinInput.value.trim();
+    const pin = staticPinDigits();
     staticPinBothEl.hidden = !isValidStaticPin(pin);
     if (pin && !isValidStaticPin(pin)) {
       showToast("Static pairing code must be exactly 8 digits", "error");
       return;
     }
+    if (pin) staticPinInput.value = codeGroups(pin).join("-");
     localStorage.setItem(STORAGE_KEYS.STATIC_PIN, pin);
     if (player)
       showToast("Static pairing code applies on the next connect", "info");
