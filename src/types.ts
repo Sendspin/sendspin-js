@@ -637,8 +637,10 @@ export interface SendspinCoreConfig {
    * The default of 0 means audio leaves the audio output port at the instant the
    * server stamped it for, matching the protocol default. Only set this to
    * compensate for latency the SDK cannot see (an amplifier, external speakers,
-   * a Bluetooth link), not for browser output latency, which is measured and
-   * compensated automatically via `useOutputLatencyCompensation`.
+   * a Bluetooth link, an Android phone's built-in speaker), not for browser
+   * output latency, which is measured and compensated automatically via
+   * `useOutputLatencyCompensation`. An Android phone's built-in speaker usually
+   * needs about 10 to 25 ms.
    *
    * Server-commanded delays (set_output_delay) are persisted via `storage` and
    * restored on the next connect. Passing `syncDelay` explicitly overrides any
