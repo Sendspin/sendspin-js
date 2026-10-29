@@ -3,7 +3,6 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 import { createInterface, type Interface } from "node:readline";
-import { KNOWN_VIOLATIONS } from "./known-violations";
 
 const PYTHON_BIN = resolve(import.meta.dirname, "../../.venv/bin/python");
 const SERVER_SCRIPT = resolve(import.meta.dirname, "sendspin-server.py");
@@ -378,7 +377,7 @@ export class AiosendspinServer {
     this.port = 0;
   }
 
-  /** Stop the server, then fail `test` on non-compliance outside the known list. */
+  /** Stop the server, then fail `test` on any logged non-compliance. */
   async close(test: { name: string; fails?: boolean }): Promise<void> {
     await this.stopProcess();
     const stateDir = this.stateDir;
@@ -386,12 +385,8 @@ export class AiosendspinServer {
     if (stateDir.startsWith(STATE_PREFIX)) {
       await rm(stateDir, { recursive: true, force: true });
     }
-    const unknown = this.noncompliance.filter(
-      (message) =>
-        !KNOWN_VIOLATIONS.some((known) => message.includes(known.message)),
-    );
-    if (!unknown.length) return;
-    const error = `Server logged unknown non-compliance:\n${unknown.join("\n")}`;
+    if (!this.noncompliance.length) return;
+    const error = `Server logged non-compliance:\n${this.noncompliance.join("\n")}`;
     if (!test.fails) throw new Error(error);
     deferredViolations.push(`${test.name}: ${error}`);
   }

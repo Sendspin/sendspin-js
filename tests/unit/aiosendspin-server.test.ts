@@ -45,11 +45,12 @@ describe("awaitProcessExit", () => {
 });
 
 describe("non-compliance check", () => {
-  const unknownLine = JSON.stringify({
+  const rejectionLine = JSON.stringify({
     log: {
-      level: "WARNING",
+      level: "ERROR",
       name: "aiosendspin",
-      message: "non-compliant client Test: client/hello sent an unlisted field",
+      message:
+        "rejecting non-compliant client Test: client/hello sent an undefined field",
     },
   });
 
@@ -59,18 +60,18 @@ describe("non-compliance check", () => {
     return server;
   }
 
-  it("fails a normal test on unlisted non-compliance", async () => {
+  it("fails a normal test on non-compliance", async () => {
     await expect(
-      serverThatLogged(unknownLine).close({ name: "normal" }),
-    ).rejects.toThrow(/unlisted field/);
+      serverThatLogged(rejectionLine).close({ name: "normal" }),
+    ).rejects.toThrow(/undefined field/);
   });
 
-  it("defers unlisted non-compliance from an it.fails test and reports it once", async () => {
-    await serverThatLogged(unknownLine).close({
+  it("defers non-compliance from an it.fails test and reports it once", async () => {
+    await serverThatLogged(rejectionLine).close({
       name: "expected",
       fails: true,
     });
-    expect(reportDeferredViolations).toThrow(/expected: .*unlisted field/s);
+    expect(reportDeferredViolations).toThrow(/expected: .*undefined field/s);
     expect(reportDeferredViolations).not.toThrow();
   });
 });
