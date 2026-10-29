@@ -77,7 +77,7 @@ describe("SendspinCore E2E (aiosendspin)", () => {
     } = {},
   ): Promise<SendspinCore> {
     core = new SendspinCore({
-      baseUrl: server.url,
+      url: server.url,
       clientName: "E2E Test Player",
       codecs: config.codecs ?? ["pcm"],
       syncDelay: config.syncDelay,

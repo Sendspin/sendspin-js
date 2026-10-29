@@ -40,7 +40,7 @@
               spellcheck="false"
               value=""
             />
-            <small id="server-url-hint">Enter the Sendspin server URL</small>
+            <small id="server-url-hint">Enter the Sendspin server URL, such as 192.168.1.20 (resolves to ws://192.168.1.20:8927/sendspin) or wss://ma.example.com/sendspin</small>
           </div>
           <div class="button-group">
             <button id="connect-btn" class="btn btn-primary">Connect</button>
@@ -400,7 +400,7 @@
               type="text"
               id="static-pin"
               inputmode="numeric"
-              maxlength="8"
+              maxlength="9"
               placeholder="unset"
             />
             <button id="open-pairing-window" class="btn btn-secondary">
