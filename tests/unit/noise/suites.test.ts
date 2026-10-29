@@ -28,8 +28,8 @@ describe.each(["chacha", "aesgcm"] as const)("suite %s", (id) => {
   });
 });
 
-import { chacha20poly1305 } from "@noble/ciphers/chacha";
-import { gcm } from "@noble/ciphers/aes";
+import { chacha20poly1305 } from "@noble/ciphers/chacha.js";
+import { gcm } from "@noble/ciphers/aes.js";
 
 describe("nonce endianness (interop)", () => {
   const key = new Uint8Array(32).fill(3);

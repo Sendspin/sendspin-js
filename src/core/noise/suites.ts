@@ -1,7 +1,7 @@
-import { x25519 } from "@noble/curves/ed25519";
-import { chacha20poly1305 } from "@noble/ciphers/chacha";
-import { gcm } from "@noble/ciphers/aes";
-import { sha256 } from "@noble/hashes/sha2";
+import { x25519 } from "@noble/curves/ed25519.js";
+import { chacha20poly1305 } from "@noble/ciphers/chacha.js";
+import { gcm } from "@noble/ciphers/aes.js";
+import { sha256 } from "@noble/hashes/sha2.js";
 
 export type SuiteId = "chacha" | "aesgcm";
 

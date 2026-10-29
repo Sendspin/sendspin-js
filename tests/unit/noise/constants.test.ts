@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { bytesToHex } from "@noble/hashes/utils";
+import { bytesToHex } from "@noble/hashes/utils.js";
 import {
   SENTINEL_PSK,
   SENTINEL_PSK_ID,

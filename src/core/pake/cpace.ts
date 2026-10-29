@@ -2,9 +2,9 @@
 // with the explicit mutual-confirmation flow (MCF) of §10.4. The Sendspin
 // server is role A (initiator) and the client is role B (responder).
 
-import { x25519 } from "@noble/curves/ed25519";
-import { sha512 } from "@noble/hashes/sha2";
-import { hmac } from "@noble/hashes/hmac";
+import { x25519 } from "@noble/curves/ed25519.js";
+import { sha512 } from "@noble/hashes/sha2.js";
+import { hmac } from "@noble/hashes/hmac.js";
 
 // Curve25519 field and Elligator2 parameters (draft G_X25519).
 const Q = 2n ** 255n - 19n;
