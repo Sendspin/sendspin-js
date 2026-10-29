@@ -1,6 +1,6 @@
 // Dynamic-PIN derivation and commitment (Sendspin pairing spec).
 
-import { sha256 } from "@noble/hashes/sha2";
+import { sha256 } from "@noble/hashes/sha2.js";
 
 const PAIRING_CODE_DERIVE_LABEL = new TextEncoder().encode(
   "sendspin-pairing-code-derive-v1",

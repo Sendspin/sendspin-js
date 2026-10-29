@@ -20,7 +20,7 @@ import {
   deriveQrPairingCode,
 } from "../../src/core/pake/pin";
 import { SUITES } from "../../src/core/noise/suites";
-import { sha256 } from "@noble/hashes/sha2";
+import { sha256 } from "@noble/hashes/sha2.js";
 
 const utf8 = (s: string) => new TextEncoder().encode(s);
 const EMPTY = new Uint8Array(0);

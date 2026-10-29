@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { hexToBytes, bytesToHex } from "@noble/hashes/utils";
+import { hexToBytes, bytesToHex } from "@noble/hashes/utils.js";
 import { SUITES, type SuiteId } from "../../../src/core/noise/suites";
 import { HandshakeState, MSG1, MSG2 } from "../../../src/core/noise/handshake";
 import { NoiseSession } from "../../../src/core/noise/session";

@@ -19,7 +19,7 @@ import {
   generateNonce,
   isValidStaticPairingCode,
 } from "./pake/pin";
-import { sha256 } from "@noble/hashes/sha2";
+import { sha256 } from "@noble/hashes/sha2.js";
 import { encodeQrCodeToken } from "./noise/pairing-token";
 
 export type PairingEvent = "pending" | "started" | "finalized" | "aborted";
