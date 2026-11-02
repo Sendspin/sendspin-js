@@ -374,6 +374,10 @@ The session converts timestamps between the server clock and the local clock,
 in microseconds of `performance.now()` (`computeClientTime`,
 `computeServerTime`). Check `timeSyncInfo.synced` before relying on them.
 
+A role can also stream to the server with `startClientStream` and
+`endClientStream`. When the server removes a role whose stream to the server
+is open, the SDK ends that stream for it.
+
 ## Local development
 
 ```

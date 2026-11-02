@@ -14,6 +14,7 @@ interface ApplicationRoleDeps {
 
 interface Activation {
   streamActive: boolean;
+  clientStreamOpen: boolean;
 }
 
 const familyOf = (id: string): string => id.split("@")[0];
@@ -74,15 +75,18 @@ export class ApplicationRoles {
 
   /** Returns whether a role was added. */
   applyActivation(activeRoles: ReadonlySet<string>): boolean {
-    for (const role of this.active.keys()) {
+    for (const [role, activation] of this.active) {
       if (activeRoles.has(role.id)) continue;
       this.active.delete(role);
+      if (activation.clientStreamOpen) {
+        this.deps.sendControl(clientStreamEnd(role), role.id);
+      }
       call(role, "onDeactivate", () => role.onDeactivate?.());
     }
     let added = false;
     for (const role of this.roles) {
       if (!activeRoles.has(role.id) || this.active.has(role)) continue;
-      const activation = { streamActive: false };
+      const activation = { streamActive: false, clientStreamOpen: false };
       this.active.set(role, activation);
       added = true;
       const session = this.createSession(role, activation);
@@ -209,6 +213,19 @@ export class ApplicationRoles {
         }
         if (isActive()) deps.sendBinary(id, data, role.id);
       },
+      startClientStream(config) {
+        if (!isActive()) return;
+        activation.clientStreamOpen = true;
+        deps.sendControl(
+          { type: "client-stream/start", payload: { [family]: config } },
+          role.id,
+        );
+      },
+      endClientStream() {
+        if (!isActive()) return;
+        activation.clientStreamOpen = false;
+        deps.sendControl(clientStreamEnd(role), role.id);
+      },
       computeClientTime: (serverTimeUs) => deps.computeClientTime(serverTimeUs),
       computeServerTime: (clientTimeUs) => deps.computeServerTime(clientTimeUs),
     };
@@ -226,4 +243,11 @@ function call<T>(
     console.error(`Sendspin: application role ${role.id} ${hook} threw`, e);
     return undefined;
   }
+}
+
+function clientStreamEnd(role: ApplicationRole): object {
+  return {
+    type: "client-stream/end",
+    payload: { roles: [familyOf(role.id)] },
+  };
 }

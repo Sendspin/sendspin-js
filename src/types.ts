@@ -616,6 +616,9 @@ export interface ApplicationRoleSession {
   sendState(): void;
   /** Throws when the ID is not in the role's binaryMessageIds. */
   sendBinaryMessage(id: number, data: Uint8Array): void;
+  /** Open the role's client-to-server stream, or update its configuration while open. */
+  startClientStream(config: object): void;
+  endClientStream(): void;
   computeClientTime(serverTimeUs: number): number;
   computeServerTime(clientTimeUs: number): number;
 }

@@ -182,6 +182,35 @@ describe("application role activation", () => {
     expect(t.sendBinary).not.toHaveBeenCalled();
   });
 
+  it("ends an open client stream before deactivating a removed role", () => {
+    const role = makeRole(DISPLAY_V1);
+    const t = track(setup([role]));
+    t.activate([DISPLAY_V1]);
+    role.session!.startClientStream({ codec: "pcm" });
+    expect(t.sendControl).toHaveBeenLastCalledWith(
+      {
+        type: "client-stream/start",
+        payload: { _example_display: { codec: "pcm" } },
+      },
+      DISPLAY_V1,
+    );
+
+    t.activate([]);
+
+    const end = t.sent("client-stream/end");
+    expect(end).toEqual([
+      [
+        { type: "client-stream/end", payload: { roles: ["_example_display"] } },
+        DISPLAY_V1,
+      ],
+    ]);
+    expect(
+      t.sendControl.mock.invocationCallOrder[
+        t.sendControl.mock.calls.indexOf(end[0])
+      ],
+    ).toBeLessThan(vi.mocked(role.onDeactivate!).mock.invocationCallOrder[0]);
+  });
+
   it("keeps roles active across a re-handshake and deactivates them on close", () => {
     const role = makeRole(DISPLAY_V1);
     const t = track(setup([role]));

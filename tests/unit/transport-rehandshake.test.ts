@@ -303,6 +303,34 @@ describe("transport re-handshake", () => {
     expect(Array.from(replayed)).toEqual([200, 1, 2, 3]);
   });
 
+  it("replays a held client-stream/end of a removed role before the activation is applied", () => {
+    const { h, newServerSession } = setupRehandshake();
+    const before = fakeWsSend(h).binary.length;
+    const end = {
+      type: "client-stream/end",
+      payload: { roles: ["_example_mic"] },
+    };
+    const start = {
+      type: "client-stream/start",
+      payload: { _example_mic: {} },
+    };
+    h.transport.sendControl(end, "_example_mic@v1");
+    h.cb.onControlMessage.mockImplementation(() =>
+      h.transport.sendControl(start, "_example_mic@v2"),
+    );
+
+    deliverActivate(h, newServerSession, ["playback"], ["_example_mic@v2"]);
+
+    const sent = fakeWsSend(h)
+      .binary.slice(before)
+      .map((frame) =>
+        JSON.parse(
+          new TextDecoder().decode(newServerSession.decrypt(frame).subarray(1)),
+        ),
+      );
+    expect(sent).toEqual([end, start]);
+  });
+
   it("ends the hold and hands a refused pairing activation to onActivateRefused", () => {
     const { h, newServerSession } = setupRehandshake(undefined, true);
     h.cb.onActivateRefused.mockImplementation(() =>

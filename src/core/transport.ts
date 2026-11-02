@@ -89,8 +89,12 @@ export class SendspinTransport {
     null;
   private lastHandshakeHash: Uint8Array = new Uint8Array(0);
   private quiesced = false;
-  private outboundQueue: { type: number; body: Uint8Array; role?: string }[] =
-    [];
+  private outboundQueue: {
+    type: number;
+    body: Uint8Array;
+    role?: string;
+    alwaysReplay: boolean;
+  }[] = [];
   private activeRoles: string[] = [];
 
   constructor(
@@ -425,12 +429,18 @@ export class SendspinTransport {
     }
     this.activeRoles = result.activeRoles;
     this.clearTimeout();
-    const replay = this.outboundQueue.filter(
-      (queued) =>
-        queued.role !== undefined && this.activeRoles.includes(queued.role),
+    const isActive = (queued: { role?: string }) =>
+      queued.role !== undefined && this.activeRoles.includes(queued.role);
+    const removedRoleEnds = this.outboundQueue.filter(
+      (queued) => queued.alwaysReplay && !isActive(queued),
     );
+    const replay = this.outboundQueue.filter(isActive);
     this.quiesced = false;
     this.outboundQueue = [];
+    // Sent before the activation, which may open a stream for a newer version of the role.
+    for (const queued of removedRoleEnds) {
+      this.encryptSend(queued.type, queued.body);
+    }
     if (result.ok) {
       this.cb.onControlMessage(
         {
@@ -463,19 +473,22 @@ export class SendspinTransport {
 
   /** A message held during a re-handshake is replayed only if `role` is still active. */
   sendControl(msg: object, role?: string): void {
+    const type = (msg as { type?: string }).type;
     // client/hello still flows during a re-handshake, since a non-compliant
     // server re-sends server/hello and awaits client/hello before the
-    // post-re-handshake server/activate.
+    // post-re-handshake server/activate. A removed role still owes its
+    // client-stream/end, so a held one is replayed regardless of the roles.
     this.send(
       0,
       utf8.encode(JSON.stringify(msg)),
       role,
-      (msg as { type?: string }).type !== "client/hello",
+      type !== "client/hello",
+      type === "client-stream/end",
     );
   }
 
   sendBinary(type: number, data: Uint8Array, role: string): void {
-    this.send(type, data, role, true);
+    this.send(type, data, role, true, false);
   }
 
   private send(
@@ -483,6 +496,7 @@ export class SendspinTransport {
     body: Uint8Array,
     role: string | undefined,
     holdable: boolean,
+    alwaysReplay: boolean,
   ): void {
     if (this.state !== "transport" || !this.session) {
       console.warn("Sendspin: send before transport ready");
@@ -490,7 +504,7 @@ export class SendspinTransport {
     }
     // Hold outbound traffic during a re-handshake, copied since the caller may reuse its buffer.
     if (this.quiesced && holdable) {
-      this.outboundQueue.push({ type, body: body.slice(), role });
+      this.outboundQueue.push({ type, body: body.slice(), role, alwaysReplay });
       return;
     }
     this.encryptSend(type, body);
