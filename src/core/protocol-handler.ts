@@ -221,6 +221,8 @@ export class ProtocolHandler {
       if (this.applicationRoles?.applyActivation(nextRoles)) {
         this.lastSentState = null;
       }
+      // A role callback disconnected.
+      if (this.activeRoles !== nextRoles) return;
     }
     if (this.activated) {
       if (rolesChanged) this.sendStateUpdate();

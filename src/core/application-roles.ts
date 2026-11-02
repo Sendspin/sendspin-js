@@ -91,6 +91,7 @@ export class ApplicationRoles {
       added = true;
       const session = this.createSession(role, activation);
       call(role, "onActivate", () => role.onActivate?.(session));
+      if (this.active.get(role) !== activation) break;
     }
     return added;
   }

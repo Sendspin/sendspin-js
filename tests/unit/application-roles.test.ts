@@ -227,6 +227,19 @@ describe("application role activation", () => {
     expect(role.onDeactivate).toHaveBeenCalledTimes(1);
   });
 
+  it("stops activating when a role disconnects from onActivate", () => {
+    const first = makeRole(DISPLAY_V1, {
+      onActivate: () => t.core.disconnect(),
+    });
+    const second = makeRole("_example_light@v1", { binaryMessageIds: [] });
+    const t = track(setup([first, second]));
+
+    t.activate([DISPLAY_V1, "_example_light@v1"]);
+
+    expect(second.onActivate).not.toHaveBeenCalled();
+    expect(t.sent("client/time")).toHaveLength(0);
+  });
+
   it("finishes activation when a role callback throws", () => {
     const broken = makeRole(DISPLAY_V1, {
       onActivate: () => {
