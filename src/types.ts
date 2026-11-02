@@ -571,6 +571,59 @@ export interface ReconnectConfig {
 }
 
 /**
+ * An application-specific role, advertised in client/hello after the built-in
+ * roles. Callbacks are called as methods, so a class instance works.
+ */
+export interface ApplicationRole {
+  /** Role name with an explicit version, starting with "_", such as "_example_display@v1". */
+  id: string;
+  /** Support object sent in client/hello under "<id>_support". */
+  support?: object;
+  /** Binary message IDs (192-255) the role sends or receives. Versions of one family may share IDs, other families may not. */
+  binaryMessageIds?: number[];
+  /** The role's client/state object, read for every client/state while the role is active. */
+  getState?(): object;
+  /** Called before the client/state the activation requires. */
+  onActivate?(session: ApplicationRoleSession): void;
+  /**
+   * Called when the server removes the role or the connection closes. Stop all
+   * output, clear buffers and drop the role's server state.
+   */
+  onDeactivate?(): void;
+  onServerState?(state: unknown): void;
+  onServerCommand?(command: unknown): void;
+  onStreamStart?(
+    config: unknown,
+    isUpdate: boolean,
+    serverTransmittedUs: number,
+  ): void;
+  onStreamClear?(serverTransmittedUs: number): void;
+  onStreamEnd?(): void;
+  /** data excludes the message ID byte. receivedAtUs is on the local clock. */
+  onBinaryMessage?(id: number, data: Uint8Array, receivedAtUs: number): void;
+}
+
+/**
+ * Lets an active application-specific role talk to the server. Sends do
+ * nothing once the role is no longer active. Local times are
+ * performance.now() in microseconds.
+ */
+export interface ApplicationRoleSession {
+  /** The server/hello "<id>_support" object, if the server sent one. */
+  readonly serverSupport: unknown;
+  sendCommand(command: object): void;
+  /** Send client/state now if it changed. */
+  sendState(): void;
+  /** Throws when the ID is not in the role's binaryMessageIds. */
+  sendBinaryMessage(id: number, data: Uint8Array): void;
+  /** Open the role's client-to-server stream, or update its configuration while open. */
+  startClientStream(config: object): void;
+  endClientStream(): void;
+  computeClientTime(serverTimeUs: number): number;
+  computeServerTime(clientTimeUs: number): number;
+}
+
+/**
  * Configuration for SendspinCore (protocol + decoding, no playback).
  */
 export interface SendspinCoreConfig {
@@ -797,6 +850,9 @@ export interface SendspinCoreConfig {
    * Print it only as a QR code of pairingToken.
    */
   pairingPskLocations?: PairSecretLocation[];
+
+  /** Application-specific roles to advertise and serve, in preference order. */
+  applicationRoles?: ApplicationRole[];
 
   /** Callback when player state changes (local or from server). */
   onStateChange?: (state: {

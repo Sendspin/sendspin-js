@@ -104,6 +104,7 @@ export class SendspinPlayer {
       suite: config.suite,
       unpairedAccess: config.unpairedAccess,
       longTermPsks: config.longTermPsks,
+      applicationRoles: config.applicationRoles,
     });
 
     const syncDelay = this.core.getSyncDelayMs();

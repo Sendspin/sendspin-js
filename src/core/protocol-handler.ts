@@ -26,6 +26,7 @@ import { clampVolume, type StateManager } from "./state-manager";
 import { TimeSyncManager } from "./time-sync-manager";
 import { getDefaultBufferCapacity, getSupportedFormats } from "./codec-support";
 import { clampSyncDelayMs } from "../sync-delay";
+import type { ApplicationRoles } from "./application-roles";
 
 // Constants
 const STATE_UPDATE_INTERVAL = 5000; // 5 seconds
@@ -43,7 +44,7 @@ function toBufferMs(value: number, name: string): number {
 }
 
 export interface MessageSender {
-  sendControl(msg: object): void;
+  sendControl(msg: object, role?: string): void;
 }
 
 export interface HelloContext {
@@ -64,6 +65,7 @@ export interface ProtocolHandlerConfig {
   onVolumeCommand?: (volume: number, muted: boolean) => void;
   onDelayCommand?: (delayMs: number) => void;
   getExternalVolume?: () => { volume: number; muted: boolean };
+  applicationRoles?: ApplicationRoles;
 }
 
 export class ProtocolHandler {
@@ -79,6 +81,7 @@ export class ProtocolHandler {
   private onVolumeCommand?: (volume: number, muted: boolean) => void;
   private onDelayCommand?: (delayMs: number) => void;
   private getExternalVolume?: () => { volume: number; muted: boolean };
+  private applicationRoles?: ApplicationRoles;
   private timeSyncManager: TimeSyncManager;
   private activated = false;
   private activeRoles: Set<string> | null = null;
@@ -115,6 +118,7 @@ export class ProtocolHandler {
     this.onVolumeCommand = config.onVolumeCommand;
     this.onDelayCommand = config.onDelayCommand;
     this.getExternalVolume = config.getExternalVolume;
+    this.applicationRoles = config.applicationRoles;
     this.timeSyncManager = new TimeSyncManager(
       sender,
       stateManager,
@@ -213,6 +217,12 @@ export class ProtocolHandler {
       this.stateManager.discardRoleState(
         removedRoles.map((role) => role.split("@")[0]),
       );
+      // A version swap can leave client/state unchanged, but the server still needs one.
+      if (this.applicationRoles?.applyActivation(nextRoles)) {
+        this.lastSentState = null;
+      }
+      // A role callback disconnected.
+      if (this.activeRoles !== nextRoles) return;
     }
     if (this.activated) {
       if (rolesChanged) this.sendStateUpdate();
@@ -252,7 +262,10 @@ export class ProtocolHandler {
    */
   resetActivation(preserveActiveRoles = false): void {
     this.activated = false;
-    if (!preserveActiveRoles) this.activeRoles = null;
+    if (!preserveActiveRoles) {
+      this.activeRoles = null;
+      this.applicationRoles?.deactivateAll();
+    }
     this.timeSyncManager.stop();
     this.stateManager.clearStateUpdateInterval();
   }
@@ -382,7 +395,12 @@ export class ProtocolHandler {
       type: "client/hello" as MessageType.CLIENT_HELLO,
       payload: {
         name: this.clientName,
-        supported_roles: ["player@v1", "controller@v1", "metadata@v1"],
+        supported_roles: [
+          "player@v1",
+          "controller@v1",
+          "metadata@v1",
+          ...(this.applicationRoles?.supportedRoles ?? []),
+        ],
         supported_pair_methods: this.helloContext.pairMethods(),
         unpaired_access: { enabled: this.helloContext.unpairedAccess },
         device_info: {
@@ -395,6 +413,7 @@ export class ProtocolHandler {
           buffer_capacity:
             this.bufferCapacity ?? getDefaultBufferCapacity(supportedFormats),
         },
+        ...this.applicationRoles?.helloSupport,
       },
     };
     this.sender.sendControl(hello);
@@ -437,6 +456,7 @@ export class ProtocolHandler {
         supported_commands: [...PLAYER_COMMANDS],
       };
     }
+    Object.assign(payload, this.applicationRoles?.clientStateObjects());
 
     const serialized = JSON.stringify(payload);
     if (serialized === this.lastSentState) return;
@@ -488,14 +508,17 @@ export class ProtocolHandler {
       const { offset_ms } = params as ControllerCommands["seek_relative"];
       fields = { offset_ms: Math.round(offset_ms) };
     }
-    this.sender.sendControl({
-      type: "client/command" as MessageType.CLIENT_COMMAND,
-      payload: {
-        controller: {
-          command,
-          ...fields,
+    this.sender.sendControl(
+      {
+        type: "client/command" as MessageType.CLIENT_COMMAND,
+        payload: {
+          controller: {
+            command,
+            ...fields,
+          },
         },
-      },
-    } satisfies ClientCommand);
+      } satisfies ClientCommand,
+      "controller@v1",
+    );
   }
 }

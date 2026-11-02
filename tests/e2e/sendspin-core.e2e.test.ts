@@ -20,7 +20,12 @@ import {
   reportDeferredViolations,
 } from "../helpers/aiosendspin-server";
 import { SendspinCore } from "../../src/core/core";
-import type { DecodedAudioChunk, StreamFormat } from "../../src/types";
+import type {
+  ApplicationRole,
+  ApplicationRoleSession,
+  DecodedAudioChunk,
+  StreamFormat,
+} from "../../src/types";
 
 // Polyfill browser globals that the SDK expects
 if (typeof globalThis.WebSocket === "undefined") {
@@ -74,6 +79,7 @@ describe("SendspinCore E2E (aiosendspin)", () => {
       codecs?: ("pcm" | "opus" | "flac")[];
       syncDelay?: number;
       onStateChange?: any;
+      applicationRoles?: ApplicationRole[];
     } = {},
   ): Promise<SendspinCore> {
     core = new SendspinCore({
@@ -82,6 +88,7 @@ describe("SendspinCore E2E (aiosendspin)", () => {
       codecs: config.codecs ?? ["pcm"],
       syncDelay: config.syncDelay,
       onStateChange: config.onStateChange,
+      applicationRoles: config.applicationRoles,
     });
     await server.trustUnpaired(core.clientId);
 
@@ -402,6 +409,56 @@ describe("SendspinCore E2E (aiosendspin)", () => {
       core!.leaveGroup();
       await waitFor(() => events.includes("stream-end"), 3000);
       expect(core!.isPlaying).toBe(false);
+    });
+  });
+
+  // ===== Application-specific roles =====
+
+  describe("application-specific roles", () => {
+    it("exchanges state, commands, stream config and binary with the server", async () => {
+      let session: ApplicationRoleSession | null = null;
+      const received: Record<string, unknown> = {};
+      await connectCore({
+        applicationRoles: [
+          {
+            id: "_sendspinjs_echo@v1",
+            support: { version: 1 },
+            binaryMessageIds: [200, 201],
+            getState: () => ({ ready: true }),
+            onActivate: (s) => (session = s),
+            onServerState: (state) => (received.state = state),
+            onServerCommand: (command) => (received.command = command),
+            onStreamStart: (config) => (received.stream = config),
+            onBinaryMessage: (id, data) =>
+              (received.binary = [id, ...Array.from(data)]),
+          },
+        ],
+      });
+      expect((await server.status()).active_roles).toContain(
+        "_sendspinjs_echo@v1",
+      );
+
+      await server.echoSend();
+      await waitFor(() => received.binary !== undefined, 3000);
+      expect(received).toEqual({
+        state: { text: "hi" },
+        command: { command: "ping" },
+        stream: { rate: 5 },
+        binary: [201, 1, 2, 3],
+      });
+
+      // The server expects the source audio layout: an int64 timestamp header.
+      const timestamp = new Uint8Array(8);
+      new DataView(timestamp.buffer).setBigInt64(0, 42n);
+      session!.sendCommand({ command: "pong" });
+      session!.sendBinaryMessage(200, Uint8Array.of(...timestamp, 7, 8));
+
+      expect(await server.echoReceived()).toEqual({
+        support: { version: 1 },
+        client_state: { ready: true },
+        commands: [{ command: "pong" }],
+        binary: [{ timestamp_us: 42, data: [7, 8] }],
+      });
     });
   });
 

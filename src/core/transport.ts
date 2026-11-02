@@ -41,7 +41,7 @@ export interface TransportCallbacks {
     msg: { type: string; payload?: unknown },
     receivedAtUs: number,
   ): void;
-  onBinaryMessage(bytes: Uint8Array): void;
+  onBinaryMessage(bytes: Uint8Array, receivedAtUs: number): void;
   onActivateRefused(activeRoles: string[]): void;
 }
 
@@ -89,7 +89,12 @@ export class SendspinTransport {
     null;
   private lastHandshakeHash: Uint8Array = new Uint8Array(0);
   private quiesced = false;
-  private outboundQueue: object[] = [];
+  private outboundQueue: {
+    type: number;
+    body: Uint8Array;
+    role?: string;
+    alwaysReplay: boolean;
+  }[] = [];
   private activeRoles: string[] = [];
 
   constructor(
@@ -284,7 +289,7 @@ export class SendspinTransport {
     } else {
       // full is the decrypt output: exclusively owned, offset 0, exact length,
       // type byte intact. Hand it over without re-copying.
-      this.cb.onBinaryMessage(full);
+      this.cb.onBinaryMessage(full, receivedAtUs);
     }
   }
 
@@ -326,7 +331,7 @@ export class SendspinTransport {
         receivedAtUs,
       );
     } else {
-      this.cb.onBinaryMessage(assembled);
+      this.cb.onBinaryMessage(assembled, receivedAtUs);
     }
   }
 
@@ -381,7 +386,7 @@ export class SendspinTransport {
     this.quiesced = true;
     this.armTimeout();
     // Send msg 2 under the CURRENT keys, then swap.
-    this.encryptSend({
+    this.encryptSendJson({
       type: "noise/handshake",
       payload: { data: base64urlEncode(m2) },
     });
@@ -424,13 +429,18 @@ export class SendspinTransport {
     }
     this.activeRoles = result.activeRoles;
     this.clearTimeout();
-    const queuedCommands = this.activeRoles.includes("controller@v1")
-      ? this.outboundQueue.filter(
-          (queued) => (queued as { type?: string }).type === "client/command",
-        )
-      : [];
+    const isActive = (queued: { role?: string }) =>
+      queued.role !== undefined && this.activeRoles.includes(queued.role);
+    const removedRoleEnds = this.outboundQueue.filter(
+      (queued) => queued.alwaysReplay && !isActive(queued),
+    );
+    const replay = this.outboundQueue.filter(isActive);
     this.quiesced = false;
     this.outboundQueue = [];
+    // Sent before the activation, which may open a stream for a newer version of the role.
+    for (const queued of removedRoleEnds) {
+      this.encryptSend(queued.type, queued.body);
+    }
     if (result.ok) {
       this.cb.onControlMessage(
         {
@@ -442,7 +452,7 @@ export class SendspinTransport {
     } else {
       this.cb.onActivateRefused(this.activeRoles);
     }
-    for (const command of queuedCommands) this.encryptSend(command);
+    for (const queued of replay) this.encryptSend(queued.type, queued.body);
   }
 
   private handleUnpair(): void {
@@ -454,51 +464,83 @@ export class SendspinTransport {
 
   private sendGoodbyeAndClose(reason: GoodbyeReason): void {
     try {
-      this.encryptSend({ type: "client/goodbye", payload: { reason } });
+      this.encryptSendJson({ type: "client/goodbye", payload: { reason } });
     } catch {
       /* best effort */
     }
     this.close();
   }
 
-  sendControl(msg: object): void {
-    if (this.state !== "transport" || !this.session) {
-      console.warn("Sendspin: sendControl before transport ready");
-      return;
-    }
-    // Hold outbound traffic during a re-handshake. client/hello still flows, since
-    // a non-compliant server re-sends server/hello and awaits client/hello before
-    // the post-re-handshake server/activate.
-    if (this.quiesced && (msg as { type?: string }).type !== "client/hello") {
-      this.outboundQueue.push(msg);
-      return;
-    }
-    this.encryptSend(msg);
+  /** A message held during a re-handshake is replayed only if `role` is still active. */
+  sendControl(msg: object, role?: string): void {
+    const type = (msg as { type?: string }).type;
+    // client/hello still flows during a re-handshake, since a non-compliant
+    // server re-sends server/hello and awaits client/hello before the
+    // post-re-handshake server/activate. A removed role still owes its
+    // client-stream/end, so a held one is replayed regardless of the roles.
+    this.send(
+      0,
+      utf8.encode(JSON.stringify(msg)),
+      role,
+      type !== "client/hello",
+      type === "client-stream/end",
+    );
   }
 
-  private encryptSend(msg: object): void {
-    const json = utf8.encode(JSON.stringify(msg));
-    if (json.length < MAX_TRANSPORT_PLAINTEXT) {
-      const pt = concat(Uint8Array.of(0), json);
+  sendBinary(type: number, data: Uint8Array, role: string): void {
+    this.send(type, data, role, true, false);
+  }
+
+  private send(
+    type: number,
+    body: Uint8Array,
+    role: string | undefined,
+    holdable: boolean,
+    alwaysReplay: boolean,
+  ): void {
+    if (this.state !== "transport" || !this.session) {
+      console.warn("Sendspin: send before transport ready");
+      return;
+    }
+    // Hold outbound traffic during a re-handshake, copied since the caller may reuse its buffer.
+    if (this.quiesced && holdable) {
+      this.outboundQueue.push({
+        type,
+        body: Uint8Array.from(body),
+        role,
+        alwaysReplay,
+      });
+      return;
+    }
+    this.encryptSend(type, body);
+  }
+
+  private encryptSend(type: number, body: Uint8Array): void {
+    if (body.length < MAX_TRANSPORT_PLAINTEXT) {
+      const pt = concat(Uint8Array.of(type), body);
       this.wsManager.sendBinary(this.session!.encrypt(pt));
       return;
     }
-    for (let start = 0; start < json.length;) {
+    for (let start = 0; start < body.length;) {
       const first = start === 0;
       const end = Math.min(
-        json.length,
+        body.length,
         start + MAX_TRANSPORT_PLAINTEXT - (first ? 3 : 2),
       );
       const flags =
         (first ? FRAGMENT_FLAG_FIRST : 0) |
-        (end === json.length ? FRAGMENT_FLAG_LAST : 0);
+        (end === body.length ? FRAGMENT_FLAG_LAST : 0);
       const header = first
-        ? Uint8Array.of(MSG_TYPE_FRAGMENT, flags, 0)
+        ? Uint8Array.of(MSG_TYPE_FRAGMENT, flags, type)
         : Uint8Array.of(MSG_TYPE_FRAGMENT, flags);
-      const pt = concat(header, json.subarray(start, end));
+      const pt = concat(header, body.subarray(start, end));
       this.wsManager.sendBinary(this.session!.encrypt(pt));
       start = end;
     }
+  }
+
+  private encryptSendJson(msg: object): void {
+    this.encryptSend(0, utf8.encode(JSON.stringify(msg)));
   }
 
   private armTimeout(): void {

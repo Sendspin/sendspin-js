@@ -93,4 +93,23 @@ describe("transport frame validation", () => {
       msg,
     );
   });
+
+  it("fragments an outbound binary message under its own message ID", () => {
+    const h = harness();
+    const { serverSession } = completeHandshake(h);
+    const data = new Uint8Array(70000).map((_, i) => i & 0xff);
+    h.transport.sendBinary(200, data, "_example_display@v1");
+
+    const frames = h.ws.sentBinary.map((ct) => serverSession.decrypt(ct));
+    expect(frames.map((f) => [f[0], f[1]])).toEqual([
+      [1, 0x02],
+      [1, 0x01],
+    ]);
+    expect(frames[0][2]).toBe(200);
+    expect(
+      Uint8Array.from(
+        frames.flatMap((f, i) => Array.from(f.subarray(i ? 2 : 3))),
+      ),
+    ).toEqual(data);
+  });
 });
