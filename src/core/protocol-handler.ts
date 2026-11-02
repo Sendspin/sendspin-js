@@ -43,7 +43,7 @@ function toBufferMs(value: number, name: string): number {
 }
 
 export interface MessageSender {
-  sendControl(msg: object): void;
+  sendControl(msg: object, role?: string): void;
 }
 
 export interface HelloContext {
@@ -488,14 +488,17 @@ export class ProtocolHandler {
       const { offset_ms } = params as ControllerCommands["seek_relative"];
       fields = { offset_ms: Math.round(offset_ms) };
     }
-    this.sender.sendControl({
-      type: "client/command" as MessageType.CLIENT_COMMAND,
-      payload: {
-        controller: {
-          command,
-          ...fields,
+    this.sender.sendControl(
+      {
+        type: "client/command" as MessageType.CLIENT_COMMAND,
+        payload: {
+          controller: {
+            command,
+            ...fields,
+          },
         },
-      },
-    } satisfies ClientCommand);
+      } satisfies ClientCommand,
+      "controller@v1",
+    );
   }
 }

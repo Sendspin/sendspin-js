@@ -89,7 +89,8 @@ export class SendspinTransport {
     null;
   private lastHandshakeHash: Uint8Array = new Uint8Array(0);
   private quiesced = false;
-  private outboundQueue: object[] = [];
+  private outboundQueue: { type: number; body: Uint8Array; role?: string }[] =
+    [];
   private activeRoles: string[] = [];
 
   constructor(
@@ -381,7 +382,7 @@ export class SendspinTransport {
     this.quiesced = true;
     this.armTimeout();
     // Send msg 2 under the CURRENT keys, then swap.
-    this.encryptSend({
+    this.encryptSendJson({
       type: "noise/handshake",
       payload: { data: base64urlEncode(m2) },
     });
@@ -424,11 +425,10 @@ export class SendspinTransport {
     }
     this.activeRoles = result.activeRoles;
     this.clearTimeout();
-    const queuedCommands = this.activeRoles.includes("controller@v1")
-      ? this.outboundQueue.filter(
-          (queued) => (queued as { type?: string }).type === "client/command",
-        )
-      : [];
+    const replay = this.outboundQueue.filter(
+      (queued) =>
+        queued.role !== undefined && this.activeRoles.includes(queued.role),
+    );
     this.quiesced = false;
     this.outboundQueue = [];
     if (result.ok) {
@@ -442,7 +442,7 @@ export class SendspinTransport {
     } else {
       this.cb.onActivateRefused(this.activeRoles);
     }
-    for (const command of queuedCommands) this.encryptSend(command);
+    for (const queued of replay) this.encryptSend(queued.type, queued.body);
   }
 
   private handleUnpair(): void {
@@ -454,51 +454,56 @@ export class SendspinTransport {
 
   private sendGoodbyeAndClose(reason: GoodbyeReason): void {
     try {
-      this.encryptSend({ type: "client/goodbye", payload: { reason } });
+      this.encryptSendJson({ type: "client/goodbye", payload: { reason } });
     } catch {
       /* best effort */
     }
     this.close();
   }
 
-  sendControl(msg: object): void {
+  /** A message held during a re-handshake is replayed only if `role` is still active. */
+  sendControl(msg: object, role?: string): void {
     if (this.state !== "transport" || !this.session) {
       console.warn("Sendspin: sendControl before transport ready");
       return;
     }
+    const body = utf8.encode(JSON.stringify(msg));
     // Hold outbound traffic during a re-handshake. client/hello still flows, since
     // a non-compliant server re-sends server/hello and awaits client/hello before
     // the post-re-handshake server/activate.
     if (this.quiesced && (msg as { type?: string }).type !== "client/hello") {
-      this.outboundQueue.push(msg);
+      this.outboundQueue.push({ type: 0, body, role });
       return;
     }
-    this.encryptSend(msg);
+    this.encryptSend(0, body);
   }
 
-  private encryptSend(msg: object): void {
-    const json = utf8.encode(JSON.stringify(msg));
-    if (json.length < MAX_TRANSPORT_PLAINTEXT) {
-      const pt = concat(Uint8Array.of(0), json);
+  private encryptSend(type: number, body: Uint8Array): void {
+    if (body.length < MAX_TRANSPORT_PLAINTEXT) {
+      const pt = concat(Uint8Array.of(type), body);
       this.wsManager.sendBinary(this.session!.encrypt(pt));
       return;
     }
-    for (let start = 0; start < json.length;) {
+    for (let start = 0; start < body.length;) {
       const first = start === 0;
       const end = Math.min(
-        json.length,
+        body.length,
         start + MAX_TRANSPORT_PLAINTEXT - (first ? 3 : 2),
       );
       const flags =
         (first ? FRAGMENT_FLAG_FIRST : 0) |
-        (end === json.length ? FRAGMENT_FLAG_LAST : 0);
+        (end === body.length ? FRAGMENT_FLAG_LAST : 0);
       const header = first
-        ? Uint8Array.of(MSG_TYPE_FRAGMENT, flags, 0)
+        ? Uint8Array.of(MSG_TYPE_FRAGMENT, flags, type)
         : Uint8Array.of(MSG_TYPE_FRAGMENT, flags);
-      const pt = concat(header, json.subarray(start, end));
+      const pt = concat(header, body.subarray(start, end));
       this.wsManager.sendBinary(this.session!.encrypt(pt));
       start = end;
     }
+  }
+
+  private encryptSendJson(msg: object): void {
+    this.encryptSend(0, utf8.encode(JSON.stringify(msg)));
   }
 
   private armTimeout(): void {

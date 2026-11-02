@@ -187,10 +187,13 @@ describe("transport re-handshake", () => {
       type: "client/state",
       payload: { available: true, player: { volume: 10 } },
     });
-    h.transport.sendControl({
-      type: "client/command",
-      payload: { controller: { command: "play" } },
-    });
+    h.transport.sendControl(
+      {
+        type: "client/command",
+        payload: { controller: { command: "play" } },
+      },
+      "controller@v1",
+    );
     h.transport.sendControl({
       type: "pair/abort",
       payload: { reason: "user_cancelled" },
@@ -220,10 +223,13 @@ describe("transport re-handshake", () => {
   it("drops a queued command when the controller role stays inactive", () => {
     const { h, newServerSession } = setupRehandshake();
     const before = fakeWsSend(h).binary.length;
-    h.transport.sendControl({
-      type: "client/command",
-      payload: { controller: { command: "play" } },
-    });
+    h.transport.sendControl(
+      {
+        type: "client/command",
+        payload: { controller: { command: "play" } },
+      },
+      "controller@v1",
+    );
     h.transport.sendControl({ type: "client/hello", payload: { name: "Cli" } });
 
     deliverActivate(h, newServerSession, ["playback"], ["player@v1"]);
@@ -234,10 +240,13 @@ describe("transport re-handshake", () => {
   it("retains a queued command when a pairing activation keeps the controller role", () => {
     const { h, newServerSession } = setupRehandshake(undefined, true);
     const before = fakeWsSend(h).binary.length;
-    h.transport.sendControl({
-      type: "client/command",
-      payload: { controller: { command: "play" } },
-    });
+    h.transport.sendControl(
+      {
+        type: "client/command",
+        payload: { controller: { command: "play" } },
+      },
+      "controller@v1",
+    );
 
     deliverActivate(
       h,
@@ -261,10 +270,13 @@ describe("transport re-handshake", () => {
       type: "client/state",
       payload: { available: true },
     });
-    h.transport.sendControl({
-      type: "client/command",
-      payload: { controller: { command: "play" } },
-    });
+    h.transport.sendControl(
+      {
+        type: "client/command",
+        payload: { controller: { command: "play" } },
+      },
+      "controller@v1",
+    );
     h.transport.sendControl({ type: "client/hello", payload: { name: "Cli" } });
     expect(fakeWsSend(h).binary.length).toBe(before + 1);
 
@@ -305,10 +317,13 @@ describe("transport re-handshake", () => {
       true,
     );
     const before = fakeWsSend(h).binary.length;
-    h.transport.sendControl({
-      type: "client/command",
-      payload: { controller: { command: "play" } },
-    });
+    h.transport.sendControl(
+      {
+        type: "client/command",
+        payload: { controller: { command: "play" } },
+      },
+      "controller@v1",
+    );
 
     deliverActivate(
       h,
@@ -337,10 +352,13 @@ describe("transport re-handshake", () => {
       h,
       completeHandshakeWithPsk(h, new Uint8Array(32).fill(31)),
     );
-    h.transport.sendControl({
-      type: "client/command",
-      payload: { controller: { command: "play" } },
-    });
+    h.transport.sendControl(
+      {
+        type: "client/command",
+        payload: { controller: { command: "play" } },
+      },
+      "controller@v1",
+    );
     const before = fakeWsSend(h).binary.length;
 
     deliverActivate(
