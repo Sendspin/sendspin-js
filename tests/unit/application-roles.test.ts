@@ -240,6 +240,19 @@ describe("application role activation", () => {
     expect(t.sent("client/time")).toHaveLength(0);
   });
 
+  it("skips the new version when the old one disconnects from onDeactivate", () => {
+    const v1 = makeRole(DISPLAY_V1, {
+      onDeactivate: () => t.core.disconnect(),
+    });
+    const v2 = makeRole(DISPLAY_V2);
+    const t = track(setup([v2, v1]));
+    t.activate([DISPLAY_V1]);
+
+    t.activate([DISPLAY_V2]);
+
+    expect(v2.onActivate).not.toHaveBeenCalled();
+  });
+
   it("finishes activation when a role callback throws", () => {
     const broken = makeRole(DISPLAY_V1, {
       onActivate: () => {

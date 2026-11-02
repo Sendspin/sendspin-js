@@ -53,6 +53,7 @@ function validate(roles: ApplicationRole[]): void {
 export class ApplicationRoles {
   private active = new Map<ApplicationRole, Activation>();
   private serverHello: Record<string, unknown> = {};
+  private connection = 0;
 
   constructor(
     private roles: ApplicationRole[],
@@ -75,6 +76,7 @@ export class ApplicationRoles {
 
   /** Returns whether a role was added. */
   applyActivation(activeRoles: ReadonlySet<string>): boolean {
+    const connection = this.connection;
     for (const [role, activation] of this.active) {
       if (activeRoles.has(role.id)) continue;
       this.active.delete(role);
@@ -82,6 +84,7 @@ export class ApplicationRoles {
         this.deps.sendControl(clientStreamEnd(role), role.id);
       }
       call(role, "onDeactivate", () => role.onDeactivate?.());
+      if (this.connection !== connection) return false;
     }
     let added = false;
     for (const role of this.roles) {
@@ -91,13 +94,14 @@ export class ApplicationRoles {
       added = true;
       const session = this.createSession(role, activation);
       call(role, "onActivate", () => role.onActivate?.(session));
-      if (this.active.get(role) !== activation) break;
+      if (this.connection !== connection) return false;
     }
     return added;
   }
 
   /** Deactivate every role without messaging the server, which is gone. */
   deactivateAll(): void {
+    this.connection++;
     const roles = [...this.active.keys()];
     this.active.clear();
     for (const role of roles) {
