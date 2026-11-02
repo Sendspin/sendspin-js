@@ -12,7 +12,7 @@ describe("SendspinTimeFilter", () => {
   let filter: SendspinTimeFilter;
 
   beforeEach(() => {
-    filter = new SendspinTimeFilter(0, 1.1, 2.0, 1e-12);
+    filter = new SendspinTimeFilter();
   });
 
   describe("single measurement", () => {
@@ -71,6 +71,15 @@ describe("SendspinTimeFilter", () => {
       const serverTime = filter.computeServerTime(200000);
       // Should be client_time + offset = 200000 + 10000 = 210000
       expect(serverTime).toBe(210000);
+    });
+
+    it("rounds a negative half offset away from zero", () => {
+      filter.update(0, 1000, 100000);
+      filter.update(-1, 1000, 200000);
+      filter.update(0, 1000, 300000);
+      expect(filter.offset).toBe(-0.5);
+
+      expect(filter.computeServerTime(400000)).toBe(399999);
     });
   });
 
@@ -165,15 +174,15 @@ describe("SendspinTimeFilter extra", () => {
   let filter: SendspinTimeFilter;
 
   beforeEach(() => {
-    filter = new SendspinTimeFilter(0, 1.1, 2.0, 1e-12);
+    filter = new SendspinTimeFilter();
   });
 
   describe("getters", () => {
     it("error and covariance reflect the first measurement variance", () => {
       filter.update(5000, 400, 100);
-      // covariance = max_error^2 = 160000, error = sqrt = 400.
-      expect(filter.covariance).toBe(160000);
-      expect(filter.error).toBe(400);
+      // covariance = (0.5 * max_error)^2 = 40000, error = sqrt = 200.
+      expect(filter.covariance).toBe(40000);
+      expect(filter.error).toBe(200);
     });
 
     it("covariance shrinks as consistent measurements accumulate", () => {
@@ -195,13 +204,13 @@ describe("SendspinTimeFilter extra", () => {
       for (let i = 1; i <= 120; i++) {
         filter.update(10000, max_error, i * 100000);
       }
-      // Residual just under cutoff (2 * max_error = 2000). offset≈10000.
-      // Use a perturbation < 2000 so forgetting is not triggered.
+      // Residual just under cutoff (3 * max_error = 3000). offset≈10000.
+      // Use a perturbation < 3000 so forgetting is not triggered.
       const before = filter.covariance;
-      filter.update(11500, max_error, 121 * 100000); // residual ~1500 < 2000
+      filter.update(12500, max_error, 121 * 100000); // residual ~2500 < 3000
 
       // Without forgetting the covariance update is the ordinary Kalman shrink:
-      // it should stay bounded near the pre-update value, not blow up by 1.21x.
+      // it should stay bounded near the pre-update value, not blow up by 4x.
       expect(filter.covariance).toBeLessThanOrEqual(before * 1.05);
     });
 
@@ -236,6 +245,16 @@ describe("SendspinTimeFilter extra", () => {
       filter.update(9999, 500, 100000);
       expect(filter.count).toBe(1);
       expect(filter.offset).toBe(offsetAfterFirst);
+    });
+
+    it("skips an update with non-positive max_error without advancing time", () => {
+      filter.update(5000, 500, 100000);
+      filter.update(9999, 0, 200000); // max_error 0 -> skipped
+      expect(filter.count).toBe(1);
+      expect(filter.offset).toBe(5000);
+      // The skipped sample must not consume its timestamp.
+      filter.update(5100, 500, 200000);
+      expect(filter.count).toBe(2);
     });
 
     it("does not corrupt drift init when a duplicate sits between measurements", () => {

@@ -87,7 +87,7 @@ export class SendspinCore implements StreamHandler {
       config.syncDelay ?? persisted ?? config.defaultSyncDelay ?? 0;
     this._syncDelayMs = clampSyncDelayMs(initialDelay);
 
-    this.timeFilter = new SendspinTimeFilter(0, 1.1, 2.0, 1e-12);
+    this.timeFilter = new SendspinTimeFilter();
     this.stateManager = new StateManager(
       config.onStateChange,
       new VolumeStore(config.storage ?? null),

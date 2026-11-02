@@ -11,12 +11,20 @@
  * matrix to track estimation uncertainty. An adaptive forgetting factor helps the
  * filter recover quickly from network disruptions or server clock adjustments.
  *
- * Direct port of the Python implementation from aiosendspin.
+ * Implements the time filter from the Sendspin specification.
  */
 
-// Residual threshold as fraction of max_error for triggering adaptive forgetting.
+// Residual threshold as multiple of max_error for triggering adaptive forgetting.
 // When residual > CUTOFF * max_error, the filter applies forgetting to recover from outliers.
-const ADAPTIVE_FORGETTING_CUTOFF = 2.0;
+const ADAPTIVE_FORGETTING_CUTOFF = 3.0;
+
+// Scale from max_error, a worst-case bound, to the measurement standard deviation.
+const MAX_ERROR_SCALE = 0.5;
+
+// Math.round rounds -0.5 to 0, not -1.
+function roundHalfAwayFromZero(value: number): number {
+  return value < 0 ? -Math.round(-value) : Math.round(value);
+}
 
 export interface TimeElement {
   last_update: number;
@@ -46,10 +54,10 @@ export class SendspinTimeFilter {
   private _current_time_element: TimeElement;
 
   constructor(
-    offset_process_std_dev: number = 0.01,
-    forget_factor: number = 1.1,
+    offset_process_std_dev: number = 0.0,
+    forget_factor: number = 2.0,
     drift_significance_threshold: number = 2.0,
-    drift_process_std_dev: number = 0.0,
+    drift_process_std_dev: number = 1e-11,
   ) {
     this._offset_process_variance =
       offset_process_std_dev * offset_process_std_dev;
@@ -86,9 +94,9 @@ export class SendspinTimeFilter {
    * @param time_added - Client timestamp when this measurement was taken in microseconds
    */
   update(measurement: number, max_error: number, time_added: number): void {
-    if (time_added <= this._last_update) {
-      // Skip non-monotonic timestamps. dt == 0 divides by zero in the drift
-      // calc, dt < 0 corrupts the predict step.
+    if (time_added <= this._last_update || max_error <= 0) {
+      // Skip non-monotonic timestamps and non-positive max_error. dt == 0
+      // divides by zero in the drift calc, dt < 0 corrupts the predict step.
       return;
     }
 
@@ -96,7 +104,7 @@ export class SendspinTimeFilter {
     this._last_update = time_added;
     this._measurements_processed += 1;
 
-    const update_std_dev = max_error;
+    const update_std_dev = max_error * MAX_ERROR_SCALE;
     const measurement_variance = update_std_dev * update_std_dev;
 
     // Filter initialization: First measurement establishes offset baseline
@@ -232,7 +240,7 @@ export class SendspinTimeFilter {
     const effective_drift = this._use_drift
       ? this._current_time_element.drift
       : 0.0;
-    const offset = Math.round(
+    const offset = roundHalfAwayFromZero(
       this._current_time_element.offset + effective_drift * dt,
     );
     return client_time + offset;
@@ -258,7 +266,7 @@ export class SendspinTimeFilter {
       ? this._current_time_element.drift
       : 0.0;
 
-    return Math.round(
+    return roundHalfAwayFromZero(
       (server_time -
         this._current_time_element.offset +
         effective_drift * this._current_time_element.last_update) /
