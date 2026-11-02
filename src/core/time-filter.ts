@@ -21,6 +21,11 @@ const ADAPTIVE_FORGETTING_CUTOFF = 3.0;
 // Scale from max_error, a worst-case bound, to the measurement standard deviation.
 const MAX_ERROR_SCALE = 0.5;
 
+// Math.round rounds -0.5 to 0, not -1.
+function roundHalfAwayFromZero(value: number): number {
+  return value < 0 ? -Math.round(-value) : Math.round(value);
+}
+
 export interface TimeElement {
   last_update: number;
   offset: number;
@@ -235,7 +240,7 @@ export class SendspinTimeFilter {
     const effective_drift = this._use_drift
       ? this._current_time_element.drift
       : 0.0;
-    const offset = Math.round(
+    const offset = roundHalfAwayFromZero(
       this._current_time_element.offset + effective_drift * dt,
     );
     return client_time + offset;
@@ -261,7 +266,7 @@ export class SendspinTimeFilter {
       ? this._current_time_element.drift
       : 0.0;
 
-    return Math.round(
+    return roundHalfAwayFromZero(
       (server_time -
         this._current_time_element.offset +
         effective_drift * this._current_time_element.last_update) /

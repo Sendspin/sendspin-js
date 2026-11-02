@@ -72,6 +72,15 @@ describe("SendspinTimeFilter", () => {
       // Should be client_time + offset = 200000 + 10000 = 210000
       expect(serverTime).toBe(210000);
     });
+
+    it("rounds a negative half offset away from zero", () => {
+      filter.update(0, 1000, 100000);
+      filter.update(-1, 1000, 200000);
+      filter.update(0, 1000, 300000);
+      expect(filter.offset).toBe(-0.5);
+
+      expect(filter.computeServerTime(400000)).toBe(399999);
+    });
   });
 
   describe("computeClientTime", () => {
