@@ -285,6 +285,24 @@ describe("transport re-handshake", () => {
     expect(fakeWsSend(h).binary.length).toBe(before + 1);
   });
 
+  it("replays held application role messages only for the exact role version still active", () => {
+    const { h, newServerSession } = setupRehandshake();
+    const before = fakeWsSend(h).binary.length;
+    const chunk = Uint8Array.of(1, 2, 3);
+    h.transport.sendBinary(200, chunk, "_example_display@v1");
+    chunk.fill(0);
+    h.transport.sendControl(
+      { type: "client/command", payload: { _example_display: {} } },
+      "_example_display@v2",
+    );
+
+    deliverActivate(h, newServerSession, ["playback"], ["_example_display@v1"]);
+
+    expect(fakeWsSend(h).binary.length).toBe(before + 1);
+    const replayed = newServerSession.decrypt(fakeWsSend(h).binary.at(-1)!);
+    expect(Array.from(replayed)).toEqual([200, 1, 2, 3]);
+  });
+
   it("ends the hold and hands a refused pairing activation to onActivateRefused", () => {
     const { h, newServerSession } = setupRehandshake(undefined, true);
     h.cb.onActivateRefused.mockImplementation(() =>

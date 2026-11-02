@@ -52,6 +52,14 @@ export interface ReceivedClientState {
   };
 }
 
+/** What the server's echo application role received from the client. */
+export interface EchoReceived {
+  support: unknown;
+  client_state: unknown;
+  commands: unknown[];
+  binary: { timestamp_us: number; data: number[] }[];
+}
+
 interface ServerLogLine {
   log?: { level: string; name: string; message: string };
 }
@@ -354,6 +362,19 @@ export class AiosendspinServer {
 
   async setDelay(delayMs: number): Promise<void> {
     await this.sendCommand("set_delay", { delay_ms: delayMs });
+  }
+
+  /** Send the echo application role's server/state, server/command, stream/start and a binary message. */
+  async echoSend(): Promise<void> {
+    await this.sendCommand("echo_send");
+  }
+
+  echoReceived(timeoutMs = 10_000): Promise<EchoReceived> {
+    return this.sendCommand(
+      "echo_received",
+      { timeout_ms: timeoutMs },
+      timeoutMs + 1_000,
+    );
   }
 
   private async stopProcess(): Promise<void> {

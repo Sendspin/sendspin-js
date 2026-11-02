@@ -41,7 +41,7 @@ export interface TransportCallbacks {
     msg: { type: string; payload?: unknown },
     receivedAtUs: number,
   ): void;
-  onBinaryMessage(bytes: Uint8Array): void;
+  onBinaryMessage(bytes: Uint8Array, receivedAtUs: number): void;
   onActivateRefused(activeRoles: string[]): void;
 }
 
@@ -285,7 +285,7 @@ export class SendspinTransport {
     } else {
       // full is the decrypt output: exclusively owned, offset 0, exact length,
       // type byte intact. Hand it over without re-copying.
-      this.cb.onBinaryMessage(full);
+      this.cb.onBinaryMessage(full, receivedAtUs);
     }
   }
 
@@ -327,7 +327,7 @@ export class SendspinTransport {
         receivedAtUs,
       );
     } else {
-      this.cb.onBinaryMessage(assembled);
+      this.cb.onBinaryMessage(assembled, receivedAtUs);
     }
   }
 
@@ -463,19 +463,37 @@ export class SendspinTransport {
 
   /** A message held during a re-handshake is replayed only if `role` is still active. */
   sendControl(msg: object, role?: string): void {
+    // client/hello still flows during a re-handshake, since a non-compliant
+    // server re-sends server/hello and awaits client/hello before the
+    // post-re-handshake server/activate.
+    this.send(
+      0,
+      utf8.encode(JSON.stringify(msg)),
+      role,
+      (msg as { type?: string }).type !== "client/hello",
+    );
+  }
+
+  sendBinary(type: number, data: Uint8Array, role: string): void {
+    this.send(type, data, role, true);
+  }
+
+  private send(
+    type: number,
+    body: Uint8Array,
+    role: string | undefined,
+    holdable: boolean,
+  ): void {
     if (this.state !== "transport" || !this.session) {
-      console.warn("Sendspin: sendControl before transport ready");
+      console.warn("Sendspin: send before transport ready");
       return;
     }
-    const body = utf8.encode(JSON.stringify(msg));
-    // Hold outbound traffic during a re-handshake. client/hello still flows, since
-    // a non-compliant server re-sends server/hello and awaits client/hello before
-    // the post-re-handshake server/activate.
-    if (this.quiesced && (msg as { type?: string }).type !== "client/hello") {
-      this.outboundQueue.push({ type: 0, body, role });
+    // Hold outbound traffic during a re-handshake, copied since the caller may reuse its buffer.
+    if (this.quiesced && holdable) {
+      this.outboundQueue.push({ type, body: body.slice(), role });
       return;
     }
-    this.encryptSend(0, body);
+    this.encryptSend(type, body);
   }
 
   private encryptSend(type: number, body: Uint8Array): void {

@@ -15,7 +15,15 @@ from typing import Any
 
 from aiohttp import web
 from aiohttp.test_utils import TestServer as AiohttpTestServer
-from aiosendspin.models.core import ClientStateMessage
+from aiosendspin.models.core import (
+    ClientStateMessage,
+    ServerCommandMessage,
+    ServerCommandPayload,
+    ServerStateMessage,
+    ServerStatePayload,
+    StreamStartMessage,
+    StreamStartPayload,
+)
 from aiosendspin.models.types import PairingCodeFormat, PairMethod
 from aiosendspin.noise.keys import Identity, b64url_decode
 from aiosendspin.noise.pairing import PairingAbortError, PairingAttempt
@@ -28,6 +36,17 @@ from aiosendspin.server import (
     SendspinServer,
 )
 from aiosendspin.server.connection import SendspinConnection
+from aiosendspin.server.roles.base import Role
+from aiosendspin.server.roles.registry import (
+    RoleSupportSpec,
+    register_role,
+    register_role_support_spec,
+)
+
+ECHO_ROLE_ID = "_sendspinjs_echo@v1"
+ECHO_FAMILY = "_sendspinjs_echo"
+ECHO_TO_SERVER = 200
+ECHO_TO_CLIENT = 201
 
 
 def generate_sine_pcm(
@@ -45,6 +64,48 @@ def generate_sine_pcm(
         for channel in range(channels):
             struct.pack_into("<h", data, (index * channels + channel) * 2, value)
     return bytes(data)
+
+
+class EchoRole(Role):
+    """Application-specific role that records what the client sends."""
+
+    def __init__(self, client: Any) -> None:
+        self._client = client
+        self.client_state: Any = None
+        self.commands: list[Any] = []
+        self.binary: list[dict[str, Any]] = []
+
+    @property
+    def role_id(self) -> str:
+        return ECHO_ROLE_ID
+
+    @property
+    def role_family(self) -> str:
+        return ECHO_FAMILY
+
+    def on_connect(self) -> None:
+        pass
+
+    def on_disconnect(self) -> None:
+        pass
+
+    def on_client_state(self, payload: Any) -> None:
+        if ECHO_FAMILY in payload.application_objects:
+            self.client_state = payload.application_objects[ECHO_FAMILY]
+
+    def on_command(self, payload: Any) -> None:
+        if ECHO_FAMILY in payload.application_objects:
+            self.commands.append(payload.application_objects[ECHO_FAMILY])
+
+    def handles_inbound_binary(self, message_type: int) -> bool:
+        return message_type == ECHO_TO_SERVER
+
+    def on_binary_chunk(self, message_type: int, timestamp_us: int, data: bytes) -> None:
+        self.binary.append({"timestamp_us": timestamp_us, "data": list(data)})
+
+
+register_role(ECHO_ROLE_ID, EchoRole)
+register_role_support_spec(ECHO_FAMILY, RoleSupportSpec(parse_support=lambda support: support))
 
 
 class HarnessServer:
@@ -376,6 +437,47 @@ class HarnessServer:
     def set_delay(self, delay_ms: int) -> None:
         self._player_role().set_output_delay(delay_ms)
 
+    async def echo_send(self) -> None:
+        """Send the client one of each role message and a binary message."""
+        role = self._echo_role()
+        role.send_message(
+            ServerStateMessage(ServerStatePayload(application_objects={ECHO_FAMILY: {"text": "hi"}}))
+        )
+        role.send_message(
+            ServerCommandMessage(
+                ServerCommandPayload(application_objects={ECHO_FAMILY: {"command": "ping"}})
+            )
+        )
+        role.send_message(
+            StreamStartMessage(StreamStartPayload(application_objects={ECHO_FAMILY: {"rate": 5}}))
+        )
+        self._active_client().send_binary(
+            bytes([ECHO_TO_CLIENT, 1, 2, 3]),
+            role_family=ECHO_FAMILY,
+            timestamp_us=0,
+            message_type=ECHO_TO_CLIENT,
+        )
+
+    async def echo_received(self, timeout_ms: int) -> dict[str, Any]:
+        """Wait until the echo role has the client's state, a command and binary."""
+        async with asyncio.timeout(timeout_ms / 1000):
+            while True:
+                role = self._echo_role()
+                if role.client_state is not None and role.commands and role.binary:
+                    return {
+                        "support": getattr(self._active_client().info, f"{ECHO_FAMILY}_support"),
+                        "client_state": role.client_state,
+                        "commands": role.commands,
+                        "binary": role.binary,
+                    }
+                await asyncio.sleep(0.01)
+
+    def _echo_role(self) -> EchoRole:
+        role = self._active_client().role(ECHO_ROLE_ID)
+        if not isinstance(role, EchoRole):
+            raise RuntimeError(f"client has no active {ECHO_ROLE_ID} role")
+        return role
+
     def _active_client(self) -> Any:
         if not self.server or not self.active_client_id:
             raise RuntimeError("no active client")
@@ -452,6 +554,11 @@ async def dispatch(server: HarnessServer, command: str, args: dict[str, Any]) ->
     if command == "set_delay":
         server.set_delay(int(args["delay_ms"]))
         return None
+    if command == "echo_send":
+        await server.echo_send()
+        return None
+    if command == "echo_received":
+        return await server.echo_received(int(args.get("timeout_ms", 10000)))
     if command == "shutdown":
         await server.shutdown()
         return "bye"

@@ -329,6 +329,51 @@ core.onAudioData = (chunk) => {
 await core.connect();
 ```
 
+### Application-specific roles
+
+Apps can add their own roles next to the built-in ones. A role's name starts
+with `_` and carries a version. Its messages use the name without the version
+as their key, and its binary message IDs come from 192-255. The SDK advertises
+the role, tracks whether the server activated it, and calls the role only while
+it is active.
+
+```typescript
+import { SendspinPlayer, type ApplicationRoleSession } from '@sendspin/sendspin-js';
+
+let display: ApplicationRoleSession | null = null;
+
+const player = new SendspinPlayer({
+  url: 'ws://your-server:8095/sendspin',
+  applicationRoles: [
+    {
+      id: '_example_display@v1',
+      support: { width: 128, height: 64 },  // client/hello "_example_display@v1_support"
+      binaryMessageIds: [192],
+      getState: () => ({ brightness: screen.brightness }),
+      onActivate: (session) => (display = session),
+      onDeactivate: () => {
+        display = null;
+        screen.clear();
+      },
+      onServerState: (state) => screen.showText(state),
+      onBinaryMessage: (id, data) => screen.queueFrame(data),
+    },
+  ],
+});
+
+// Later, while the role is active
+display?.sendCommand({ command: 'touch', x: 10, y: 20 });
+display?.sendState();  // after screen.brightness changed
+```
+
+`getState` is read for every `client/state`, so keep it synchronous and cheap.
+`onDeactivate` runs when the server removes the role or the connection closes:
+stop all output, clear buffers and drop the role's server state there.
+
+The session converts timestamps between the server clock and the local clock,
+in microseconds of `performance.now()` (`computeClientTime`,
+`computeServerTime`). Check `timeSyncInfo.synced` before relying on them.
+
 ## Local development
 
 ```

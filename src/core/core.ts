@@ -21,6 +21,7 @@ import { SendspinTransport } from "./transport";
 import type { HandshakeInfo } from "./transport";
 import { SUITES } from "./noise/suites";
 import { PairingManager } from "./pairing";
+import { ApplicationRoles } from "./application-roles";
 import { base64urlDecode } from "./noise/base64url";
 import { encodePairingToken } from "./noise/pairing-token";
 import type {
@@ -53,6 +54,7 @@ export class SendspinCore implements StreamHandler {
   private transport: SendspinTransport;
   private pairing: PairingManager;
   private handshakeInfo: HandshakeInfo | null = null;
+  private applicationRoles: ApplicationRoles;
 
   // Stream events — consumers (e.g., SendspinPlayer) subscribe to these
   private _onAudioData?: (chunk: DecodedAudioChunk) => void;
@@ -68,6 +70,17 @@ export class SendspinCore implements StreamHandler {
   private _onConnectionClose?: () => void;
 
   constructor(config: SendspinCoreConfig) {
+    this.applicationRoles = new ApplicationRoles(
+      config.applicationRoles ?? [],
+      {
+        sendControl: (msg, role) => this.transport.sendControl(msg, role),
+        sendBinary: (type, data, role) =>
+          this.transport.sendBinary(type, data, role),
+        sendState: () => this.protocolHandler.sendStateUpdate(),
+        computeClientTime: (us) => this.timeFilter.computeClientTime(us),
+        computeServerTime: (us) => this.timeFilter.computeServerTime(us),
+      },
+    );
     if (!config.storage) {
       console.warn(
         "Sendspin: no storage provided, so the identity, Pairing PSK, paired servers and pairing round count are kept in memory only and reset on reload.",
@@ -127,8 +140,11 @@ export class SendspinCore implements StreamHandler {
         },
         onControlMessage: (msg, receivedAtUs) =>
           this.routeControl(msg, receivedAtUs),
-        onBinaryMessage: (bytes) =>
-          this.handleBinaryMessage(bytes.buffer as ArrayBuffer),
+        onBinaryMessage: (bytes, receivedAtUs) => {
+          if (!this.applicationRoles.handleBinary(bytes, receivedAtUs)) {
+            this.handleBinaryMessage(bytes.buffer as ArrayBuffer);
+          }
+        },
         onActivateRefused: (activeRoles) => {
           this.protocolHandler.resumeActivation(activeRoles);
           this.pairing.onRefusedActivate();
@@ -183,6 +199,7 @@ export class SendspinCore implements StreamHandler {
         onVolumeCommand: config.onVolumeCommand,
         onDelayCommand: config.onDelayCommand,
         getExternalVolume: config.getExternalVolume,
+        applicationRoles: this.applicationRoles,
       },
     );
   }
@@ -230,6 +247,7 @@ export class SendspinCore implements StreamHandler {
       );
     }
     this.protocolHandler.handleServerMessage(msg as never, receivedAtUs);
+    this.applicationRoles.handleMessage(msg);
   }
 
   private onTransportClose(): void {
