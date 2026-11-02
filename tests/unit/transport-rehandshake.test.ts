@@ -288,7 +288,7 @@ describe("transport re-handshake", () => {
   it("replays held application role messages only for the exact role version still active", () => {
     const { h, newServerSession } = setupRehandshake();
     const before = fakeWsSend(h).binary.length;
-    const chunk = Uint8Array.of(1, 2, 3);
+    const chunk = Buffer.from([1, 2, 3]);
     h.transport.sendBinary(200, chunk, "_example_display@v1");
     chunk.fill(0);
     h.transport.sendControl(

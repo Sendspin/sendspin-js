@@ -504,7 +504,12 @@ export class SendspinTransport {
     }
     // Hold outbound traffic during a re-handshake, copied since the caller may reuse its buffer.
     if (this.quiesced && holdable) {
-      this.outboundQueue.push({ type, body: body.slice(), role, alwaysReplay });
+      this.outboundQueue.push({
+        type,
+        body: Uint8Array.from(body),
+        role,
+        alwaysReplay,
+      });
       return;
     }
     this.encryptSend(type, body);
