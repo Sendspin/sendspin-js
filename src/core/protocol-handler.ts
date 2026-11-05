@@ -178,8 +178,9 @@ export class ProtocolHandler {
     this.sendClientHello();
   }
 
-  // Handle server/activate: start the initial client/state, time-sync, and
-  // periodic state updates. A repeat activate only applies role changes.
+  // Handle server/activate: start the initial client/state (held for a player
+  // until the clock syncs), time-sync, and periodic state updates. A repeat
+  // activate only applies role changes.
   private handleServerActivate(message: ServerActivate): void {
     this.applyActivation(message.payload.active_roles);
   }
@@ -434,6 +435,9 @@ export class ProtocolHandler {
   // This avoids race conditions when responding to volume commands.
   sendStateUpdate(skipHardwareRead = false): void {
     if (!this.activated) return;
+    // The time sync manager sends the held state once the clock first syncs.
+    if (this.activeRoles?.has("player@v1") && !this.timeFilter.is_synchronized)
+      return;
     let volume = this.stateManager.volume;
     let muted = this.stateManager.muted;
     if (!skipHardwareRead && this.useHardwareVolume && this.getExternalVolume) {
@@ -444,7 +448,7 @@ export class ProtocolHandler {
     }
 
     const payload: ClientState["payload"] = {
-      available: this.timeFilter.is_synchronized,
+      available: true,
     };
     if (this.activeRoles?.has("player@v1")) {
       payload.player = {

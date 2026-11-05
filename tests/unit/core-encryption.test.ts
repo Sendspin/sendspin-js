@@ -236,6 +236,7 @@ describe("SendspinCore encryption wiring", () => {
     });
     await core.connect();
     const { serverSession: session } = completeHandshake(ws);
+    core._timeFilter.update(0, 500, 1_000_000);
 
     serverSend(ws, session, { type: "server/hello", payload: {} });
     serverSend(ws, session, {
@@ -519,6 +520,7 @@ describe("SendspinCore encryption wiring", () => {
       ws,
       server,
     );
+    core._timeFilter.update(0, 500, 1_000_000);
     serverSend(ws, serverSession, {
       type: "server/activate",
       payload: { activities: ["playback"], active_roles: ["player@v1"] },
