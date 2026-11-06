@@ -146,8 +146,9 @@ describe("getSupportedFormats", () => {
     expect(formats.some((f) => f.codec === "opus")).toBe(false);
   });
 
-  // Servers only have to support flac and pcm, so the list always offers at
-  // least one of them. The fallback is flac then pcm, as the browser allows.
+  // Servers only have to support flac and pcm at 16-bit and 44.1 or 48 kHz,
+  // so the list always offers at least one of them that way. The fallback is
+  // flac then pcm, as the browser allows.
   describe("flac/pcm guarantee", () => {
     beforeEach(() => {
       vi.spyOn(console, "warn").mockImplementation(() => {});
