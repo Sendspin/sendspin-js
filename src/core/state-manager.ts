@@ -245,11 +245,7 @@ export class StateManager {
       } else {
         this.clearPendingMetadata();
         if (metadataDelayMs > 0) {
-          this.pendingMetadataTimer = setTimeout(() => {
-            this.pendingMetadataTimer = null;
-            this._serverState = { ...this._serverState, metadata };
-            this.notifyStateChange();
-          }, metadataDelayMs);
+          this.schedulePendingMetadata(metadata, metadataDelayMs);
           applied = rest;
         }
       }
@@ -259,13 +255,36 @@ export class StateManager {
     this.notifyStateChange();
   }
 
-  // Replay held metadata in arrival order, as if each update arrived now.
+  // Apply held metadata as if each update arrived now in order, notifying once.
   applyHeldMetadata(delayMs: (timestampUs: number) => number): void {
-    const held = this.heldMetadata;
-    this.heldMetadata = [];
-    for (const metadata of held) {
-      this.updateServerState({ metadata }, delayMs(metadata.timestamp));
+    let due: ServerStateMetadata | undefined;
+    let pending: { metadata: ServerStateMetadata; delayMs: number } | undefined;
+    for (const metadata of this.heldMetadata) {
+      const delay = delayMs(metadata.timestamp);
+      if (delay > 0) {
+        pending = { metadata, delayMs: delay };
+      } else {
+        due = metadata;
+        pending = undefined;
+      }
     }
+    this.heldMetadata = [];
+    if (pending)
+      this.schedulePendingMetadata(pending.metadata, pending.delayMs);
+    if (!due) return;
+    this._serverState = { ...this._serverState, metadata: due };
+    this.notifyStateChange();
+  }
+
+  private schedulePendingMetadata(
+    metadata: ServerStateMetadata,
+    delayMs: number,
+  ): void {
+    this.pendingMetadataTimer = setTimeout(() => {
+      this.pendingMetadataTimer = null;
+      this._serverState = { ...this._serverState, metadata };
+      this.notifyStateChange();
+    }, delayMs);
   }
 
   discardRoleState(families: string[]): void {

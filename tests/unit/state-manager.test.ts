@@ -184,6 +184,28 @@ describe("StateManager", () => {
 
       expect(sm.serverState).toEqual({});
     });
+
+    it("keeps replayed metadata out of a session the state callback cleared", () => {
+      let disconnected = false;
+      const sm2 = new StateManager(() => {
+        if (disconnected) return;
+        disconnected = true;
+        sm2.clearConnectionState();
+      });
+      sm2.updateServerState(
+        { metadata: { timestamp: 1, title: "Current" } },
+        null,
+      );
+      sm2.updateServerState(
+        { metadata: { timestamp: 2, title: "Next" } },
+        null,
+      );
+
+      sm2.applyHeldMetadata((timestampUs) => (timestampUs === 2 ? 1000 : 0));
+      vi.advanceTimersByTime(1000);
+
+      expect(sm2.serverState).toEqual({});
+    });
   });
 
   describe("clearConnectionState", () => {
