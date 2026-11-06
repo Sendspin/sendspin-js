@@ -3,7 +3,7 @@
  *
  * Covers browser codec detection (Safari / Firefox / Chrome, with and without
  * WebCodecs AudioDecoder), format expansion rules, browser filtering of
- * requested codecs, and the flac/pcm entry the protocol requires.
+ * requested codecs, and the flac/pcm entry every server can serve.
  *
  * navigator / AudioDecoder / window don't exist in node; each test installs
  * the minimal globals it needs and restores them afterward.
@@ -146,8 +146,8 @@ describe("getSupportedFormats", () => {
     expect(formats.some((f) => f.codec === "opus")).toBe(false);
   });
 
-  // Servers only have to support flac and pcm, so a player must offer at
-  // least one of them; the fallback is flac then pcm, as the browser allows.
+  // Servers only have to support flac and pcm, so the list always offers at
+  // least one of them. The fallback is flac then pcm, as the browser allows.
   describe("flac/pcm guarantee", () => {
     beforeEach(() => {
       vi.spyOn(console, "warn").mockImplementation(() => {});
