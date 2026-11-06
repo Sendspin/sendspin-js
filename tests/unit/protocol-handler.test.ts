@@ -74,6 +74,29 @@ function lastSent(
   return undefined;
 }
 
+// Answer each probe of a time sync burst with a zero clock offset.
+function completeTimeSyncBurst(
+  handler: ProtocolHandler,
+  send: ReturnType<typeof vi.fn>,
+): void {
+  for (let i = 0; i < 8; i++) {
+    const t1 = (
+      lastSent(send, "client/time")!.payload as Record<string, number>
+    ).client_transmitted;
+    handler.handleServerMessage(
+      {
+        type: "server/time",
+        payload: {
+          client_transmitted: t1,
+          server_received: t1 + 100,
+          server_transmitted: t1 + 200,
+        },
+      } as never,
+      t1 + 300,
+    );
+  }
+}
+
 describe("ProtocolHandler", () => {
   let send: ReturnType<typeof vi.fn>;
   let streamHandler: ReturnType<typeof makeStreamHandler>;
@@ -249,15 +272,30 @@ describe("ProtocolHandler extra", () => {
       expect(stateManager.serverState.metadata?.title).toBe("Next");
     });
 
-    it("applies metadata at once before the first time sync measurement", () => {
+    it("holds metadata until the clock syncs, then replays it in arrival order", () => {
       const handler = makeHandler();
-
+      dispatch(handler, {
+        type: "server/activate",
+        payload: { activities: [], active_roles: ["metadata@v1"] },
+      });
       dispatch(handler, {
         type: "server/state",
-        payload: { metadata: { timestamp: 7_000_000_000, title: "Current" } },
+        payload: { metadata: { timestamp: 500_000, title: "Current" } },
       });
+      dispatch(handler, {
+        type: "server/state",
+        payload: { metadata: { timestamp: 3_000_000, title: "Next" } },
+      });
+      expect(stateManager.serverState.metadata).toBeUndefined();
 
+      // Zero offset, so server time 3 s is 2 s after the mocked local now of 1 s.
+      completeTimeSyncBurst(handler, send);
       expect(stateManager.serverState.metadata?.title).toBe("Current");
+
+      vi.advanceTimersByTime(1999);
+      expect(stateManager.serverState.metadata?.title).toBe("Current");
+      vi.advanceTimersByTime(1);
+      expect(stateManager.serverState.metadata?.title).toBe("Next");
     });
   });
 
@@ -549,22 +587,7 @@ describe("ProtocolHandler extra", () => {
       });
       expect(lastSent(send, "client/state")).toBeUndefined();
 
-      for (let i = 0; i < 8; i++) {
-        const t1 = (
-          lastSent(send, "client/time")!.payload as Record<string, number>
-        ).client_transmitted;
-        handler.handleServerMessage(
-          {
-            type: "server/time",
-            payload: {
-              client_transmitted: t1,
-              server_received: t1 + 100,
-              server_transmitted: t1 + 200,
-            },
-          } as never,
-          t1 + 300,
-        );
-      }
+      completeTimeSyncBurst(handler, send);
 
       const states = send.mock.calls.filter(
         ([msg]) => msg.type === "client/state",
