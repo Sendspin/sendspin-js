@@ -69,7 +69,7 @@ const groupMuteIcon = document.getElementById("group-mute-icon");
 const clientIdEl = document.getElementById("client-id");
 const pairingTokenEl = document.getElementById("pairing-token");
 const rotatePskBtn = document.getElementById("rotate-psk");
-const trustLevelEl = document.getElementById("trust-level");
+const pairingStatusEl = document.getElementById("pairing-status");
 const unpairedAccessCheckbox = document.getElementById("unpaired-access");
 const pairingPinGroup = document.getElementById("pairing-pin-group");
 const pairingPinEl = document.getElementById("pairing-pin");
@@ -262,7 +262,7 @@ function resetStatusDisplay() {
   progressDuration.textContent = "--:--";
   clientIdEl.textContent = "-";
   pairingTokenEl.textContent = "-";
-  trustLevelEl.textContent = "-";
+  pairingStatusEl.textContent = "-";
   pairingPinGroup.hidden = true;
   pairingPendingGroup.hidden = true;
   pairingPinEl.textContent = "-";
@@ -310,15 +310,15 @@ function onPairing(event, detail) {
   console.log("Pairing event:", event, detail ?? "");
   pairingPendingGroup.hidden = event !== "pending";
   if (event === "pending") {
-    trustLevelEl.textContent = "awaiting operator...";
+    pairingStatusEl.textContent = "awaiting operator...";
     showToast("Pairing needs an operator action", "info");
   } else if (event === "started") {
-    trustLevelEl.textContent = "pairing...";
+    pairingStatusEl.textContent = "pairing...";
   } else if (event === "finalized") {
-    trustLevelEl.textContent = "user (just paired)";
+    pairingStatusEl.textContent = "paired";
     showToast("Pairing complete", "success");
   } else if (event === "aborted") {
-    trustLevelEl.textContent = `aborted (${detail ?? "unknown"})`;
+    pairingStatusEl.textContent = `aborted (${detail ?? "unknown"})`;
     showToast(`Pairing aborted: ${detail ?? "unknown"}`, "error");
   }
   updateRoundLimitDisplay();
