@@ -57,12 +57,16 @@
     "eslint-config-prettier": "10.1.8",
     "eslint-plugin-prettier": "5.5.6",
     "husky": "^9.1.7",
+    "lint-staged": "^16.4.0",
     "prettier": "3.9.6",
     "rollup": "^4.54.0",
     "serve": "^14.2.5",
     "typescript": "^6.0.2",
     "vitest": "^4.1.4",
     "ws": "^8.20.0"
+  },
+  "lint-staged": {
+    "*.{js,ts}": "eslint --fix"
   },
   "publishConfig": {
     "access": "public"
