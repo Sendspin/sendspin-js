@@ -2,6 +2,7 @@ import type {
   PlayerState,
   StreamFormat,
   ServerStatePayload,
+  ServerStateMetadata,
   GroupUpdatePayload,
 } from "../types";
 import type { VolumeStore } from "./volume-store";
@@ -57,6 +58,7 @@ export class StateManager {
   // Cached server state (from server/state messages)
   private _serverState: ServerStatePayload = {};
   private pendingMetadataTimer: ReturnType<typeof setTimeout> | null = null;
+  private heldMetadata: ServerStateMetadata[] = [];
 
   // Cached group state (from group/update messages)
   private _groupState: GroupUpdatePayload = {};
@@ -229,23 +231,41 @@ export class StateManager {
   }
 
   // Replace each included role object, holding delayed metadata as the single pending update.
-  updateServerState(update: ServerStatePayload, metadataDelayMs = 0): void {
+  // A null delay holds the metadata until applyHeldMetadata.
+  updateServerState(
+    update: ServerStatePayload,
+    metadataDelayMs: number | null = 0,
+  ): void {
     let applied = update;
     if (update.metadata !== undefined) {
-      this.clearPendingMetadata();
-      if (metadataDelayMs > 0) {
-        const { metadata, ...rest } = update;
-        this.pendingMetadataTimer = setTimeout(() => {
-          this.pendingMetadataTimer = null;
-          this._serverState = { ...this._serverState, metadata };
-          this.notifyStateChange();
-        }, metadataDelayMs);
+      const { metadata, ...rest } = update;
+      if (metadataDelayMs === null) {
+        this.heldMetadata.push(metadata);
         applied = rest;
+      } else {
+        this.clearPendingMetadata();
+        if (metadataDelayMs > 0) {
+          this.pendingMetadataTimer = setTimeout(() => {
+            this.pendingMetadataTimer = null;
+            this._serverState = { ...this._serverState, metadata };
+            this.notifyStateChange();
+          }, metadataDelayMs);
+          applied = rest;
+        }
       }
     }
     if (Object.keys(applied).length === 0) return;
     this._serverState = { ...this._serverState, ...applied };
     this.notifyStateChange();
+  }
+
+  // Replay held metadata in arrival order, as if each update arrived now.
+  applyHeldMetadata(delayMs: (timestampUs: number) => number): void {
+    const held = this.heldMetadata;
+    this.heldMetadata = [];
+    for (const metadata of held) {
+      this.updateServerState({ metadata }, delayMs(metadata.timestamp));
+    }
   }
 
   discardRoleState(families: string[]): void {
@@ -272,6 +292,7 @@ export class StateManager {
   }
 
   private clearPendingMetadata(): void {
+    this.heldMetadata = [];
     if (this.pendingMetadataTimer !== null) {
       clearTimeout(this.pendingMetadataTimer);
       this.pendingMetadataTimer = null;

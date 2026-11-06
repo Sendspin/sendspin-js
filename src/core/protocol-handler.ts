@@ -123,7 +123,12 @@ export class ProtocolHandler {
       sender,
       stateManager,
       timeFilter,
-      () => this.sendStateUpdate(),
+      () => {
+        this.stateManager.applyHeldMetadata((timestampUs) =>
+          this.metadataDelayMs(timestampUs),
+        );
+        this.sendStateUpdate();
+      },
     );
   }
 
@@ -271,16 +276,22 @@ export class ProtocolHandler {
     this.stateManager.clearStateUpdateInterval();
   }
 
-  // Without a time sync measurement the filter has no estimate to translate
-  // the metadata timestamp with, so the update applies immediately.
+  // Until the clock syncs, the filter has no estimate to translate the
+  // metadata timestamp with, so the update is held until then.
   private handleServerState(message: ServerState): void {
     const { metadata } = message.payload;
-    let metadataDelayMs = 0;
-    if (metadata && this.timeFilter.count > 0) {
-      const localUs = this.timeFilter.computeClientTime(metadata.timestamp);
-      metadataDelayMs = (localUs - performance.now() * 1000) / 1000;
+    let metadataDelayMs: number | null = 0;
+    if (metadata) {
+      metadataDelayMs = this.timeFilter.is_synchronized
+        ? this.metadataDelayMs(metadata.timestamp)
+        : null;
     }
     this.stateManager.updateServerState(message.payload, metadataDelayMs);
+  }
+
+  private metadataDelayMs(timestampUs: number): number {
+    const localUs = this.timeFilter.computeClientTime(timestampUs);
+    return (localUs - performance.now() * 1000) / 1000;
   }
 
   private handleStreamStart(message: StreamStart): void {

@@ -272,15 +272,30 @@ describe("ProtocolHandler extra", () => {
       expect(stateManager.serverState.metadata?.title).toBe("Next");
     });
 
-    it("applies metadata at once before the first time sync measurement", () => {
+    it("holds metadata until the clock syncs, then replays it in arrival order", () => {
       const handler = makeHandler();
-
+      dispatch(handler, {
+        type: "server/activate",
+        payload: { activities: [], active_roles: ["metadata@v1"] },
+      });
       dispatch(handler, {
         type: "server/state",
-        payload: { metadata: { timestamp: 7_000_000_000, title: "Current" } },
+        payload: { metadata: { timestamp: 500_000, title: "Current" } },
       });
+      dispatch(handler, {
+        type: "server/state",
+        payload: { metadata: { timestamp: 3_000_000, title: "Next" } },
+      });
+      expect(stateManager.serverState.metadata).toBeUndefined();
 
+      // Zero offset, so server time 3 s is 2 s after the mocked local now of 1 s.
+      completeTimeSyncBurst(handler, send);
       expect(stateManager.serverState.metadata?.title).toBe("Current");
+
+      vi.advanceTimersByTime(1999);
+      expect(stateManager.serverState.metadata?.title).toBe("Current");
+      vi.advanceTimersByTime(1);
+      expect(stateManager.serverState.metadata?.title).toBe("Next");
     });
   });
 
