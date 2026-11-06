@@ -211,7 +211,10 @@ describe("ProtocolHandler extra", () => {
     onVolumeCommand = vi.fn();
     sender = { sendControl: send };
     helloContext = makeHelloContext();
-    timeFilter = { update: vi.fn() } as unknown as SendspinTimeFilter;
+    timeFilter = {
+      update: vi.fn(),
+      is_synchronized: true,
+    } as unknown as SendspinTimeFilter;
   });
 
   afterEach(() => {
@@ -536,14 +539,15 @@ describe("ProtocolHandler extra", () => {
       expect((state.payload as Record<string, unknown>).player).toBeUndefined();
     });
 
-    it("reports available once the first time sync burst completes", () => {
+    it("holds the player's first client/state until the first time sync burst completes", () => {
       timeFilter = new SendspinTimeFilter();
       const handler = makeHandler();
       activate(handler);
-      const available = () =>
-        (lastSent(send, "client/state")!.payload as Record<string, unknown>)
-          .available;
-      expect(available()).toBe(false);
+      dispatch(handler, {
+        type: "server/command",
+        payload: { player: { command: "volume", volume: 30 } },
+      });
+      expect(lastSent(send, "client/state")).toBeUndefined();
 
       for (let i = 0; i < 8; i++) {
         const t1 = (
@@ -562,10 +566,17 @@ describe("ProtocolHandler extra", () => {
         );
       }
 
-      expect(available()).toBe(true);
+      const states = send.mock.calls.filter(
+        ([msg]) => msg.type === "client/state",
+      );
+      expect(states).toHaveLength(1);
+      expect(states[0][0].payload).toMatchObject({
+        available: true,
+        player: { volume: 30 },
+      });
     });
 
-    it("reports unavailable before time sync without the player role", () => {
+    it("sends client/state before time sync without the player role", () => {
       timeFilter = new SendspinTimeFilter();
       const handler = makeHandler();
       dispatch(handler, {
@@ -574,7 +585,7 @@ describe("ProtocolHandler extra", () => {
       });
 
       const state = lastSent(send, "client/state")!;
-      expect((state.payload as Record<string, unknown>).available).toBe(false);
+      expect((state.payload as Record<string, unknown>).available).toBe(true);
     });
 
     it("includes output_delay_ms clamped to 0-5000", () => {

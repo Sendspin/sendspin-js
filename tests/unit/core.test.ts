@@ -59,6 +59,7 @@ function activatePlayer(
   core: SendspinCore,
   send: ReturnType<typeof vi.fn>,
 ): void {
+  core._timeFilter.update(0, 500, 1_000_000);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (core as any).routeControl({
     type: "server/activate",
@@ -454,6 +455,7 @@ describe("SendspinCore command + state forwarding", () => {
       staticPairingCode: "12345678",
     });
     const send = spySend(core);
+    core._timeFilter.update(0, 500, 1_000_000);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (core as any).routeControl({
       type: "server/activate",
