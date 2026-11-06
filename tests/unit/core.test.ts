@@ -159,6 +159,22 @@ describe("SendspinCore (offline)", () => {
       expect(onAudioData).not.toHaveBeenCalled();
     });
 
+    it("closes the connection on an audio message shorter than 13 bytes", () => {
+      vi.spyOn(console, "warn").mockImplementation(() => {});
+      core._stateManager.currentStreamFormat = PCM_FORMAT;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const internals = core as any;
+      const close = vi.spyOn(internals.transport, "close");
+      const decode = vi.spyOn(internals.decoder, "handleBinaryMessage");
+
+      const chunk = new Uint8Array(12);
+      chunk[0] = 4;
+      core.handleBinaryMessage(chunk.buffer);
+
+      expect(close).toHaveBeenCalledOnce();
+      expect(decode).not.toHaveBeenCalled();
+    });
+
     it("ignores binary IDs other than audio chunks without an audio warning", () => {
       const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
       const artwork = new Uint8Array(20);
