@@ -516,6 +516,40 @@ describe("AudioScheduler generation / seek handling", () => {
   });
 });
 
+describe("AudioScheduler clear from a timestamp", () => {
+  const CHUNK_US = 100_000;
+
+  it("drops audio at or after from_timestamp and continues the replacement after the kept audio", () => {
+    const h = setup();
+    const base = nowUs() + 500_000;
+    for (let i = 0; i < 3; i++) {
+      h.scheduler.handleDecodedChunk(
+        makeChunk(base + i * CHUNK_US, h.state.streamGeneration),
+      );
+    }
+    h.scheduler.processAudioQueue();
+    const [a, b, c] = h.ctx.startedSources;
+
+    h.state.clearStreamFrom(base + CHUNK_US);
+    h.scheduler.clearBuffersFrom(base + CHUNK_US);
+    expect(a.stopped).toBeNull();
+    expect(b.stopped).not.toBeNull();
+    expect(c.stopped).not.toBeNull();
+
+    // A resync would place the replacement 3 ms later than the kept audio's end.
+    h.tf.clientOffsetUs = 3_000;
+    h.scheduler.handleDecodedChunk(
+      makeChunk(base + CHUNK_US, h.state.streamGeneration),
+    );
+    h.scheduler.processAudioQueue();
+    const replacement = h.ctx.startedSources[3];
+    expect(replacement.started!).toBeCloseTo(
+      a.started! + a.buffer!.duration,
+      6,
+    );
+  });
+});
+
 describe("AudioScheduler consecutive-chunk continuity", () => {
   it("schedules consecutive in-sync chunks back-to-back (no gap)", () => {
     const { scheduler, ctx } = setup();

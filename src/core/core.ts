@@ -62,7 +62,7 @@ export class SendspinCore implements StreamHandler {
     format: StreamFormat,
     isFormatUpdate: boolean,
   ) => void;
-  private _onStreamClear?: () => void;
+  private _onStreamClear?: (fromTimestampUs?: number) => void;
   private _onStreamEnd?: () => void;
   private _onVolumeUpdate?: () => void;
   private _onSyncDelayChange?: (delayMs: number) => void;
@@ -107,8 +107,14 @@ export class SendspinCore implements StreamHandler {
     );
 
     this.decoder = new SendspinDecoder(
-      (chunk) => this._onAudioData?.(chunk),
-      () => this.stateManager.streamGeneration,
+      (chunk) => {
+        if (
+          this.stateManager.isChunkLive(chunk.generation, chunk.serverTimeUs)
+        ) {
+          this._onAudioData?.(chunk);
+        }
+      },
+      () => this.stateManager.firstLiveGeneration,
     );
 
     this.wsManager = new WebSocketManager(config.reconnect);
@@ -302,9 +308,13 @@ export class SendspinCore implements StreamHandler {
     this._onStreamStart?.(format, isFormatUpdate);
   }
 
-  handleStreamClear(): void {
-    this.discardPendingAudio();
-    this._onStreamClear?.();
+  handleStreamClear(fromTimestampUs?: number): void {
+    if (fromTimestampUs === undefined) {
+      this.discardPendingAudio();
+    } else {
+      this.stateManager.clearStreamFrom(fromTimestampUs);
+    }
+    this._onStreamClear?.(fromTimestampUs);
   }
 
   handleStreamEnd(): void {
@@ -348,7 +358,7 @@ export class SendspinCore implements StreamHandler {
   ) {
     this._onStreamStart = cb;
   }
-  set onStreamClear(cb: (() => void) | undefined) {
+  set onStreamClear(cb: ((fromTimestampUs?: number) => void) | undefined) {
     this._onStreamClear = cb;
   }
   set onStreamEnd(cb: (() => void) | undefined) {

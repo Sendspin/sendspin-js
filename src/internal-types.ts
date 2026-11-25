@@ -18,7 +18,7 @@ export interface AudioBufferQueueItem {
 export interface StreamHandler {
   handleBinaryMessage(data: ArrayBuffer): void;
   handleStreamStart(format: StreamFormat, isFormatUpdate: boolean): void;
-  handleStreamClear(): void;
+  handleStreamClear(fromTimestampUs?: number): void;
   handleStreamEnd(): void;
   handleVolumeUpdate(): void;
   handleSyncDelayChange(delayMs: number): void;

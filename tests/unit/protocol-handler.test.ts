@@ -162,6 +162,14 @@ describe("ProtocolHandler", () => {
       expect(streamHandler.handleStreamClear).toHaveBeenCalledTimes(1);
     });
 
+    it("forwards from_timestamp to the stream handler", () => {
+      dispatch(handler, {
+        type: "stream/clear",
+        payload: { from_timestamp: 5_000_000 },
+      });
+      expect(streamHandler.handleStreamClear).toHaveBeenCalledWith(5_000_000);
+    });
+
     it("ignores a clear whose roles exclude the player", () => {
       dispatch(handler, {
         type: "stream/clear",

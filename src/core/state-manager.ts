@@ -54,6 +54,7 @@ export class StateManager {
   private _streamStartServerTime: number = 0;
   private _streamStartAudioTime: number = 0;
   private _streamGeneration: number = 0;
+  private partialClears: { generation: number; fromUs: number }[] = [];
 
   // Cached server state (from server/state messages)
   private _serverState: ServerStatePayload = {};
@@ -166,11 +167,31 @@ export class StateManager {
     this._streamStartServerTime = 0;
     this._streamStartAudioTime = 0;
     this._streamGeneration++;
+    this.partialClears = [];
+  }
+
+  /** Starts a new generation and drops earlier-generation chunks timestamped at or after fromUs. */
+  clearStreamFrom(fromUs: number): void {
+    this.partialClears.push({ generation: this._streamGeneration, fromUs });
+    this._streamGeneration++;
   }
 
   // Get current stream generation
   get streamGeneration(): number {
     return this._streamGeneration;
+  }
+
+  /** Generation of the last full clear. Chunks from earlier generations are stale. */
+  get firstLiveGeneration(): number {
+    return this._streamGeneration - this.partialClears.length;
+  }
+
+  isChunkLive(generation: number, serverTimeUs: number): boolean {
+    if (generation === this._streamGeneration) return true;
+    if (generation < this.firstLiveGeneration) return false;
+    return this.partialClears.every(
+      (clear) => clear.generation < generation || serverTimeUs < clear.fromUs,
+    );
   }
 
   // Interval management

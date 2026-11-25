@@ -143,8 +143,12 @@ export class SendspinPlayer {
       this.scheduler.startAudioElement();
     };
 
-    this.core.onStreamClear = () => {
-      this.scheduler.clearBuffers();
+    this.core.onStreamClear = (fromTimestampUs) => {
+      if (fromTimestampUs === undefined) {
+        this.scheduler.clearBuffers();
+      } else {
+        this.scheduler.clearBuffersFrom(fromTimestampUs);
+      }
     };
 
     this.core.onStreamEnd = () => {
