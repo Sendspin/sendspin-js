@@ -793,7 +793,8 @@ export class AudioScheduler {
       console.warn("Sendspin: Received audio chunk but no audio context");
       return;
     }
-    if (chunk.generation !== this.stateManager.streamGeneration) return;
+    if (!this.stateManager.isChunkLive(chunk.generation, chunk.serverTimeUs))
+      return;
     const numChannels = chunk.samples.length;
     const numFrames = chunk.samples[0].length;
     const audioBuffer = this.audioContext.createBuffer(
@@ -816,9 +817,8 @@ export class AudioScheduler {
     if (!this.audioContext || !this.gainNode) return;
     if (this.audioContext.state !== "running") return;
 
-    const currentGeneration = this.stateManager.streamGeneration;
-    this.audioBufferQueue = this.audioBufferQueue.filter(
-      (chunk) => chunk.generation === currentGeneration,
+    this.audioBufferQueue = this.audioBufferQueue.filter((chunk) =>
+      this.stateManager.isChunkLive(chunk.generation, chunk.serverTime),
     );
     this.audioBufferQueue.sort((a, b) => a.serverTime - b.serverTime);
     if (!this.timeFilter.is_synchronized) return;
@@ -1100,6 +1100,37 @@ export class AudioScheduler {
     this.resyncCount = 0;
     this.latencyTracker.reset();
     this.clockSource.reset();
+  }
+
+  /** Drops audio timestamped at or after fromServerTimeUs and keeps the timeline of the audio before it. */
+  clearBuffersFrom(fromServerTimeUs: number): void {
+    this.audioBufferQueue = this.audioBufferQueue.filter(
+      (chunk) => chunk.serverTime < fromServerTimeUs,
+    );
+    const kept: typeof this.scheduledSources = [];
+    for (const entry of this.scheduledSources) {
+      if (entry.serverTime < fromServerTimeUs) {
+        kept.push(entry);
+        continue;
+      }
+      entry.source.onended = null;
+      try {
+        entry.source.stop();
+      } catch {
+        /* ignore */
+      }
+    }
+    this.scheduledSources = kept;
+    if (kept.length === 0) {
+      this.resetScheduledPlaybackState("cleared from timestamp");
+      return;
+    }
+    if (this.nextPlaybackTime === 0) return;
+    const tail = kept.reduce((a, b) => (b.endTime > a.endTime ? b : a));
+    this.nextPlaybackTime -= this.nextScheduleTime - tail.endTime;
+    this.nextScheduleTime = tail.endTime;
+    this.lastScheduledServerTime =
+      tail.serverTime + tail.buffer.duration * 1_000_000;
   }
 
   // Leaves the AudioContext running, since a resumed one can play late or silent on Chromium for Android.

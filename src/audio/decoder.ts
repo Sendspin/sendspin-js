@@ -9,7 +9,7 @@ import type { StreamFormat, DecodedAudioChunk } from "../types";
 
 export class SendspinDecoder {
   private onDecodedChunk: (chunk: DecodedAudioChunk) => void;
-  private currentGeneration: () => number;
+  private firstLiveGeneration: () => number;
 
   // Native Opus decoder (WebCodecs API)
   private webCodecsDecoder: AudioDecoder | null = null;
@@ -33,10 +33,10 @@ export class SendspinDecoder {
 
   constructor(
     onDecodedChunk: (chunk: DecodedAudioChunk) => void,
-    currentGeneration: () => number,
+    firstLiveGeneration: () => number,
   ) {
     this.onDecodedChunk = onDecodedChunk;
-    this.currentGeneration = currentGeneration;
+    this.firstLiveGeneration = firstLiveGeneration;
   }
 
   /**
@@ -78,7 +78,7 @@ export class SendspinDecoder {
       try {
         const decoded = await this.decode(audioData, format);
 
-        if (decoded && generation === this.currentGeneration()) {
+        if (decoded && generation >= this.firstLiveGeneration()) {
           this.onDecodedChunk({
             samples: decoded.samples,
             sampleRate: decoded.sampleRate,
@@ -350,9 +350,9 @@ export class SendspinDecoder {
         audioData.close();
         return;
       }
-      if (generation !== this.currentGeneration()) {
+      if (generation < this.firstLiveGeneration()) {
         console.warn(
-          `[NativeOpus] Dropping old-stream frame (ts=${serverTimeUs}, gen=${generation} != current=${this.currentGeneration()})`,
+          `[NativeOpus] Dropping old-stream frame (ts=${serverTimeUs}, gen=${generation} < first live=${this.firstLiveGeneration()})`,
         );
         audioData.close();
         return;

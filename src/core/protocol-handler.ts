@@ -326,8 +326,13 @@ export class ProtocolHandler {
   private handleStreamClear(message: StreamClear): void {
     const roles = message.payload.roles;
     if (!roles || roles.includes("player")) {
-      console.log("Sendspin: Stream clear (seek)");
-      this.streamHandler.handleStreamClear();
+      const fromTimestampUs = message.payload.from_timestamp;
+      console.log(
+        fromTimestampUs === undefined
+          ? "Sendspin: Stream clear (seek)"
+          : `Sendspin: Stream clear from ${fromTimestampUs}`,
+      );
+      this.streamHandler.handleStreamClear(fromTimestampUs);
     }
   }
 

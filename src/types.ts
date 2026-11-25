@@ -229,6 +229,7 @@ export interface StreamClear {
   payload: {
     server_transmitted: number;
     roles?: string[];
+    from_timestamp?: number;
   };
 }
 
@@ -517,7 +518,7 @@ export interface DecodedAudioChunk {
   sampleRate: number;
   /** Server timestamp in microseconds */
   serverTimeUs: number;
-  /** Stream generation (incremented on each new stream) */
+  /** Stream generation (incremented on each new stream and clear). Chunks kept by a clear with from_timestamp keep their generation, so they can arrive after chunks of a newer one. */
   generation: number;
 }
 
@@ -597,7 +598,8 @@ export interface ApplicationRole {
     isUpdate: boolean,
     serverTransmittedUs: number,
   ): void;
-  onStreamClear?(serverTransmittedUs: number): void;
+  /** fromTimestampUs is set when the server clears only data at or after that server time. */
+  onStreamClear?(serverTransmittedUs: number, fromTimestampUs?: number): void;
   onStreamEnd?(): void;
   /** data excludes the message ID byte. receivedAtUs is on the local clock. */
   onBinaryMessage?(id: number, data: Uint8Array, receivedAtUs: number): void;

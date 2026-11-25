@@ -163,7 +163,10 @@ export class ApplicationRoles {
           // Without a role list, stream/clear targets only player and visualizer.
           if (roles?.includes(family)) {
             call(role, "onStreamClear", () =>
-              role.onStreamClear?.(serverTransmittedUs),
+              role.onStreamClear?.(
+                serverTransmittedUs,
+                payload.from_timestamp as number | undefined,
+              ),
             );
           }
           break;

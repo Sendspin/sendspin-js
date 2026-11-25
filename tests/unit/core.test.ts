@@ -204,6 +204,34 @@ describe("SendspinCore (offline)", () => {
       expect(onAudioData).toHaveBeenCalledTimes(1);
       expect(onAudioData.mock.calls[0][0].serverTimeUs).toBe(2000);
     });
+
+    it("keeps a decoding chunk before from_timestamp and drops one at or after it", async () => {
+      const onAudioData = vi.fn();
+      core.onAudioData = onAudioData;
+      core._stateManager.currentStreamFormat = PCM_FORMAT;
+      const chunk = (timestampUs: number, sample: number) => {
+        const data = new Uint8Array(13 + 4 * PCM_FORMAT.channels);
+        data[0] = 4;
+        new DataView(data.buffer).setBigInt64(1, BigInt(timestampUs));
+        new DataView(data.buffer).setInt16(13, sample, true);
+        return data.buffer;
+      };
+
+      core.handleBinaryMessage(chunk(1000, 1));
+      core.handleBinaryMessage(chunk(2000, 1));
+      core.handleStreamClear(2000);
+      core.handleBinaryMessage(chunk(2000, 2));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      const emitted = onAudioData.mock.calls.map(([c]) => [
+        c.serverTimeUs,
+        Math.round(c.samples[0][0] * 32768),
+      ]);
+      expect(emitted).toEqual([
+        [1000, 1],
+        [2000, 2],
+      ]);
+    });
   });
 
   describe("teardown", () => {

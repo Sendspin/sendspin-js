@@ -52,6 +52,20 @@ describe("StateManager", () => {
       expect(sm.streamStartServerTime).toBe(0);
       expect(sm.streamStartAudioTime).toBe(0);
     });
+
+    it("keeps chunks before every later partial clear until a full clear", () => {
+      sm.clearStreamFrom(2000);
+      sm.clearStreamFrom(3000);
+
+      expect(sm.isChunkLive(0, 1999)).toBe(true);
+      expect(sm.isChunkLive(0, 2000)).toBe(false);
+      expect(sm.isChunkLive(1, 2999)).toBe(true);
+      expect(sm.isChunkLive(1, 3000)).toBe(false);
+      expect(sm.isChunkLive(2, 3000)).toBe(true);
+
+      sm.resetStreamAnchors();
+      expect(sm.isChunkLive(2, 1000)).toBe(false);
+    });
   });
 
   describe("onStateChange callback", () => {

@@ -314,13 +314,27 @@ describe("application role messages", () => {
       server_transmitted: 2,
       roles: ["_example_display"],
     });
-    expect(role.onStreamClear).toHaveBeenCalledExactlyOnceWith(2);
+    expect(role.onStreamClear).toHaveBeenCalledExactlyOnceWith(2, undefined);
 
     t.route("stream/end", { roles: ["player"] });
     expect(role.onStreamEnd).not.toHaveBeenCalled();
     t.route("stream/end", {});
     t.route("stream/end", {});
     expect(role.onStreamEnd).toHaveBeenCalledTimes(1);
+  });
+
+  it("passes from_timestamp of a stream/clear to the role", () => {
+    const role = makeRole(DISPLAY_V1);
+    const t = track(setup([role]));
+    t.activate([DISPLAY_V1]);
+    t.route("stream/start", { server_transmitted: 0, _example_display: {} });
+
+    t.route("stream/clear", {
+      server_transmitted: 1,
+      roles: ["_example_display"],
+      from_timestamp: 5000,
+    });
+    expect(role.onStreamClear).toHaveBeenCalledExactlyOnceWith(1, 5000);
   });
 
   it("routes binary IDs to the active role that claims them", () => {
