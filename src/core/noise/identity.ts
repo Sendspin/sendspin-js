@@ -1,6 +1,6 @@
-import type { SendspinStorage } from "../../types";
-import { SUITES } from "./suites";
-import { base64urlEncode, base64urlDecode } from "./base64url";
+import type { SendspinStorage } from "../../types.js";
+import { SUITES } from "./suites.js";
+import { base64urlEncode, base64urlDecode } from "./base64url.js";
 
 const SK_KEY = "sendspin-identity-sk";
 

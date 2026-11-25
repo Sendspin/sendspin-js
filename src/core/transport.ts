@@ -1,18 +1,18 @@
-import type { WebSocketManager } from "./websocket-manager";
-import type { Identity } from "./noise/identity";
-import type { PskStore, PskEntry, PskCategory } from "./noise/psk";
-import type { SuiteId } from "./noise/suites";
-import { SUITES, SUITE_WIRE_NAME } from "./noise/suites";
-import { HandshakeState, MSG1, MSG2 } from "./noise/handshake";
-import { NoiseSession } from "./noise/session";
-import { base64urlEncode, base64urlDecode } from "./noise/base64url";
-import { SENTINEL_PSK_ID } from "./noise/constants";
-import { authorizeActivate } from "./activate-authorization";
+import type { WebSocketManager } from "./websocket-manager.js";
+import type { Identity } from "./noise/identity.js";
+import type { PskStore, PskEntry, PskCategory } from "./noise/psk.js";
+import type { SuiteId } from "./noise/suites.js";
+import { SUITES, SUITE_WIRE_NAME } from "./noise/suites.js";
+import { HandshakeState, MSG1, MSG2 } from "./noise/handshake.js";
+import { NoiseSession } from "./noise/session.js";
+import { base64urlEncode, base64urlDecode } from "./noise/base64url.js";
+import { SENTINEL_PSK_ID } from "./noise/constants.js";
+import { authorizeActivate } from "./activate-authorization.js";
 import type {
   ActivatePairing,
   GoodbyeReason,
   SupportedPairMethods,
-} from "../types";
+} from "../types.js";
 
 const utf8 = new TextEncoder();
 const dutf8 = new TextDecoder();

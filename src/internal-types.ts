@@ -3,7 +3,7 @@
  * public API surface. These are intentionally NOT re-exported from index.ts.
  */
 
-import type { StreamFormat } from "./types";
+import type { StreamFormat } from "./types.js";
 
 export interface AudioBufferQueueItem {
   buffer: AudioBuffer;

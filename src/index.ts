@@ -1,6 +1,6 @@
-import { SendspinCore } from "./core/core";
-import { AudioScheduler } from "./audio/scheduler";
-import { SILENT_AUDIO_SRC } from "./silent-audio.generated";
+import { SendspinCore } from "./core/core.js";
+import { AudioScheduler } from "./audio/scheduler.js";
+import { SILENT_AUDIO_SRC } from "./silent-audio.generated.js";
 import type {
   SendspinPlayerConfig,
   SendspinStorage,
@@ -10,7 +10,7 @@ import type {
   ControllerCommand,
   ControllerCommands,
   CorrectionMode,
-} from "./types";
+} from "./types.js";
 
 // Platform detection utilities
 function detectIsAndroid(): boolean {
@@ -438,13 +438,13 @@ export class SendspinPlayer {
 }
 
 // Re-export types for convenience
-export * from "./types";
-export { SendspinTimeFilter } from "./core/time-filter";
-export { SendspinCore } from "./core/core";
-export { loadSendspinClientIdentity } from "./client-identity";
-export type { SendspinClientIdentity } from "./client-identity";
-export { SendspinDecoder } from "./audio/decoder";
-export { AudioScheduler } from "./audio/scheduler";
+export * from "./types.js";
+export { SendspinTimeFilter } from "./core/time-filter.js";
+export { SendspinCore } from "./core/core.js";
+export { loadSendspinClientIdentity } from "./client-identity.js";
+export type { SendspinClientIdentity } from "./client-identity.js";
+export { SendspinDecoder } from "./audio/decoder.js";
+export { AudioScheduler } from "./audio/scheduler.js";
 
 // Export platform detection utilities
 export { detectIsAndroid, detectIsIOS, detectIsMobile, detectIsCastRuntime };

@@ -1,4 +1,4 @@
-import { base64urlDecode } from "./base64url";
+import { base64urlDecode } from "./base64url.js";
 
 const BASE32_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
 const KEY_SIZE = 32;

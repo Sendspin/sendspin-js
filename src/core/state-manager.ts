@@ -4,8 +4,8 @@ import type {
   ServerStatePayload,
   ServerStateMetadata,
   GroupUpdatePayload,
-} from "../types";
-import type { VolumeStore } from "./volume-store";
+} from "../types.js";
+import type { VolumeStore } from "./volume-store.js";
 
 export function clampVolume(volume: number): number {
   return Math.max(0, Math.min(100, Math.round(volume)));
