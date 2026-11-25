@@ -1,4 +1,4 @@
-import type { ApplicationRole, ApplicationRoleSession } from "../types";
+import type { ApplicationRole, ApplicationRoleSession } from "../types.js";
 
 const ROLE_ID = /^_[^@]+@[^@]+$/;
 const MIN_BINARY_ID = 192;

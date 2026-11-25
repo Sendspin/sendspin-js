@@ -1,7 +1,7 @@
-import type { SendspinTimeFilter } from "./time-filter";
-import type { StateManager } from "./state-manager";
-import type { MessageSender } from "./protocol-handler";
-import type { ClientTime, MessageType, ServerTime } from "../types";
+import type { SendspinTimeFilter } from "./time-filter.js";
+import type { StateManager } from "./state-manager.js";
+import type { MessageSender } from "./protocol-handler.js";
+import type { ClientTime, MessageType, ServerTime } from "../types.js";
 
 const TIME_SYNC_BURST_SIZE = 8;
 // Stays under the spec's 10 s maximum between burst starts, leaving room for timer lateness.

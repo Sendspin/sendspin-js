@@ -1,7 +1,7 @@
-export * from "./base64url";
-export * from "./constants";
-export * from "./suites";
-export * from "./handshake";
-export * from "./session";
-export { CipherState } from "./cipher-state";
-export { SymmetricState } from "./symmetric-state";
+export * from "./base64url.js";
+export * from "./constants.js";
+export * from "./suites.js";
+export * from "./handshake.js";
+export * from "./session.js";
+export { CipherState } from "./cipher-state.js";
+export { SymmetricState } from "./symmetric-state.js";

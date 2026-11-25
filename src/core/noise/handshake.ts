@@ -1,6 +1,6 @@
-import type { CipherSuite } from "./suites";
-import { SymmetricState } from "./symmetric-state";
-import { CipherState } from "./cipher-state";
+import type { CipherSuite } from "./suites.js";
+import { SymmetricState } from "./symmetric-state.js";
+import { CipherState } from "./cipher-state.js";
 
 export type Role = "initiator" | "responder";
 type Token = "e" | "s" | "ee" | "es" | "se" | "ss" | "psk";

@@ -3,8 +3,8 @@
  * reconnections, as the spec requires.
  */
 
-import type { SendspinStorage } from "../types";
-import { clampSyncDelayMs } from "../sync-delay";
+import type { SendspinStorage } from "../types.js";
+import { clampSyncDelayMs } from "../sync-delay.js";
 
 // Ignore delays saved before fixed scheduling headroom was removed (#159).
 const STATIC_DELAY_STORAGE_KEY = "sendspin-static-delay-ms-v2";

@@ -1,6 +1,6 @@
-import type { SendspinStorage } from "../../types";
-import { SENTINEL_PSK, pskId } from "./constants";
-import { base64urlEncode, base64urlDecode } from "./base64url";
+import type { SendspinStorage } from "../../types.js";
+import { SENTINEL_PSK, pskId } from "./constants.js";
+import { base64urlEncode, base64urlDecode } from "./base64url.js";
 
 /** A Sendspin PSK is 32 bytes from a CSPRNG. */
 function randomPsk(): Uint8Array {

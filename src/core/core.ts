@@ -7,23 +7,23 @@
  * tools directly.
  */
 
-import { SendspinDecoder } from "../audio/decoder";
-import { ProtocolHandler } from "./protocol-handler";
-import { StateManager } from "./state-manager";
-import { WebSocketManager } from "./websocket-manager";
-import { SendspinTimeFilter } from "./time-filter";
-import { StaticDelayStore } from "./static-delay-store";
-import { VolumeStore } from "./volume-store";
-import { clampSyncDelayMs } from "../sync-delay";
-import { Identity } from "./noise/identity";
-import { PskStore } from "./noise/psk";
-import { SendspinTransport } from "./transport";
-import type { HandshakeInfo } from "./transport";
-import { SUITES } from "./noise/suites";
-import { PairingManager } from "./pairing";
-import { ApplicationRoles } from "./application-roles";
-import { base64urlDecode } from "./noise/base64url";
-import { encodePairingToken } from "./noise/pairing-token";
+import { SendspinDecoder } from "../audio/decoder.js";
+import { ProtocolHandler } from "./protocol-handler.js";
+import { StateManager } from "./state-manager.js";
+import { WebSocketManager } from "./websocket-manager.js";
+import { SendspinTimeFilter } from "./time-filter.js";
+import { StaticDelayStore } from "./static-delay-store.js";
+import { VolumeStore } from "./volume-store.js";
+import { clampSyncDelayMs } from "../sync-delay.js";
+import { Identity } from "./noise/identity.js";
+import { PskStore } from "./noise/psk.js";
+import { SendspinTransport } from "./transport.js";
+import type { HandshakeInfo } from "./transport.js";
+import { SUITES } from "./noise/suites.js";
+import { PairingManager } from "./pairing.js";
+import { ApplicationRoles } from "./application-roles.js";
+import { base64urlDecode } from "./noise/base64url.js";
+import { encodePairingToken } from "./noise/pairing-token.js";
 import type {
   ActivatePairing,
   SendspinCoreConfig,
@@ -35,8 +35,8 @@ import type {
   ControllerCommands,
   ServerStatePayload,
   GroupUpdatePayload,
-} from "../types";
-import type { StreamHandler } from "../internal-types";
+} from "../types.js";
+import type { StreamHandler } from "../internal-types.js";
 
 export class SendspinCore implements StreamHandler {
   private wsManager: WebSocketManager;

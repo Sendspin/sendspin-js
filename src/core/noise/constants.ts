@@ -1,5 +1,5 @@
 import { sha256 } from "@noble/hashes/sha2.js";
-import { base64urlEncode } from "./base64url";
+import { base64urlEncode } from "./base64url.js";
 
 const enc = new TextEncoder();
 

@@ -1,7 +1,7 @@
 import { hmac } from "@noble/hashes/hmac.js";
 import { sha256 } from "@noble/hashes/sha2.js";
-import type { CipherSuite } from "./suites";
-import { CipherState, EMPTY } from "./cipher-state";
+import type { CipherSuite } from "./suites.js";
+import { CipherState, EMPTY } from "./cipher-state.js";
 
 const HASHLEN = 32;
 

@@ -1,9 +1,9 @@
-import type { PskCategory } from "./noise/psk";
+import type { PskCategory } from "./noise/psk.js";
 import type {
   ActivatePairing,
   GoodbyeReason,
   SupportedPairMethods,
-} from "../types";
+} from "../types.js";
 
 export type AuthResult =
   | { ok: true; activeRoles: string[] }

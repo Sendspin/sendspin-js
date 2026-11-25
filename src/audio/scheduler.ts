@@ -12,21 +12,21 @@ import type {
   CorrectionThresholds,
   DecodedAudioChunk,
   SendspinStorage,
-} from "../types";
-import type { AudioBufferQueueItem } from "../internal-types";
-import type { StateManager } from "../core/state-manager";
-import type { SendspinTimeFilter } from "../core/time-filter";
-import { ClockSource } from "./clock-source";
+} from "../types.js";
+import type { AudioBufferQueueItem } from "../internal-types.js";
+import type { StateManager } from "../core/state-manager.js";
+import type { SendspinTimeFilter } from "../core/time-filter.js";
+import { ClockSource } from "./clock-source.js";
 import {
   RecorrectionMonitor,
   RECORRECTION_CUTOVER_GUARD_SEC,
-} from "./recorrection-monitor";
-import { OutputLatencyTracker } from "./output-latency-tracker";
+} from "./recorrection-monitor.js";
+import { OutputLatencyTracker } from "./output-latency-tracker.js";
 import {
   getUnreportedOutputLatencyMs,
   reportsContextTimeAtRenderPosition,
-} from "./platform-output-latency";
-import { clampSyncDelayMs } from "../sync-delay";
+} from "./platform-output-latency.js";
+import { clampSyncDelayMs } from "../sync-delay.js";
 
 // Sync correction constants
 const SAMPLE_CORRECTION_FADE_LEN = 8;

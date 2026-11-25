@@ -1,5 +1,5 @@
-import type { CipherState } from "./cipher-state";
-import type { Role } from "./handshake";
+import type { CipherState } from "./cipher-state.js";
+import type { Role } from "./handshake.js";
 
 const EMPTY = new Uint8Array(0);
 

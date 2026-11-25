@@ -1,5 +1,5 @@
-import type { PskStore } from "./noise/psk";
-import { base64urlEncode, base64urlDecode } from "./noise/base64url";
+import type { PskStore } from "./noise/psk.js";
+import { base64urlEncode, base64urlDecode } from "./noise/base64url.js";
 import type {
   ActivatePairing,
   PairAbortReason,
@@ -9,8 +9,8 @@ import type {
   PairSecretLocation,
   SendspinStorage,
   SupportedPairMethods,
-} from "../types";
-import { CPace, CPaceError, SHARE_SIZE, TAG_SIZE } from "./pake/cpace";
+} from "../types.js";
+import { CPace, CPaceError, SHARE_SIZE, TAG_SIZE } from "./pake/cpace.js";
 import {
   NONCE_SIZE,
   commitNonce,
@@ -18,9 +18,9 @@ import {
   deriveQrPairingCode,
   generateNonce,
   isValidStaticPairingCode,
-} from "./pake/pin";
+} from "./pake/pin.js";
 import { sha256 } from "@noble/hashes/sha2.js";
-import { encodeQrCodeToken } from "./noise/pairing-token";
+import { encodeQrCodeToken } from "./noise/pairing-token.js";
 
 export type PairingEvent = "pending" | "started" | "finalized" | "aborted";
 

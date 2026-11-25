@@ -1,4 +1,4 @@
-import type { CipherSuite } from "./suites";
+import type { CipherSuite } from "./suites.js";
 
 const EMPTY = new Uint8Array(0);
 
