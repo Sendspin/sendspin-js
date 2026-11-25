@@ -187,6 +187,7 @@ export class StateManager {
   }
 
   isChunkLive(generation: number, serverTimeUs: number): boolean {
+    if (generation === this._streamGeneration) return true;
     if (generation < this.firstLiveGeneration) return false;
     return this.partialClears.every(
       (clear) => clear.generation < generation || serverTimeUs < clear.fromUs,
