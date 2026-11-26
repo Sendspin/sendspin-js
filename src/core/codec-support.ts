@@ -1,4 +1,4 @@
-import type { Codec, SupportedFormat } from "../types";
+import type { Codec, SupportedFormat } from "../types.js";
 
 // Depth of buffered audio the server streams ahead, in seconds. Servers gate
 // the send queue on both bytes (buffer_capacity) and duration; aiosendspin's

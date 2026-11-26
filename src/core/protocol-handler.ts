@@ -1,4 +1,4 @@
-import type { SendspinTimeFilter } from "./time-filter";
+import type { SendspinTimeFilter } from "./time-filter.js";
 import type {
   ClientCommand,
   ClientGoodbye,
@@ -20,13 +20,16 @@ import type {
   StreamEnd,
   StreamStart,
   SupportedPairMethods,
-} from "../types";
-import type { StreamHandler } from "../internal-types";
-import { clampVolume, type StateManager } from "./state-manager";
-import { TimeSyncManager } from "./time-sync-manager";
-import { getDefaultBufferCapacity, getSupportedFormats } from "./codec-support";
-import { clampSyncDelayMs } from "../sync-delay";
-import type { ApplicationRoles } from "./application-roles";
+} from "../types.js";
+import type { StreamHandler } from "../internal-types.js";
+import { clampVolume, type StateManager } from "./state-manager.js";
+import { TimeSyncManager } from "./time-sync-manager.js";
+import {
+  getDefaultBufferCapacity,
+  getSupportedFormats,
+} from "./codec-support.js";
+import { clampSyncDelayMs } from "../sync-delay.js";
+import type { ApplicationRoles } from "./application-roles.js";
 
 // Constants
 const STATE_UPDATE_INTERVAL = 5000; // 5 seconds

@@ -9,7 +9,7 @@
  * (built-in speakers, USB DAC, Bluetooth) as it changes at runtime.
  */
 
-import type { SendspinStorage } from "../types";
+import type { SendspinStorage } from "../types.js";
 
 /**
  * Stand-in for AudioContext.outputLatency on browsers that do not implement it

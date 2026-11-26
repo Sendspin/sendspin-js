@@ -1,4 +1,4 @@
-import type { ReconnectConfig } from "../types";
+import type { ReconnectConfig } from "../types.js";
 
 export class WebSocketManager {
   private ws: WebSocket | null = null;

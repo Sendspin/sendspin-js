@@ -1,7 +1,7 @@
-import type { SendspinStorage } from "./types";
-import { Identity } from "./core/noise/identity";
-import { PskStore } from "./core/noise/psk";
-import { encodePairingToken } from "./core/noise/pairing-token";
+import type { SendspinStorage } from "./types.js";
+import { Identity } from "./core/noise/identity.js";
+import { PskStore } from "./core/noise/psk.js";
+import { encodePairingToken } from "./core/noise/pairing-token.js";
 
 export interface SendspinClientIdentity {
   /** The client's stable identity id (base64url X25519 public key). */

@@ -3,7 +3,7 @@
  * spec recommends.
  */
 
-import type { SendspinStorage } from "../types";
+import type { SendspinStorage } from "../types.js";
 
 const VOLUME_STORAGE_KEY = "sendspin-volume";
 const MUTED_STORAGE_KEY = "sendspin-muted";
