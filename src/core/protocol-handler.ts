@@ -19,6 +19,7 @@ import type {
   StreamClear,
   StreamEnd,
   StreamStart,
+  SupportedFormat,
   SupportedPairMethods,
 } from "../types.js";
 import type { StreamHandler } from "../internal-types.js";
@@ -77,6 +78,7 @@ export class ProtocolHandler {
   private manufacturer?: string;
   private softwareVersion?: string;
   private codecs: Codec[];
+  private advertisedFormats: SupportedFormat[] | null = null;
   private bufferCapacity: number | undefined;
   private requiredLeadTimeMs: number;
   private minBufferMs: number;
@@ -408,9 +410,14 @@ export class ProtocolHandler {
     this.sendStateUpdate(true);
   }
 
+  get supportedFormats(): SupportedFormat[] {
+    this.advertisedFormats ??= getSupportedFormats(this.codecs);
+    return this.advertisedFormats;
+  }
+
   // client_id and version live in client/init, not the hello.
   sendClientHello(): void {
-    const supportedFormats = getSupportedFormats(this.codecs);
+    const supportedFormats = this.supportedFormats;
     const hello: ClientHello = {
       type: "client/hello" as MessageType.CLIENT_HELLO,
       payload: {
