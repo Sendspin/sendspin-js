@@ -211,6 +211,19 @@ player.setRequiredLeadTimeMs(300);
 player.setMinBufferMs(1500);
 ```
 
+### Preferred format
+
+`supportedFormats` lists the formats the player advertises to the server, in
+priority order. It depends on the `codecs` option and on what the browser can
+decode. Report one of them as preferred at runtime, and the server streams it
+when it can, though it may still pick another advertised format, for example
+to match a track's sample rate. Pass `null` to clear the preference.
+
+```typescript
+const flac = player.supportedFormats.find((format) => format.codec === 'flac');
+if (flac) player.setPreferredFormat(flac);
+```
+
 ### Encryption and pairing
 
 Every connection is encrypted (Noise KKpsk2). By default the SDK connects

@@ -271,8 +271,15 @@ class HarnessServer:
                     and isinstance(raw_player, dict)
                     and raw_player.get("volume") == expected_volume
                 ):
+                    preferred = role.preferred_format
                     return {
                         "raw_payload": self.raw_client_state,
+                        "server_preferred_format": {
+                            "codec": role.preferred_codec.value,
+                            "channels": preferred.channels,
+                            "sample_rate": preferred.sample_rate,
+                            "bit_depth": preferred.bit_depth,
+                        },
                         "semantic_state": {
                             "available": client.available,
                             "player": {

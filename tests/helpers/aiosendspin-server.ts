@@ -39,6 +39,12 @@ export type CodeWaitResult =
 
 export interface ReceivedClientState {
   raw_payload: Record<string, unknown>;
+  server_preferred_format: {
+    codec: string;
+    channels: number;
+    sample_rate: number;
+    bit_depth: number;
+  };
   semantic_state: {
     available: boolean;
     player: {

@@ -6,6 +6,7 @@ import type {
   SendspinStorage,
   PlayerState,
   StreamFormat,
+  SupportedFormat,
   GoodbyeReason,
   ControllerCommand,
   ControllerCommands,
@@ -299,6 +300,15 @@ export class SendspinPlayer {
   }
 
   /**
+   * Report the format the player prefers via client/state, or null to leave
+   * the choice to the supportedFormats order. Throws RangeError unless the
+   * format is one of supportedFormats.
+   */
+  setPreferredFormat(format: SupportedFormat | null): void {
+    this.core.setPreferredFormat(format);
+  }
+
+  /**
    * Set the sync correction mode at runtime.
    */
   setCorrectionMode(mode: CorrectionMode): void {
@@ -340,6 +350,15 @@ export class SendspinPlayer {
 
   get currentFormat(): StreamFormat | null {
     return this.core.currentFormat;
+  }
+
+  get preferredFormat(): SupportedFormat | null {
+    return this.core.preferredFormat;
+  }
+
+  /** The formats advertised to the server, in priority order. */
+  get supportedFormats(): SupportedFormat[] {
+    return this.core.supportedFormats;
   }
 
   get isConnected(): boolean {

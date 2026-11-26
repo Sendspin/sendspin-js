@@ -251,6 +251,7 @@ describe("ProtocolHandler extra", () => {
   afterEach(() => {
     stateManager.clearAllIntervals();
     vi.useRealTimers();
+    vi.unstubAllGlobals();
   });
 
   describe("server/state metadata timing", () => {
@@ -653,6 +654,60 @@ describe("ProtocolHandler extra", () => {
         lastSent(send, "client/state")!.payload as Record<string, unknown>
       ).player as Record<string, unknown>;
       expect(player.min_buffer_ms).toBe(99);
+    });
+
+    it("sends the preferred format until it is cleared", () => {
+      const handler = makeHandler({ codecs: ["flac", "pcm"] });
+      activate(handler);
+      const flac44k = {
+        codec: "flac",
+        channels: 2,
+        sample_rate: 44100,
+        bit_depth: 16,
+      };
+
+      handler.setPreferredFormat(flac44k);
+      let player = (
+        lastSent(send, "client/state")!.payload as Record<string, unknown>
+      ).player as Record<string, unknown>;
+      expect(player.format).toEqual(flac44k);
+
+      handler.setPreferredFormat(null);
+      player = (
+        lastSent(send, "client/state")!.payload as Record<string, unknown>
+      ).player as Record<string, unknown>;
+      expect(player).not.toHaveProperty("format");
+    });
+
+    it("accepts only advertised formats, ignoring bit_depth for opus", () => {
+      vi.stubGlobal("AudioDecoder", class {});
+      const handler = makeHandler({ codecs: ["opus", "pcm"] });
+      activate(handler);
+
+      handler.setPreferredFormat({
+        codec: "opus",
+        channels: 2,
+        sample_rate: 48000,
+        bit_depth: 24,
+      });
+      expect(() =>
+        handler.setPreferredFormat({
+          codec: "pcm",
+          channels: 2,
+          sample_rate: 48000,
+          bit_depth: 24,
+        }),
+      ).toThrow(RangeError);
+
+      const player = (
+        lastSent(send, "client/state")!.payload as Record<string, unknown>
+      ).player as Record<string, unknown>;
+      expect(player.format).toEqual({
+        codec: "opus",
+        channels: 2,
+        sample_rate: 48000,
+        bit_depth: 16,
+      });
     });
 
     describe("hardware volume", () => {

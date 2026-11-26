@@ -19,6 +19,7 @@ import type {
   StreamClear,
   StreamEnd,
   StreamStart,
+  SupportedFormat,
   SupportedPairMethods,
 } from "../types.js";
 import type { StreamHandler } from "../internal-types.js";
@@ -77,6 +78,8 @@ export class ProtocolHandler {
   private manufacturer?: string;
   private softwareVersion?: string;
   private codecs: Codec[];
+  private advertisedFormats: SupportedFormat[] | null = null;
+  private formatPreference: SupportedFormat | null = null;
   private bufferCapacity: number | undefined;
   private requiredLeadTimeMs: number;
   private minBufferMs: number;
@@ -408,9 +411,14 @@ export class ProtocolHandler {
     this.sendStateUpdate(true);
   }
 
+  get supportedFormats(): SupportedFormat[] {
+    this.advertisedFormats ??= getSupportedFormats(this.codecs);
+    return this.advertisedFormats.map((format) => ({ ...format }));
+  }
+
   // client_id and version live in client/init, not the hello.
   sendClientHello(): void {
-    const supportedFormats = getSupportedFormats(this.codecs);
+    const supportedFormats = this.supportedFormats;
     const hello: ClientHello = {
       type: "client/hello" as MessageType.CLIENT_HELLO,
       payload: {
@@ -449,6 +457,31 @@ export class ProtocolHandler {
     this.sendStateUpdate();
   }
 
+  get preferredFormat(): SupportedFormat | null {
+    return this.formatPreference && { ...this.formatPreference };
+  }
+
+  setPreferredFormat(format: SupportedFormat | null): void {
+    if (format === null) {
+      this.formatPreference = null;
+    } else {
+      const match = this.supportedFormats.find(
+        (entry) =>
+          entry.codec === format.codec &&
+          entry.channels === format.channels &&
+          entry.sample_rate === format.sample_rate &&
+          (entry.codec === "opus" || entry.bit_depth === format.bit_depth),
+      );
+      if (!match) {
+        throw new RangeError(
+          `Format ${JSON.stringify(format)} is not one of the advertised supported_formats`,
+        );
+      }
+      this.formatPreference = match;
+    }
+    this.sendStateUpdate();
+  }
+
   // Send the full state, skipped when identical to the last one sent.
   // When skipHardwareRead is true, use stateManager values instead of reading from hardware.
   // This avoids race conditions when responding to volume commands.
@@ -478,6 +511,7 @@ export class ProtocolHandler {
         min_buffer_ms: this.minBufferMs,
         supported_commands: [...PLAYER_COMMANDS],
       };
+      if (this.formatPreference) payload.player.format = this.formatPreference;
     }
     Object.assign(payload, this.applicationRoles?.clientStateObjects());
 

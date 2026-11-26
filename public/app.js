@@ -57,6 +57,7 @@ const applyRequiredLeadTimeBtn = document.getElementById(
 );
 const minBufferInput = document.getElementById("min-buffer");
 const applyMinBufferBtn = document.getElementById("apply-min-buffer");
+const preferredFormatSelect = document.getElementById("preferred-format");
 const correctionModeSelect = document.getElementById("correction-mode");
 const resyncThresholdInput = document.getElementById("resync-threshold");
 const deadbandThresholdInput = document.getElementById("deadband-threshold");
@@ -473,7 +474,7 @@ function updateStatusDisplay() {
   // Format info
   const format = player.currentFormat;
   if (format) {
-    formatStatus.textContent = `${format.codec.toUpperCase()} ${format.sample_rate / 1000}kHz ${format.channels}ch`;
+    formatStatus.textContent = formatLabel(format);
   }
 
   // Sync info
@@ -895,6 +896,7 @@ async function connect() {
     volumeValue.textContent = `${player.volume}%`;
     updateMuteIcon(player.muted);
     correctionModeSelect.value = savedCorrectionMode;
+    populatePreferredFormats();
   } catch (error) {
     console.error("Connection failed:", error);
     showToast(`Connection failed: ${error.message}`, "error");
@@ -1022,6 +1024,41 @@ function applyMinBuffer() {
   showToast(`Min buffer set to ${minBuffer}ms`, "success");
 }
 
+function formatLabel(format) {
+  return `${format.codec.toUpperCase()} ${format.sample_rate / 1000}kHz ${format.channels}ch`;
+}
+
+/**
+ * List the formats the player advertised and select its current preference
+ */
+function populatePreferredFormats() {
+  const formats = player.supportedFormats;
+  preferredFormatSelect.replaceChildren(new Option("No preference", ""));
+  formats.forEach((format, index) => {
+    preferredFormatSelect.add(new Option(formatLabel(format), String(index)));
+  });
+  const preferred = JSON.stringify(player.preferredFormat);
+  const index = formats.findIndex(
+    (format) => JSON.stringify(format) === preferred,
+  );
+  preferredFormatSelect.value = index === -1 ? "" : String(index);
+}
+
+/**
+ * Apply preferred format
+ */
+function applyPreferredFormat() {
+  if (!player) return;
+  const index = preferredFormatSelect.value;
+  player.setPreferredFormat(
+    index === "" ? null : player.supportedFormats[Number(index)],
+  );
+  showToast(
+    `Preferred format set to ${preferredFormatSelect.selectedOptions[0].text}`,
+    "success",
+  );
+}
+
 /**
  * Apply correction mode
  */
@@ -1075,6 +1112,7 @@ function init() {
   applyRequiredLeadTimeBtn.addEventListener("click", applyRequiredLeadTime);
   applyMinBufferBtn.addEventListener("click", applyMinBuffer);
   correctionModeSelect.addEventListener("change", applyCorrectionMode);
+  preferredFormatSelect.addEventListener("change", applyPreferredFormat);
   resyncThresholdInput?.addEventListener("change", () => {
     localStorage.setItem(
       STORAGE_KEYS.RESYNC_THRESHOLD,
