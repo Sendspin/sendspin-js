@@ -131,6 +131,7 @@ export class ProtocolHandler {
           this.metadataDelayMs(timestampUs),
         );
         this.sendStateUpdate();
+        this.streamHandler.handleTimeSynchronized();
       },
     );
   }

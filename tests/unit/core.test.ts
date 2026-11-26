@@ -71,6 +71,12 @@ function activatePlayer(
   send.mockClear();
 }
 
+// Sync the clock to a server time 1 s before zero, so small timestamps lie just ahead.
+function syncClockBeforeZero(core: SendspinCore): void {
+  const clientUs = performance.now() * 1000;
+  core._timeFilter.update(-clientUs - 1_000_000, 500, clientUs);
+}
+
 function seedController(core: SendspinCore, commands: string[]): void {
   core._stateManager.updateServerState({
     controller: {
@@ -186,6 +192,7 @@ describe("SendspinCore (offline)", () => {
     });
 
     it("drops a chunk still decoding when stream/clear arrives", async () => {
+      syncClockBeforeZero(core);
       const onAudioData = vi.fn();
       core.onAudioData = onAudioData;
       core._stateManager.currentStreamFormat = PCM_FORMAT;
@@ -199,13 +206,14 @@ describe("SendspinCore (offline)", () => {
       core.handleBinaryMessage(chunk(1000));
       core.handleStreamClear();
       core.handleBinaryMessage(chunk(2000));
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      await vi.waitFor(() => expect(onAudioData).toHaveBeenCalled());
 
       expect(onAudioData).toHaveBeenCalledTimes(1);
       expect(onAudioData.mock.calls[0][0].serverTimeUs).toBe(2000);
     });
 
     it("keeps a decoding chunk before from_timestamp and drops one at or after it", async () => {
+      syncClockBeforeZero(core);
       const onAudioData = vi.fn();
       core.onAudioData = onAudioData;
       core._stateManager.currentStreamFormat = PCM_FORMAT;
@@ -221,7 +229,7 @@ describe("SendspinCore (offline)", () => {
       core.handleBinaryMessage(chunk(2000, 1));
       core.handleStreamClear(2000);
       core.handleBinaryMessage(chunk(2000, 2));
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      await vi.waitFor(() => expect(onAudioData).toHaveBeenCalledTimes(2));
 
       const emitted = onAudioData.mock.calls.map(([c]) => [
         c.serverTimeUs,
@@ -231,6 +239,59 @@ describe("SendspinCore (offline)", () => {
         [1000, 1],
         [2000, 2],
       ]);
+    });
+  });
+
+  describe("decode pacing", () => {
+    const pcmChunk = (timestampUs: number) => {
+      const data = new Uint8Array(13 + 4 * PCM_FORMAT.channels);
+      data[0] = 4;
+      new DataView(data.buffer).setBigInt64(1, BigInt(timestampUs));
+      return data.buffer;
+    };
+
+    it("holds audio until the clock syncs, then decodes it", async () => {
+      const onAudioData = vi.fn();
+      core.onAudioData = onAudioData;
+      core._stateManager.currentStreamFormat = PCM_FORMAT;
+
+      core.handleBinaryMessage(pcmChunk(1000));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(onAudioData).not.toHaveBeenCalled();
+
+      syncClockBeforeZero(core);
+      core.handleTimeSynchronized();
+      await vi.waitFor(() => expect(onAudioData).toHaveBeenCalledOnce());
+    });
+
+    it("decodes earlier once the output delay grows", async () => {
+      const onAudioData = vi.fn();
+      core.onAudioData = onAudioData;
+      core._stateManager.currentStreamFormat = PCM_FORMAT;
+      core._timeFilter.update(0, 500, 1_000_000);
+      core.handleBinaryMessage(
+        pcmChunk(core.getCurrentServerTimeUs() + 8_000_000),
+      );
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(onAudioData).not.toHaveBeenCalled();
+
+      core.setSyncDelay(5000);
+
+      await vi.waitFor(() => expect(onAudioData).toHaveBeenCalledOnce());
+    });
+
+    it("disconnect drops audio that was not decoded yet", async () => {
+      const onAudioData = vi.fn();
+      core.onAudioData = onAudioData;
+      core._stateManager.currentStreamFormat = PCM_FORMAT;
+      core.handleBinaryMessage(pcmChunk(1000));
+
+      core.disconnect();
+      syncClockBeforeZero(core);
+      core.handleTimeSynchronized();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(onAudioData).not.toHaveBeenCalled();
     });
   });
 

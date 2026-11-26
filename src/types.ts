@@ -508,7 +508,7 @@ export interface SendspinPlayerConfig extends SendspinCoreConfig {
 
 /**
  * A decoded audio chunk with raw PCM samples.
- * Emitted by SendspinCore after decoding compressed audio.
+ * Emitted by SendspinCore once it decodes the chunk, shortly before its server timestamp.
  * Consumed by SendspinPlayer for playback, or by visualization/analysis tools.
  */
 export interface DecodedAudioChunk {

@@ -22,5 +22,6 @@ export interface StreamHandler {
   handleStreamEnd(): void;
   handleVolumeUpdate(): void;
   handleSyncDelayChange(delayMs: number): void;
+  handleTimeSynchronized(): void;
   getSyncDelayMs(): number;
 }

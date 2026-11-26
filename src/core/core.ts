@@ -8,6 +8,7 @@
  */
 
 import { SendspinDecoder } from "../audio/decoder.js";
+import { DecodeQueue } from "../audio/decode-queue.js";
 import { ProtocolHandler } from "./protocol-handler.js";
 import { StateManager } from "./state-manager.js";
 import { WebSocketManager } from "./websocket-manager.js";
@@ -38,12 +39,17 @@ import type {
 } from "../types.js";
 import type { StreamHandler } from "../internal-types.js";
 
+const DEFAULT_DECODE_LEAD_SEC = 5;
+
 export class SendspinCore implements StreamHandler {
   private wsManager: WebSocketManager;
   private protocolHandler: ProtocolHandler;
   private stateManager: StateManager;
   private timeFilter: SendspinTimeFilter;
   private decoder: SendspinDecoder;
+  private decodeQueue: DecodeQueue;
+  private decodeLeadSec = () =>
+    DEFAULT_DECODE_LEAD_SEC + this._syncDelayMs / 1000;
 
   private config: SendspinCoreConfig;
   private _syncDelayMs: number;
@@ -115,6 +121,15 @@ export class SendspinCore implements StreamHandler {
         }
       },
       () => this.stateManager.firstLiveGeneration,
+    );
+    this.decodeQueue = new DecodeQueue(
+      (data, format, generation) =>
+        this.decoder.handleBinaryMessage(data, format, generation),
+      () =>
+        this.timeFilter.is_synchronized ? this.getCurrentServerTimeUs() : null,
+      (generation, serverTimeUs) =>
+        this.stateManager.isChunkLive(generation, serverTimeUs),
+      () => this.decodeLeadSec(),
     );
 
     this.wsManager = new WebSocketManager(config.reconnect);
@@ -298,7 +313,7 @@ export class SendspinCore implements StreamHandler {
       return;
     }
     const generation = this.stateManager.streamGeneration;
-    this.decoder.handleBinaryMessage(data, format, generation);
+    this.decodeQueue.push(data, format, generation);
   }
 
   handleStreamStart(format: StreamFormat, isFormatUpdate: boolean): void {
@@ -325,7 +340,12 @@ export class SendspinCore implements StreamHandler {
   // A new generation makes the decoder drop decodes still in flight.
   private discardPendingAudio(): void {
     this.stateManager.resetStreamAnchors();
+    this.decodeQueue.clear();
     this.decoder.clearState();
+  }
+
+  handleTimeSynchronized(): void {
+    void this.decodeQueue.pump();
   }
 
   handleVolumeUpdate(): void {
@@ -336,6 +356,7 @@ export class SendspinCore implements StreamHandler {
     this._syncDelayMs = clampSyncDelayMs(delayMs);
     this.delayStore.save(this._syncDelayMs);
     this._onSyncDelayChange?.(this._syncDelayMs);
+    void this.decodeQueue.pump();
   }
 
   handleSyncDelayChange(delayMs: number): void {
@@ -447,6 +468,7 @@ export class SendspinCore implements StreamHandler {
     this.stateManager.clearAllIntervals();
     this.wsManager.disconnect();
     this.resetSession();
+    this.decodeQueue.clear();
     this.decoder.close();
     this.timeFilter.reset();
     this.stateManager.reset();
@@ -664,5 +686,20 @@ export class SendspinCore implements StreamHandler {
   /** @internal */
   get _timeFilter(): SendspinTimeFilter {
     return this.timeFilter;
+  }
+
+  /** @internal Sets how many seconds before its server timestamp a chunk gets decoded. */
+  _setDecodeLead(getLeadSec: () => number): void {
+    this.decodeLeadSec = getLeadSec;
+  }
+
+  /** @internal Decodes queued audio that is due, without waiting for a timer. */
+  _wakeDecoder(): void {
+    void this.decodeQueue.pump();
+  }
+
+  /** @internal Seconds of received audio not yet decoded. */
+  get _undecodedRunwaySec(): number {
+    return this.decodeQueue.runwaySec();
   }
 }

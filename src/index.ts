@@ -128,6 +128,9 @@ export class SendspinPlayer {
     });
 
     // Wire core events to scheduler
+    this.core._setDecodeLead(() => this.scheduler.getDecodeLeadSec());
+    // Audio events still fire where background timers are held back.
+    this.scheduler.onSourceEnded = () => this.core._wakeDecoder();
     this.core.onAudioData = (chunk) => {
       this.scheduler.handleDecodedChunk(chunk);
     };
@@ -200,7 +203,10 @@ export class SendspinPlayer {
   private scheduleDisconnectPlaybackReset(): void {
     this.cancelPendingDisconnectPlaybackReset();
 
-    const runwaySec = this.scheduler.measureBufferedPlaybackRunwaySec();
+    const runwaySec = Math.max(
+      this.scheduler.measureBufferedPlaybackRunwaySec(),
+      this.core._undecodedRunwaySec,
+    );
     if (runwaySec <= 0) {
       this.resetPlaybackStateAfterDisconnect();
       return;

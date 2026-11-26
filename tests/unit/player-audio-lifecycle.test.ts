@@ -64,4 +64,71 @@ describe("SendspinPlayer audio lifecycle", () => {
 
     expect(contexts[0].state).toBe("closed");
   });
+
+  describe("with undecoded audio", () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let core: any;
+    let player: SendspinPlayer;
+
+    beforeEach(() => {
+      player = createPlayer();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      core = (player as any).core;
+      core._timeFilter.update(0, 500, 1_000_000);
+      core._stateManager.currentStreamFormat = {
+        codec: "pcm",
+        sample_rate: 48000,
+        channels: 2,
+        bit_depth: 16,
+      };
+      core._stateManager.isPlaying = true;
+    });
+
+    afterEach(() => player.disconnect());
+
+    const pushChunkAhead = (aheadUs: number): number => {
+      const serverTimeUs = core.getCurrentServerTimeUs() + aheadUs;
+      const chunk = new Uint8Array(17);
+      chunk[0] = 4;
+      new DataView(chunk.buffer).setBigInt64(1, BigInt(serverTimeUs));
+      core.handleBinaryMessage(chunk.buffer);
+      return serverTimeUs;
+    };
+
+    it("decodes as far ahead as the scheduling horizon", async () => {
+      const handleDecodedChunk = vi
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        .spyOn((player as any).scheduler, "handleDecodedChunk")
+        .mockImplementation(() => {});
+
+      pushChunkAhead(15_000_000);
+
+      await vi.waitFor(() => expect(handleDecodedChunk).toHaveBeenCalled());
+    });
+
+    it("wakes the decode queue when a scheduled chunk finishes playing", () => {
+      const wake = vi.spyOn(core, "_wakeDecoder");
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (player as any).scheduler.onSourceEnded();
+
+      expect(wake).toHaveBeenCalledOnce();
+    });
+
+    it("keeps playing after a connection drop until that audio has played", () => {
+      pushChunkAhead(60_000_000);
+
+      core.onTransportClose();
+
+      expect(player.isPlaying).toBe(true);
+    });
+
+    it("stops after a connection drop when a clear discarded that audio", () => {
+      core.handleStreamClear(pushChunkAhead(60_000_000));
+
+      core.onTransportClose();
+
+      expect(player.isPlaying).toBe(false);
+    });
+  });
 });
