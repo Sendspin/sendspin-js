@@ -330,6 +330,25 @@ describe("Sendspin encryption and pairing E2E (aiosendspin)", () => {
     expect(state.semantic_state).toEqual(expectedState);
   });
 
+  it("server adopts the preferred format from client/state", async () => {
+    const connection = await connect({
+      clientName: "Preferred format client",
+      unpairedAccess: true,
+    });
+    const pcm44k = {
+      codec: "pcm",
+      channels: 2,
+      sample_rate: 44100,
+      bit_depth: 16,
+    };
+    connection.core.setPreferredFormat(pcm44k);
+    connection.core.setVolume(37);
+
+    await server.trustUnpaired(connection.core.clientId);
+    const state = await server.waitForClientState(connection.core.clientId, 37);
+    expect(state.server_preferred_format).toEqual(pcm44k);
+  });
+
   it("rejects a malformed Pairing PSK token", async () => {
     const connection = await connect({ clientName: "Malformed token client" });
     const result = await server.pairWithToken("not-a-token");

@@ -29,6 +29,7 @@ import type {
   SendspinCoreConfig,
   DecodedAudioChunk,
   StreamFormat,
+  SupportedFormat,
   GoodbyeReason,
   PlayerState,
   ControllerCommand,
@@ -493,6 +494,18 @@ export class SendspinCore implements StreamHandler {
 
   setMinBufferMs(minBufferMs: number): void {
     this.protocolHandler.setMinBufferMs(minBufferMs);
+  }
+
+  setPreferredFormat(format: SupportedFormat | null): void {
+    this.protocolHandler.setPreferredFormat(format);
+  }
+
+  get preferredFormat(): SupportedFormat | null {
+    return this.protocolHandler.preferredFormat;
+  }
+
+  get supportedFormats(): SupportedFormat[] {
+    return this.protocolHandler.supportedFormats;
   }
 
   // ========================================

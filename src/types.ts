@@ -13,6 +13,7 @@ export enum MessageType {
   SERVER_COMMAND = "server/command",
   STREAM_START = "stream/start",
   STREAM_CLEAR = "stream/clear",
+  /** @deprecated Removed from the spec. Use `setPreferredFormat` instead. */
   STREAM_REQUEST_FORMAT = "stream/request-format",
   STREAM_END = "stream/end",
   GROUP_UPDATE = "group/update",
@@ -121,6 +122,7 @@ export interface ClientState {
       required_lead_time_ms: number;
       min_buffer_ms: number;
       supported_commands: Array<"volume" | "mute" | "set_output_delay">;
+      format?: SupportedFormat;
     };
   };
 }
