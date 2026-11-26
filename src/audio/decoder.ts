@@ -210,7 +210,7 @@ export class SendspinDecoder {
       // Extract Float32Array per channel from AudioBuffer
       const samples: Float32Array[] = [];
       for (let ch = 0; ch < audioBuffer.numberOfChannels; ch++) {
-        samples.push(new Float32Array(audioBuffer.getChannelData(ch)));
+        samples.push(audioBuffer.getChannelData(ch));
       }
 
       return { samples, sampleRate: audioBuffer.sampleRate };
