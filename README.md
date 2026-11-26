@@ -314,6 +314,10 @@ Apps that need the decoded PCM stream (e.g. visualizers) can use
 `DecodedAudioChunk` events; `AudioScheduler` is the Web Audio consumer that
 `SendspinPlayer` wires for you.
 
+Received audio stays encoded until about 5 seconds plus the output delay
+before its `serverTimeUs`, and `onAudioData` fires once it is decoded. Nothing
+is decoded before the clock is synchronized.
+
 ```typescript
 import { SendspinCore } from '@sendspin/sendspin-js';
 

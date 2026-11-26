@@ -33,6 +33,7 @@ function makeStreamHandler(): StreamHandler &
     handleStreamEnd: vi.fn(),
     handleVolumeUpdate: vi.fn(),
     handleSyncDelayChange: vi.fn(),
+    handleTimeSynchronized: vi.fn(),
     getSyncDelayMs: vi.fn(() => 0),
   } as StreamHandler & Record<string, ReturnType<typeof vi.fn>>;
 }
@@ -58,6 +59,7 @@ function makeStreamHandlerWithDelay(
     handleStreamEnd: vi.fn(),
     handleVolumeUpdate: vi.fn(),
     handleSyncDelayChange: vi.fn(),
+    handleTimeSynchronized: vi.fn(),
     getSyncDelayMs: vi.fn(() => syncDelayMs),
   } as StreamHandler & Record<string, ReturnType<typeof vi.fn>>;
 }
@@ -605,6 +607,17 @@ describe("ProtocolHandler extra", () => {
         available: true,
         player: { volume: 30 },
       });
+    });
+
+    it("tells the stream handler when the clock first syncs", () => {
+      timeFilter = new SendspinTimeFilter();
+      const handler = makeHandler();
+      activate(handler);
+      expect(streamHandler.handleTimeSynchronized).not.toHaveBeenCalled();
+
+      completeTimeSyncBurst(handler, send);
+
+      expect(streamHandler.handleTimeSynchronized).toHaveBeenCalledOnce();
     });
 
     it("sends client/state before time sync without the player role", () => {

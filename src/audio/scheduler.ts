@@ -58,6 +58,8 @@ const SCHEDULE_HORIZON_GOOD_ERROR_MS = 8;
 const SCHEDULE_REFILL_THRESHOLD_FRACTION = 0.5;
 const SCHEDULE_REFILL_MIN_THRESHOLD_SEC = 0.1;
 const SCHEDULE_REFILL_MAX_THRESHOLD_SEC = 5;
+// Covers output latency and decode time on top of the scheduling horizon.
+const DECODE_LEAD_MARGIN_SEC = 1;
 
 const VOLUME_RAMP_TIME_CONSTANT_SEC = 0.015;
 
@@ -153,6 +155,8 @@ export class AudioScheduler {
   // On Apple WebKit and Firefox, getOutputTimestamp() aged to now lands on the render position, not the playout position.
   private contextTimeAtRenderPosition = reportsContextTimeAtRenderPosition();
   private scheduleTimeout: ReturnType<typeof setTimeout> | null = null;
+  /** @internal Called each time a scheduled chunk finishes playing. */
+  onSourceEnded?: () => void;
   private refillTimeout: ReturnType<typeof setTimeout> | null = null;
   private queueProcessScheduled = false;
 
@@ -260,6 +264,15 @@ export class AudioScheduler {
     if (errorMs <= SCHEDULE_HORIZON_GOOD_ERROR_MS)
       return SCHEDULE_HORIZON_GOOD_SEC;
     return SCHEDULE_HORIZON_POOR_SEC;
+  }
+
+  /** @internal How far ahead of its server timestamp a chunk must be decoded to fill the scheduling horizon. */
+  getDecodeLeadSec(): number {
+    return (
+      this.getTargetScheduledHorizonSec() +
+      this.syncDelayMs / 1000 +
+      DECODE_LEAD_MARGIN_SEC
+    );
   }
 
   private getScheduledAheadSec(currentTimeSec: number): number {
@@ -1032,6 +1045,7 @@ export class AudioScheduler {
           this.resetScheduledPlaybackState("all scheduled audio ended");
           if (this.audioBufferQueue.length > 0) this.processAudioQueue();
         }
+        this.onSourceEnded?.();
       };
     }
     this.scheduleQueueRefill(targetScheduledHorizonSec);

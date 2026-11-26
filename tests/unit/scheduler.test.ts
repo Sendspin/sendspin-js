@@ -452,6 +452,18 @@ describe("AudioScheduler late-chunk dropping", () => {
 });
 
 describe("AudioScheduler clock-not-synced gating", () => {
+  it("reports each scheduled chunk that finishes playing", () => {
+    const { scheduler, ctx } = setup();
+    const onSourceEnded = vi.fn();
+    scheduler.onSourceEnded = onSourceEnded;
+    scheduler.handleDecodedChunk(makeChunk(nowUs(), 0));
+    scheduler.processAudioQueue();
+
+    ctx.startedSources[0].onended!();
+
+    expect(onSourceEnded).toHaveBeenCalledOnce();
+  });
+
   it("schedules once the filter becomes synchronized", () => {
     const { scheduler, ctx, tf } = setup();
     tf.synchronized = false;
